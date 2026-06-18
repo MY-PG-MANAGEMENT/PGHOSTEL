@@ -11,3 +11,4 @@ owner_app/build/
 
 .env
 *.log
+/bin/

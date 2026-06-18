@@ -7,7 +7,8 @@ class ApiClient {
   ApiClient({required this.storage});
 
   final FlutterSecureStorage storage;
-  final String baseUrl = 'http://localhost:8080/api';
+  // Using local network IP address for physical device connectivity
+  final String baseUrl = 'http://192.168.1.34:8080/api';
 
   Future<Map<String, dynamic>> get(String path) async {
     final response = await http.get(Uri.parse('$baseUrl$path'), headers: await _headers());
