@@ -1,0 +1,13 @@
+.gradle/
+build/
+out/
+*.iml
+
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+owner_app/build/
+
+.env
+*.log

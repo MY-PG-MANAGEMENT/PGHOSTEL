@@ -1,0 +1,30 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: pg-manager-backend
+  datasource:
+    url: jdbc:mysql://localhost:3306/pg_manager?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: root
+    password: change_me
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+app:
+  security:
+    jwt-secret: change-this-development-secret-change-before-production-123456789
+    access-token-minutes: 30
+    refresh-token-days: 14
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
