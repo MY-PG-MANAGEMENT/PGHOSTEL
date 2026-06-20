@@ -11,4 +11,14 @@ owner_app/build/
 
 .env
 *.log
-/bin/
+
+# Eclipse
+.classpath
+.project
+.settings/
+backend/.settings/
+
+# Flutter
+owner_app/.metadata
+
+*.class
