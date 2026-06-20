@@ -1,0 +1,43 @@
+erDiagram
+    FACILITY ||--o{ ROOM_PHOTO : "has photos"
+    FACILITY ||--o{ CONTENT_REFERENCE : "stores images"
+    CONTENT_REFERENCE ||--|{ ROOM_PHOTO : "referenced by"
+    
+    ROOM_PHOTO {
+        bigint room_photo_id PK
+        bigint room_facility_id FK
+        bigint content_reference_id FK
+        int display_order
+        varchar description
+        datetime created_at
+        datetime updated_at
+    }
+
+    FACILITY {
+        bigint facility_id PK
+        bigint organization_id FK
+        varchar facility_type_id
+        varchar facility_name
+        varchar facility_status
+        varchar room_number
+        int floor_number
+        decimal monthly_rent
+        decimal size_sq_ft
+        varchar description
+        datetime created_at
+        datetime updated_at
+    }
+
+    CONTENT_REFERENCE {
+        bigint content_reference_id PK
+        bigint organization_id FK
+        varchar owner_entity_type
+        bigint owner_entity_id
+        varchar content_type_id
+        varchar storage_provider
+        varchar storage_key
+        varchar mime_type
+        varchar status
+        datetime created_at
+        datetime updated_at
+    }

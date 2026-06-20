@@ -1,0 +1,8 @@
+stateDiagram-v2
+    [*] --> DraftAdmission
+    DraftAdmission --> ActiveAdmission: agreement signed and bed assigned
+    ActiveAdmission --> ActiveAdmission: transfer bed
+    ActiveAdmission --> PendingSettlement: checkout and calculate deductions
+    PendingSettlement --> Settled: cash deposit refund recorded
+    Settled --> [*]
+

@@ -3,6 +3,8 @@ package com.pgmanager.security;
 import com.pgmanager.auth.UserLogin;
 import com.pgmanager.auth.UserLoginRepository;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -12,9 +14,12 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class AppUserDetailsService implements UserDetailsService {
     private final UserLoginRepository userLoginRepository;
+    private static final Logger log = LoggerFactory.getLogger(AppUserDetailsService.class);
+
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+    	log.info("username : {}", username);
         UserLogin user = userLoginRepository.findByUsername(username)
                 .orElseThrow(() -> new UsernameNotFoundException("Invalid username"));
         return new AppUserPrincipal(

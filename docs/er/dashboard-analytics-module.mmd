@@ -1,0 +1,134 @@
+erDiagram
+    FACILITY ||--o{ FACILITY_PARTY : "has occupancy"
+    FACILITY_PARTY ||--|| PARTY : "occupied by"
+    FACILITY ||--o{ ADMISSION : "receives admission"
+    ADMISSION ||--|| BILLING_ACCOUNT : "creates account"
+    BILLING_ACCOUNT ||--o{ INVOICE : "generates invoices"
+    INVOICE ||--o{ PAYMENT_ALLOCATION : "receives payments"
+    PAYMENT_ALLOCATION ||--|| PAYMENT : "from payment"
+    FACILITY_AMENITY }o--|| AMENITY_TYPE : "classified by"
+
+    FACILITY_OCCUPANCY_SUMMARY {
+        bigint facility_id PK
+        varchar facility_name
+        int capacity
+        int occupied_count
+        int vacant_count
+        decimal occupancy_percent
+    }
+
+    PENDING_PAYMENT_SUMMARY {
+        bigint invoice_id PK
+        bigint organization_id FK
+        bigint billing_account_id FK
+        date invoice_month
+        date due_date
+        decimal pending_amount
+        int days_overdue
+    }
+
+    ANALYTICS_CACHE {
+        varchar cache_key PK
+        bigint organization_id FK
+        json cache_value
+        datetime cached_at
+        datetime expires_at
+    }
+
+    ACTIVITY_LOG {
+        bigint activity_log_id PK
+        bigint organization_id FK
+        bigint user_login_id FK
+        varchar activity_type
+        varchar entity_type
+        bigint entity_id
+        json action_details
+        varchar ip_address
+        datetime created_at
+    }
+
+    FACILITY {
+        bigint facility_id PK
+        bigint organization_id FK
+        varchar facility_type_id
+        varchar facility_name
+        int capacity
+        varchar status
+        datetime created_at
+    }
+
+    FACILITY_PARTY {
+        bigint facility_party_id PK
+        bigint organization_id FK
+        bigint facility_id FK
+        bigint party_id FK
+        varchar role_type_id
+        date from_date
+        date thru_date
+    }
+
+    PARTY {
+        bigint party_id PK
+        varchar party_type_id
+        varchar status
+    }
+
+    ADMISSION {
+        bigint admission_id PK
+        bigint organization_id FK
+        bigint party_id FK
+        bigint bed_facility_id FK
+        date move_in_date
+        decimal monthly_rent
+        varchar status
+    }
+
+    BILLING_ACCOUNT {
+        bigint billing_account_id PK
+        bigint organization_id FK
+        bigint party_id FK
+        bigint admission_id FK
+        varchar status
+        decimal advance_balance
+    }
+
+    INVOICE {
+        bigint invoice_id PK
+        bigint organization_id FK
+        bigint billing_account_id FK
+        varchar invoice_number UK
+        date invoice_month
+        date due_date
+        decimal total_amount
+        decimal paid_amount
+        varchar status
+    }
+
+    PAYMENT_ALLOCATION {
+        bigint payment_allocation_id PK
+        bigint organization_id FK
+        bigint payment_id FK
+        bigint invoice_id FK
+        decimal amount
+    }
+
+    PAYMENT {
+        bigint payment_id PK
+        bigint organization_id FK
+        decimal amount
+        date payment_date
+        varchar status
+    }
+
+    FACILITY_AMENITY {
+        bigint facility_id FK PK
+        varchar amenity_type_id FK PK
+        boolean available
+    }
+
+    AMENITY_TYPE {
+        varchar amenity_type_id PK
+        varchar name
+        varchar icon_code
+        boolean active
+    }

@@ -1,0 +1,100 @@
+erDiagram
+    PAYMENT_METHOD_TYPE ||--o{ PAYMENT : "specifies"
+    PAYMENT ||--o{ PAYMENT_ALLOCATION : "allocated to"
+    PAYMENT ||--o{ PAYMENT_REFUND : "refunded"
+    INVOICE ||--o{ PAYMENT_ALLOCATION : "settled by"
+    BILLING_ACCOUNT ||--o{ INVOICE : "generates"
+    ADMISSION ||--|| BILLING_ACCOUNT : "creates"
+
+    PAYMENT_METHOD_TYPE {
+        varchar method_type_id PK
+        varchar name
+        varchar description
+        boolean enabled
+        int display_order
+    }
+
+    PAYMENT {
+        bigint payment_id PK
+        bigint organization_id FK
+        bigint rent_id FK
+        bigint party_id FK
+        decimal amount
+        varchar payment_mode
+        varchar payment_method_type FK
+        date payment_date
+        varchar reference_number
+        varchar idempotency_key UK
+        varchar provider_code
+        varchar external_transaction_id
+        varchar status
+        varchar notes
+        datetime created_at
+        datetime updated_at
+    }
+
+    PAYMENT_ALLOCATION {
+        bigint payment_allocation_id PK
+        bigint organization_id FK
+        bigint payment_id FK
+        bigint invoice_id FK
+        decimal amount
+        datetime allocated_at
+    }
+
+    PAYMENT_REFUND {
+        bigint payment_refund_id PK
+        bigint organization_id FK
+        bigint payment_id FK
+        decimal amount
+        varchar refund_method
+        varchar reference_number
+        varchar reason
+        varchar status
+        datetime refunded_at
+        datetime created_at
+        datetime updated_at
+    }
+
+    INVOICE {
+        bigint invoice_id PK
+        bigint organization_id FK
+        bigint billing_account_id FK
+        bigint legacy_rent_id FK
+        varchar invoice_number UK
+        date invoice_month
+        date issue_date
+        date due_date
+        decimal total_amount
+        decimal paid_amount
+        varchar status
+        datetime created_at
+        datetime updated_at
+    }
+
+    BILLING_ACCOUNT {
+        bigint billing_account_id PK
+        bigint organization_id FK
+        bigint party_id FK
+        bigint admission_id FK
+        varchar currency_code
+        varchar status
+        decimal advance_balance
+        datetime created_at
+        datetime updated_at
+    }
+
+    ADMISSION {
+        bigint admission_id PK
+        bigint organization_id FK
+        bigint party_id FK
+        bigint bed_facility_id FK
+        date move_in_date
+        decimal monthly_rent
+        decimal security_deposit
+        decimal advance_amount
+        int notice_period_days
+        varchar status
+        datetime created_at
+        datetime updated_at
+    }

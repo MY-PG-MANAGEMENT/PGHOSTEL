@@ -10,22 +10,23 @@ import com.pgmanager.common.util.HashUtil;
 import com.pgmanager.facility.Facility;
 import com.pgmanager.facility.FacilityRepository;
 import com.pgmanager.facility.FacilityType;
-import com.pgmanager.party.Party;
-import com.pgmanager.party.PartyRepository;
-import com.pgmanager.party.PartyType;
-import com.pgmanager.party.Person;
-import com.pgmanager.party.PersonRepository;
+import com.pgmanager.party.*;
 import com.pgmanager.security.AppUserDetailsService;
 import com.pgmanager.security.AppUserPrincipal;
 import com.pgmanager.security.JwtService;
 import com.pgmanager.security.RoleType;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
@@ -45,6 +46,7 @@ public class AuthService {
     private final JwtService jwtService;
     private final AuditService auditService;
     private final SecureRandom secureRandom = new SecureRandom();
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
     @Value("${app.security.refresh-token-days}")
     private long refreshTokenDays;
@@ -84,11 +86,62 @@ public class AuthService {
 
     @Transactional
     public AuthResponse login(LoginRequest request) {
-        authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(request.username(), request.password()));
-        AppUserPrincipal principal = (AppUserPrincipal) userDetailsService.loadUserByUsername(request.username());
-        auditService.log(principal.organizationId(), principal.userLoginId(), "LOGIN", "USER_LOGIN", principal.userLoginId(), "User logged in");
-        return issueTokens(principal);
+
+        try {
+
+            log.info("==================================================");
+            log.info("Login request received");
+            log.info("Username : {}", request.username());
+            log.info("Password : {}", request.password());
+
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(
+                            request.username(),
+                            request.password()));
+
+            log.info("Authentication successful for {}", request.username());
+
+            AppUserPrincipal principal =
+                    (AppUserPrincipal) userDetailsService.loadUserByUsername(
+                            request.username());
+
+            log.info("Entered Password : {}", request.password());
+            log.info("DB Password      : {}", principal.getPassword());
+
+            boolean match =
+                    passwordEncoder.matches(request.password(),
+                            principal.getPassword());
+
+            log.info("Password Match : {}", match);
+
+            log.info("UserLoginId    : {}", principal.userLoginId());
+            log.info("OrganizationId : {}", principal.organizationId());
+            log.info("Role           : {}", principal.roleTypeId());
+
+            auditService.log(
+                    principal.organizationId(),
+                    principal.userLoginId(),
+                    "LOGIN",
+                    "USER_LOGIN",
+                    principal.userLoginId(),
+                    "User logged in");
+
+            return issueTokens(principal);
+
+        } catch (BadCredentialsException e) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED,
+                    "Invalid username or password");
+
+        } catch (Exception e) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Login failed");
+        }
     }
+
 
     @Transactional
     public AuthResponse refresh(RefreshTokenRequest request) {

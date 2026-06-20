@@ -1,0 +1,9 @@
+flowchart LR
+    ACCOUNT["Billing account"] --> CHARGE["Recurring charge"]
+    CHARGE --> INVOICE["Monthly invoice"]
+    INVOICE --> ITEMS["Invoice items"]
+    CASH["Cash payment"] --> ALLOCATION["Payment allocation"]
+    ALLOCATION --> INVOICE
+    CASH --> REFUND["Cash refund"]
+    ADVANCE["Advance payment"] --> ACCOUNT
+

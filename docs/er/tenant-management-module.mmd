@@ -1,0 +1,151 @@
+erDiagram
+    PARTY ||--|| PERSON : "has profile"
+    PARTY ||--o{ IDENTITY_DOCUMENT : "identifies"
+    PARTY ||--o{ EMERGENCY_CONTACT : "has"
+    PARTY ||--o{ TENANT_EMPLOYMENT : "works_at"
+    PARTY ||--o{ ADMISSION : "admitted as"
+    IDENTITY_DOCUMENT ||--o| CONTENT_REFERENCE : "stores"
+    ADMISSION ||--|| AGREEMENT : "governs"
+    ADMISSION ||--o| CHECKOUT : "closes"
+    ADMISSION ||--|| BILLING_ACCOUNT : "creates"
+
+    PARTY {
+        bigint party_id PK
+        varchar party_type_id
+        varchar status
+        datetime created_at
+        datetime updated_at
+    }
+
+    PERSON {
+        bigint party_id PK FK
+        varchar full_name
+        varchar mobile_number
+        varchar gender
+        date date_of_birth
+        varchar aadhaar_number
+        varchar occupation
+        varchar company_name
+        varchar guardian_name
+        varchar guardian_mobile_number
+        varchar address
+        datetime created_at
+        datetime updated_at
+    }
+
+    IDENTITY_DOCUMENT {
+        bigint identity_document_id PK
+        bigint organization_id FK
+        bigint party_id FK
+        varchar document_type_id
+        varchar document_number
+        varchar verification_status
+        datetime verified_at
+        date expires_on
+        bigint content_reference_id FK
+        datetime created_at
+        datetime updated_at
+    }
+
+    CONTENT_REFERENCE {
+        bigint content_reference_id PK
+        bigint organization_id FK
+        varchar owner_entity_type
+        bigint owner_entity_id
+        varchar content_type_id
+        varchar storage_provider
+        varchar storage_key
+        varchar mime_type
+        varchar status
+        datetime created_at
+        datetime updated_at
+    }
+
+    EMERGENCY_CONTACT {
+        bigint emergency_contact_id PK
+        bigint organization_id FK
+        bigint party_id FK
+        varchar contact_name
+        varchar relationship_type_id
+        varchar mobile_number
+        varchar alternate_number
+        varchar address
+        boolean is_primary
+        datetime created_at
+        datetime updated_at
+    }
+
+    TENANT_EMPLOYMENT {
+        bigint tenant_employment_id PK
+        bigint organization_id FK
+        bigint party_id FK
+        varchar company_name
+        varchar designation
+        varchar employee_id
+        decimal monthly_salary
+        varchar work_email
+        varchar office_address
+        date from_date
+        date thru_date
+        datetime created_at
+        datetime updated_at
+    }
+
+    ADMISSION {
+        bigint admission_id PK
+        bigint organization_id FK
+        bigint party_id FK
+        bigint bed_facility_id FK
+        date move_in_date
+        decimal monthly_rent
+        decimal security_deposit
+        decimal advance_amount
+        int notice_period_days
+        varchar status
+        datetime created_at
+        datetime updated_at
+    }
+
+    AGREEMENT {
+        bigint agreement_id PK
+        bigint organization_id FK
+        bigint admission_id FK
+        varchar agreement_type_id
+        varchar agreement_number UK
+        date from_date
+        date thru_date
+        longtext terms
+        varchar status
+        datetime signed_at
+        datetime created_at
+        datetime updated_at
+    }
+
+    CHECKOUT {
+        bigint checkout_id PK
+        bigint organization_id FK
+        bigint admission_id FK
+        date checkout_date
+        decimal pending_dues
+        decimal damage_charges
+        decimal other_deductions
+        decimal refundable_deposit
+        varchar status
+        varchar refund_method
+        varchar refund_reference
+        datetime settled_at
+        datetime created_at
+        datetime updated_at
+    }
+
+    BILLING_ACCOUNT {
+        bigint billing_account_id PK
+        bigint organization_id FK
+        bigint party_id FK
+        bigint admission_id FK
+        varchar currency_code
+        varchar status
+        decimal advance_balance
+        datetime created_at
+        datetime updated_at
+    }

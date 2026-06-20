@@ -1,0 +1,9 @@
+flowchart TD
+    ORG["Organization facility"] -->|"effective-dated member"| PROPERTY["Property facility"]
+    PROPERTY -->|"effective-dated member"| FLOOR["Floor facility"]
+    FLOOR -->|"effective-dated member"| ROOM["Room facility"]
+    ROOM -->|"effective-dated member"| BED["Bed facility"]
+    BED -->|"FACILITY_PARTY / OCCUPANT"| TENANT["Tenant party"]
+    PROPERTY --> AMENITY["Facility amenities"]
+    PROPERTY --> ADDRESS["Facility contact mechanism"]
+

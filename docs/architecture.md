@@ -2,13 +2,14 @@
 
 PG Manager is a lightweight owner-first PG/Hostel Management SaaS.
 
-## Phase 1 Scope
+## Product Scope
 
 - Spring Boot backend APIs.
 - Flutter Owner App.
 - Shared MySQL database.
 - Organization-scoped multi-tenancy.
-- Owner workflows for setup, tenant management, occupancy, rent, payment, and dashboard.
+- Owner workflows for setup, inventory, tenant lifecycle, billing, notifications, settings, and analytics.
+- A responsive Flutter Super Admin workspace using the same API and design system.
 
 ## Backend Style
 
@@ -23,8 +24,10 @@ Packages:
 - `onboarding`: owner setup wizard.
 - `tenant`: tenant onboarding and profile management.
 - `occupancy`: bed assignment, transfer, checkout, history.
-- `rent`: rent/deposit/advance/discount/penalty tracking.
-- `payment`: manual payment recording.
+- `billing`: invoices, allocations, cash payments, advances, receipts, and refunds.
+- `notification`: in-app delivery and provider-neutral future outbox.
+- `settings`: profile, device security, and user preferences.
+- `admin`: plans, organizations, roles, reporting, audit, and platform settings.
 - `dashboard`: owner summary APIs.
 - `feature`: future feature toggles.
 - `subscription`: future subscription support.
@@ -36,6 +39,9 @@ The first version uses shared-database multi-tenancy. Organization is represente
 
 All owner business APIs derive `organizationId` from the authenticated user. Clients should not be trusted to choose organization scope for owner actions.
 
-## Future Readiness
+## External Adapter Boundaries
 
-The schema reserves roles, subscriptions, feature toggles, and audit logging from phase 1 so super-admin functionality can be added later without changing the core data model.
+- Online payment provider fields and webhook/idempotency contracts exist, but only cash is enabled.
+- WhatsApp outbox/provider fields exist, but only in-app delivery is enabled.
+- Content references exist, but upload/view actions remain disabled until private object storage is configured.
+- Biometric data never leaves the device; the backend stores only device enrollment metadata.

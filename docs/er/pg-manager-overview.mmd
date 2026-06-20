@@ -1,0 +1,43 @@
+erDiagram
+    PARTY ||--|| PERSON : "has profile"
+    PARTY ||--o{ PARTY_ROLE : "acts as"
+    ROLE_TYPE ||--o{ PARTY_ROLE : assigns
+    ROLE_TYPE ||--o{ ROLE_PERMISSION : grants
+    PERMISSION ||--o{ ROLE_PERMISSION : includes
+    PARTY ||--o{ USER_LOGIN : authenticates
+    USER_LOGIN ||--o{ USER_DEVICE : registers
+    USER_LOGIN ||--o{ USER_PREFERENCE : configures
+
+    FACILITY ||--o{ FACILITY_GROUP_MEMBER : parent
+    FACILITY ||--o{ FACILITY_GROUP_MEMBER : child
+    FACILITY ||--o{ FACILITY_PARTY : assigned
+    PARTY ||--o{ FACILITY_PARTY : occupies
+    FACILITY ||--o{ FACILITY_AMENITY : offers
+    AMENITY_TYPE ||--o{ FACILITY_AMENITY : classifies
+
+    PARTY ||--o{ ADMISSION : admitted
+    FACILITY ||--o{ ADMISSION : "bed assigned"
+    ADMISSION ||--|| AGREEMENT : governs
+    ADMISSION ||--o| CHECKOUT : closes
+    PARTY ||--o{ EMERGENCY_CONTACT : has
+    PARTY ||--o{ TENANT_EMPLOYMENT : works_at
+    PARTY ||--o{ IDENTITY_DOCUMENT : identifies
+
+    ADMISSION ||--o| BILLING_ACCOUNT : bills
+    BILLING_ACCOUNT ||--o{ RECURRING_CHARGE : defines
+    BILLING_ACCOUNT ||--o{ INVOICE : receives
+    INVOICE ||--|{ INVOICE_ITEM : contains
+    PAYMENT ||--o{ PAYMENT_ALLOCATION : allocates
+    INVOICE ||--o{ PAYMENT_ALLOCATION : settles
+    PAYMENT ||--o{ PAYMENT_REFUND : refunds
+
+    NOTIFICATION_CATEGORY ||--o{ NOTIFICATION : classifies
+    NOTIFICATION ||--o{ NOTIFICATION_RECIPIENT : targets
+    PARTY ||--o{ NOTIFICATION_RECIPIENT : receives
+    PARTY ||--o{ NOTIFICATION_PREFERENCE : configures
+    NOTIFICATION ||--o{ NOTIFICATION_OUTBOX : delivers
+
+    SUBSCRIPTION_PLAN ||--o{ PLAN_FEATURE : contains
+    FEATURE_MASTER ||--o{ PLAN_FEATURE : enables
+    FACILITY ||--o{ SUBSCRIPTION : subscribes
+

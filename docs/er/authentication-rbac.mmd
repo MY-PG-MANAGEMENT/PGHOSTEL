@@ -1,0 +1,10 @@
+flowchart LR
+    USER["User login"] --> PARTY["Party"]
+    PARTY --> ROLE["Effective party role"]
+    ROLE --> PERMISSION["Role permissions"]
+    USER --> TOKEN["Refresh tokens"]
+    USER --> RESET["Password reset tokens"]
+    USER --> DEVICE["Registered devices"]
+    DEVICE --> BIOMETRIC["Local biometric unlock only"]
+    USER --> HISTORY["Login history"]
+

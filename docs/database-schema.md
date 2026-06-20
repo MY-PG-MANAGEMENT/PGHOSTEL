@@ -1,50 +1,27 @@
 # Database Schema
 
-The schema intentionally avoids separate master tables for organization, property, floor, room, bed, tenant, and bed allocation.
+PG Manager uses a pragmatic Apache OFBiz-style model while retaining numeric identifiers, JPA, and Flyway.
 
-## Core Generic Tables
+## Core model
 
-- `facility`: stores `ORGANIZATION`, `PROPERTY`, `FLOOR`, `ROOM`, and `BED`.
-- `facility_group_member`: stores the hierarchy between facilities.
-- `party`: generic party identity.
-- `person`: person details for owners and tenants.
-- `user_login`: credentials and role.
-- `facility_party`: effective-dated relationships between a party and facility.
+- `party`, `person`, `party_role`, and contact mechanisms represent people and their effective-dated roles.
+- `facility` represents organizations, properties, floors, rooms, and beds. `facility_group_member` stores hierarchy.
+- `facility_party` stores organization membership and effective-dated bed occupancy.
+- Type/status tables and role permissions replace ungoverned UI strings where lifecycle or authorization depends on the value.
 
-## Business Tables
+## Application domains
 
-- `rent`: monthly rent, deposit, advance, discount, penalty, paid amount, status.
-- `payment`: manual payment records by cash, UPI, bank transfer, or card.
-- `audit_log`: operational activity logging.
+- Inventory: facility addresses, amenities, pricing, availability, and future-ready `content_reference` metadata.
+- Tenancy: employment, emergency contacts, ID metadata, admissions, agreements, checkout, and deposit settlement.
+- Billing: accounts, recurring charges, invoices/items, payments, allocations, advances, refunds, and receipts.
+- Experience: notifications, recipient read/archive state, channel preferences, outbox, and user preferences.
+- Platform: plans/features, organization subscriptions, system settings, user devices, login history, and audit data.
 
-## Future-Ready Tables
+Images and identity files are not stored in v1. A content record remains `STORAGE_DISABLED` until a private object-storage adapter is configured.
 
-- `feature_master`: supported feature codes.
-- `organization_feature`: per-organization feature enablement.
-- `subscription`: organization subscription plan/status.
+## Compatibility
 
-## Facility Hierarchy
+Migration `V3__full_application_schema.sql` is additive. It retains `rent` and `payment`, creates normalized billing accounts/invoices, and backfills legacy rent/payment rows. Legacy endpoints can remain live while clients move to `/api/billing/**`.
 
-```text
-ORGANIZATION
-  PROPERTY
-    FLOOR
-      ROOM
-        BED
-```
+Editable ER sources live in [`docs/er`](er/).
 
-This hierarchy is stored with `facility_group_member`, not with separate parent columns for each level.
-
-## Occupancy
-
-Bed assignment is represented by:
-
-```text
-facility_party.facility_id = BED_ID
-facility_party.party_id = TENANT_PARTY_ID
-facility_party.role_type_id = OCCUPANT
-facility_party.from_date = start date
-facility_party.thru_date = checkout or transfer end date
-```
-
-Transfer closes the current active row and creates a new active row.

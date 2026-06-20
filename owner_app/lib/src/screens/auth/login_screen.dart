@@ -42,9 +42,35 @@ class _LoginScreenState extends State<LoginScreen> {
                       label: 'Login',
                       onPressed: () async {
                         if (!formKey.currentState!.validate()) return;
-                        await context.read<AppState>().login(username.text.trim(), password.text);
-                        if (context.mounted) context.go('/dashboard');
+
+                        try {
+                          await context.read<AppState>()
+                              .login(username.text.trim(), password.text);
+
+                          if (context.mounted) {
+                            context.go('/dashboard');
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  e.toString().replaceFirst('Exception: ', ''),
+                                ),
+                              ),
+                            );
+                          }
+                        }
                       },
+                    ),
+                    TextButton(onPressed: () => context.go('/forgot-password'), child: const Text('Forgot password?')),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final ok = await context.read<AppState>().biometricLogin();
+                        if (ok && context.mounted) context.go('/dashboard');
+                      },
+                      icon: const Icon(Icons.fingerprint),
+                      label: const Text('Unlock with device security'),
                     ),
                     TextButton(onPressed: () => context.go('/register'), child: const Text('Create owner account')),
                   ],
