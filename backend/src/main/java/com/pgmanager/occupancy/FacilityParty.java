@@ -10,6 +10,7 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 @Getter
@@ -39,4 +40,13 @@ public class FacilityParty extends BaseEntity {
 
     @Column(name = "thru_date")
     private LocalDate thruDate;
+
+    @Column(name = "monthly_rent", precision = 10, scale = 2)
+    private BigDecimal monthlyRent;
+
+    @Column(name = "security_deposit", precision = 10, scale = 2)
+    private BigDecimal securityDeposit;
+
+    @Column(name = "expected_checkout_date")
+    private LocalDate expectedCheckoutDate;
 }

@@ -8,4 +8,6 @@ public interface FacilityGroupMemberRepository extends JpaRepository<FacilityGro
     List<FacilityGroupMember> findByParentFacilityIdAndThruDateIsNull(Long parentFacilityId);
 
     List<FacilityGroupMember> findByChildFacilityIdAndThruDateIsNull(Long childFacilityId);
+
+    void deleteAllByChildFacilityId(Long childFacilityId);
 }

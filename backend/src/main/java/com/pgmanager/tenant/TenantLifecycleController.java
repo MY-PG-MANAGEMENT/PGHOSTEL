@@ -122,14 +122,26 @@ public class TenantLifecycleController {
         Map<String, Object> admission = rows.getFirst();
         LocalDate moveIn = ((java.sql.Date) admission.get("move_in_date")).toLocalDate();
         Long bedId = ((Number) admission.get("bed_facility_id")).longValue();
-        occupancyService.assign(currentUser.organizationId(), currentUser.userLoginId(), new BedAssignRequest(partyId, bedId, moveIn));
+        occupancyService.assign(currentUser.organizationId(), currentUser.userLoginId(), new BedAssignRequest(partyId, bedId, moveIn, null, null, null));
         jdbc.update("UPDATE admission SET status='ACTIVE',updated_at=?,version=version+1 WHERE admission_id=?", LocalDateTime.now(), admissionId);
         jdbc.update("UPDATE agreement SET status='SIGNED',signed_at=?,updated_at=?,version=version+1 WHERE admission_id=?",
                 LocalDateTime.now(), LocalDateTime.now(), admissionId);
+        Long signOrg = currentUser.organizationId();
         jdbc.update("INSERT INTO billing_account(organization_id,party_id,admission_id,currency_code,status,advance_balance,created_at,updated_at) " +
-                        "VALUES(?,?,?,'INR','ACTIVE',?,?,?)", currentUser.organizationId(), partyId, admissionId,
+                        "VALUES(?,?,?,'INR','ACTIVE',?,?,?)", signOrg, partyId, admissionId,
                 admission.get("advance_amount"), LocalDateTime.now(), LocalDateTime.now());
-        return ApiResponse.ok(Map.of("admissionId", admissionId, "status", "ACTIVE", "bedFacilityId", bedId));
+        Long billingAccountId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        // Auto-generate first month invoice
+        BigDecimal monthlyRent = admission.get("monthly_rent") != null ? decimal(admission.get("monthly_rent")) : BigDecimal.ZERO;
+        LocalDate invoiceMonth = LocalDate.of(moveIn.getYear(), moveIn.getMonthValue(), 1);
+        String invoiceNumber = "INV-" + signOrg + "-" + admissionId;
+        jdbc.update("INSERT INTO invoice(organization_id,billing_account_id,invoice_number,invoice_month,issue_date,due_date," +
+                        "total_amount,paid_amount,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,0,'PENDING',?,?)",
+                signOrg, billingAccountId, invoiceNumber, invoiceMonth, moveIn, moveIn, monthlyRent, LocalDateTime.now(), LocalDateTime.now());
+        Long invoiceId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        jdbc.update("INSERT INTO invoice_item(invoice_id,item_type_id,description,amount,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                invoiceId, "MONTHLY_RENT", "Monthly Rent", monthlyRent, LocalDateTime.now(), LocalDateTime.now());
+        return ApiResponse.ok(Map.of("admissionId", admissionId, "status", "ACTIVE", "bedFacilityId", bedId, "invoiceId", invoiceId));
     }
 
     @GetMapping("/agreements")
