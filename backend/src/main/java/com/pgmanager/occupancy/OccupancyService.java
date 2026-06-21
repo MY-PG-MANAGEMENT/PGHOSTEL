@@ -4,16 +4,19 @@ import com.pgmanager.audit.AuditService;
 import com.pgmanager.common.exception.BadRequestException;
 import com.pgmanager.common.exception.NotFoundException;
 import com.pgmanager.facility.Facility;
+import com.pgmanager.facility.FacilityGroupMemberRepository;
 import com.pgmanager.facility.FacilityRepository;
 import com.pgmanager.facility.FacilityType;
 import com.pgmanager.occupancy.dto.OccupancyDtos.BedAssignRequest;
 import com.pgmanager.occupancy.dto.OccupancyDtos.BedTransferRequest;
 import com.pgmanager.occupancy.dto.OccupancyDtos.CheckoutRequest;
 import com.pgmanager.occupancy.dto.OccupancyDtos.OccupancyResponse;
+import com.pgmanager.pricing.PropertySharingPriceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -22,6 +25,8 @@ import java.util.List;
 public class OccupancyService {
     private final FacilityPartyRepository facilityPartyRepository;
     private final FacilityRepository facilityRepository;
+    private final FacilityGroupMemberRepository facilityGroupMemberRepository;
+    private final PropertySharingPriceRepository sharingPriceRepository;
     private final AuditService auditService;
 
     @Transactional
@@ -44,12 +49,19 @@ public class OccupancyService {
             throw new BadRequestException("Bed is already occupied");
         });
 
+        BigDecimal effectiveRent = request.monthlyRent() != null
+                ? request.monthlyRent()
+                : resolveRent(organizationId, request.bedFacilityId());
+
         FacilityParty occupancy = new FacilityParty();
         occupancy.setOrganizationId(organizationId);
         occupancy.setFacilityId(request.bedFacilityId());
         occupancy.setPartyId(request.partyId());
         occupancy.setRoleTypeId(OccupancyRole.OCCUPANT);
         occupancy.setFromDate(fromDate);
+        occupancy.setMonthlyRent(effectiveRent);
+        occupancy.setSecurityDeposit(request.securityDeposit());
+        occupancy.setExpectedCheckoutDate(request.expectedCheckoutDate());
         occupancy = facilityPartyRepository.save(occupancy);
         auditService.log(organizationId, userLoginId, "BED_ASSIGNED", "FACILITY_PARTY", occupancy.getFacilityPartyId(), "Bed assigned");
         return toResponse(occupancy);
@@ -105,11 +117,8 @@ public class OccupancyService {
     }
 
     private void validateTenant(Long organizationId, Long partyId) {
-        facilityPartyRepository.findByOrganizationIdAndPartyIdAndRoleTypeIdAndThruDateIsNull(
-                organizationId,
-                partyId,
-                OccupancyRole.TENANT
-        ).orElseThrow(() -> new NotFoundException("Tenant not found in current organization"));
+        facilityPartyRepository.findOrgMembership(organizationId, partyId, OccupancyRole.TENANT)
+                .orElseThrow(() -> new NotFoundException("Tenant not found in current organization"));
     }
 
     private void validateBed(Long organizationId, Long bedFacilityId) {
@@ -120,6 +129,28 @@ public class OccupancyService {
         }
     }
 
+    private BigDecimal resolveRent(Long orgId, Long bedFacilityId) {
+        var bedParents = facilityGroupMemberRepository.findByChildFacilityIdAndThruDateIsNull(bedFacilityId);
+        if (bedParents.isEmpty()) return null;
+        Long roomId = bedParents.get(0).getParentFacilityId();
+
+        Facility room = facilityRepository.findById(roomId).orElse(null);
+        if (room == null || room.getSharingType() == null) return null;
+
+        var roomParents = facilityGroupMemberRepository.findByChildFacilityIdAndThruDateIsNull(roomId);
+        if (roomParents.isEmpty()) return null;
+        Long floorId = roomParents.get(0).getParentFacilityId();
+
+        var floorParents = facilityGroupMemberRepository.findByChildFacilityIdAndThruDateIsNull(floorId);
+        if (floorParents.isEmpty()) return null;
+        Long propertyId = floorParents.get(0).getParentFacilityId();
+
+        return sharingPriceRepository
+                .findByOrganizationIdAndPropertyFacilityIdAndSharingType(orgId, propertyId, room.getSharingType())
+                .map(p -> p.getMonthlyRent())
+                .orElse(null);
+    }
+
     private OccupancyResponse toResponse(FacilityParty facilityParty) {
         return new OccupancyResponse(
                 facilityParty.getFacilityPartyId(),
@@ -127,7 +158,10 @@ public class OccupancyService {
                 facilityParty.getFacilityId(),
                 facilityParty.getRoleTypeId(),
                 facilityParty.getFromDate(),
-                facilityParty.getThruDate()
+                facilityParty.getThruDate(),
+                facilityParty.getMonthlyRent(),
+                facilityParty.getSecurityDeposit(),
+                facilityParty.getExpectedCheckoutDate()
         );
     }
 }

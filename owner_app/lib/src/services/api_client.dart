@@ -9,7 +9,7 @@ class ApiClient {
   final FlutterSecureStorage storage;
   static const String _configuredBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://192.168.1.34:8080/api',
+    defaultValue: 'http://192.168.1.9:8080/api',
   );
   final String baseUrl = _configuredBaseUrl;
 
@@ -43,9 +43,6 @@ class ApiClient {
       print('REQUEST');
       print('$method $url');
 
-      if (body != null) {
-        print('BODY: ${jsonEncode(body)}');
-      }
 
       final request = http.Request(method, Uri.parse(url))
         ..headers.addAll(await _headers());

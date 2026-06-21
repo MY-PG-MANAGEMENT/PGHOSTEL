@@ -25,6 +25,8 @@ public class Person extends BaseEntity {
     @Column(name = "mobile_number", nullable = false)
     private String mobileNumber;
 
+    private String email;
+
     private String gender;
 
     @Column(name = "date_of_birth")
@@ -38,6 +40,14 @@ public class Person extends BaseEntity {
     @Column(name = "company_name")
     private String companyName;
 
+    @Column(name = "employer_name")
+    private String employerName;
+
+    private String designation;
+
+    @Column(name = "work_address", length = 500)
+    private String workAddress;
+
     @Column(name = "guardian_name")
     private String guardianName;
 
@@ -45,4 +55,16 @@ public class Person extends BaseEntity {
     private String guardianMobileNumber;
 
     private String address;
+
+    @Column(name = "permanent_address", length = 500)
+    private String permanentAddress;
+
+    @Column(name = "emergency_contact_name")
+    private String emergencyContactName;
+
+    @Column(name = "emergency_contact_mobile")
+    private String emergencyContactMobile;
+
+    @Column(name = "emergency_contact_relation")
+    private String emergencyContactRelation;
 }

@@ -71,6 +71,8 @@ public class AuthService {
         organization.setFacilityTypeId(FacilityType.ORGANIZATION);
         organization.setFacilityName(request.organizationName());
         organization = facilityRepository.save(organization);
+        organization.setFacilityCode("ORG_" + organization.getFacilityId());
+        organization = facilityRepository.save(organization);
 
         UserLogin user = new UserLogin();
         user.setPartyId(party.getPartyId());
@@ -89,34 +91,14 @@ public class AuthService {
 
         try {
 
-            log.info("==================================================");
-            log.info("Login request received");
-            log.info("Username : {}", request.username());
-            log.info("Password : {}", request.password());
-
             authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(
                             request.username(),
                             request.password()));
 
-            log.info("Authentication successful for {}", request.username());
-
             AppUserPrincipal principal =
                     (AppUserPrincipal) userDetailsService.loadUserByUsername(
                             request.username());
-
-            log.info("Entered Password : {}", request.password());
-            log.info("DB Password      : {}", principal.getPassword());
-
-            boolean match =
-                    passwordEncoder.matches(request.password(),
-                            principal.getPassword());
-
-            log.info("Password Match : {}", match);
-
-            log.info("UserLoginId    : {}", principal.userLoginId());
-            log.info("OrganizationId : {}", principal.organizationId());
-            log.info("Role           : {}", principal.roleTypeId());
 
             auditService.log(
                     principal.organizationId(),
