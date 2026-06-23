@@ -116,9 +116,26 @@ public class TenantService {
 
     @Transactional(readOnly = true)
     public List<TenantResponse> listByProperty(Long organizationId, Long propertyId) {
-        return facilityPartyRepository
-                .findTenantsAtFacility(organizationId, propertyId, OccupancyRole.TENANT)
+        // Primary: tenants with an explicit property-level TENANT row.
+        // Union: tenants who have an active OCCUPANT row for a bed in this property
+        // (covers tenants created globally and assigned via the bed-assign flow).
+        java.util.Set<Long> seenPartyIds = new java.util.HashSet<>();
+        java.util.List<FacilityParty> rows = new java.util.ArrayList<>(
+                facilityPartyRepository.findTenantsAtFacility(organizationId, propertyId, OccupancyRole.TENANT));
+        // Also include tenants whose org-level row exists but no property-level row was written —
+        // this covers (a) globally-created tenants never assigned to this property's beds, and
+        // (b) tenants who are now checked out (thruDate set), so the active-only query misses them.
+        // We scan all historical OCCUPANT rows for the party and check if any belong to this property.
+        rows.addAll(facilityPartyRepository.findTenantsAtFacility(organizationId, organizationId, OccupancyRole.TENANT)
                 .stream()
+                .filter(fp -> facilityPartyRepository
+                        .findByOrganizationIdAndPartyIdAndRoleTypeId(
+                                organizationId, fp.getPartyId(), OccupancyRole.OCCUPANT)
+                        .stream()
+                        .anyMatch(occ -> isInProperty(occ.getFacilityId(), propertyId)))
+                .toList());
+        return rows.stream()
+                .filter(fp -> seenPartyIds.add(fp.getPartyId()))
                 .map(fp -> {
                     Person person = personRepository.findById(fp.getPartyId()).orElse(null);
                     if (person == null) return null;
@@ -205,6 +222,20 @@ public class TenantService {
         if (request.designation() != null) person.setDesignation(request.designation());
         if (request.workAddress() != null) person.setWorkAddress(request.workAddress());
         return toResponse(person, null, null, false, null, null, null, null);
+    }
+
+    // Walks bed → room → floor → property to check if a bed belongs to a property.
+    private boolean isInProperty(Long bedId, Long propertyId) {
+        return facilityGroupMemberRepository.findByChildFacilityIdAndThruDateIsNull(bedId)
+                .stream().findFirst()
+                .flatMap(rgm -> facilityGroupMemberRepository
+                        .findByChildFacilityIdAndThruDateIsNull(rgm.getParentFacilityId())
+                        .stream().findFirst())
+                .flatMap(fgm -> facilityGroupMemberRepository
+                        .findByChildFacilityIdAndThruDateIsNull(fgm.getParentFacilityId())
+                        .stream().findFirst())
+                .map(pgm -> propertyId.equals(pgm.getParentFacilityId()))
+                .orElse(false);
     }
 
     private void assertTenantInOrganization(Long organizationId, Long partyId) {

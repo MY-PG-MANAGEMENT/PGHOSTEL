@@ -78,22 +78,32 @@ public class FacilityController {
     @GetMapping("/properties/{propertyId}/vacant-beds")
     ApiResponse<List<Map<String, Object>>> vacantBeds(@PathVariable Long propertyId) {
         Long org = currentUser.organizationId();
-        List<Map<String, Object>> beds = jdbc.queryForList(
-                "SELECT bed.facility_id bed_id,bed.facility_name bed_name,bed.facility_code bed_code," +
+        String base =
+                "bed.facility_id bed_id,bed.facility_name bed_name,bed.facility_code bed_code," +
                 "bed.monthly_rent monthly_rent," +
                 "room.facility_id room_id,room.facility_name room_name,room.room_number room_number,room.sharing_type sharing_type," +
-                "floor.facility_id floor_id,floor.facility_name floor_name,floor.floor_number floor_number " +
+                "floor.facility_id floor_id,floor.facility_name floor_name,floor.floor_number floor_number ";
+        String joins =
                 "FROM facility bed " +
                 "JOIN facility_group_member bgm ON bgm.child_facility_id=bed.facility_id AND bgm.thru_date IS NULL " +
                 "JOIN facility room ON room.facility_id=bgm.parent_facility_id AND room.facility_type_id='ROOM' " +
                 "JOIN facility_group_member rgm ON rgm.child_facility_id=room.facility_id AND rgm.thru_date IS NULL " +
                 "JOIN facility floor ON floor.facility_id=rgm.parent_facility_id AND floor.facility_type_id='FLOOR' " +
-                "JOIN facility_group_member fgm ON fgm.child_facility_id=floor.facility_id AND fgm.thru_date IS NULL " +
+                "JOIN facility_group_member fgm ON fgm.child_facility_id=floor.facility_id AND fgm.thru_date IS NULL ";
+        List<Map<String, Object>> beds = jdbc.queryForList(
+                "SELECT " + base + ",CAST(NULL AS DATE) expected_checkout_date,'VACANT' bed_status " +
+                joins +
                 "WHERE fgm.parent_facility_id=? AND bed.facility_type_id='BED' AND bed.organization_id=? " +
                 "AND NOT EXISTS (SELECT 1 FROM facility_party fp WHERE fp.facility_id=bed.facility_id " +
                 "  AND fp.role_type_id='OCCUPANT' AND fp.thru_date IS NULL) " +
-                "ORDER BY floor.floor_number,room.room_number,bed.facility_id",
-                propertyId, org);
+                "UNION ALL " +
+                "SELECT " + base + ",fp.expected_checkout_date,'UPCOMING' bed_status " +
+                joins +
+                "JOIN facility_party fp ON fp.facility_id=bed.facility_id AND fp.role_type_id='OCCUPANT' AND fp.thru_date IS NULL " +
+                "WHERE fgm.parent_facility_id=? AND bed.facility_type_id='BED' AND bed.organization_id=? " +
+                "AND fp.expected_checkout_date IS NOT NULL AND fp.expected_checkout_date>=CURDATE() " +
+                "ORDER BY bed_status,floor_number,room_number,bed_id",
+                propertyId, org, propertyId, org);
         return ApiResponse.ok(beds);
     }
 

@@ -9,7 +9,7 @@ class ApiClient {
   final FlutterSecureStorage storage;
   static const String _configuredBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://192.168.1.9:8080/api',
+    defaultValue: 'http://192.168.1.17:8080/api',
   );
   final String baseUrl = _configuredBaseUrl;
 
@@ -24,6 +24,7 @@ class ApiClient {
   Future<Map<String, dynamic>> put(String path, Map<String, dynamic> body) async {
     return _send('PUT', path, body: body);
   }
+
 
   Future<Map<String, dynamic>> patch(String path, Map<String, dynamic> body) => _send('PATCH', path, body: body);
   Future<Map<String, dynamic>> delete(String path) => _send('DELETE', path);

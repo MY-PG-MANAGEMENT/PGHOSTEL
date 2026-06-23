@@ -63,8 +63,43 @@ public class OccupancyService {
         occupancy.setSecurityDeposit(request.securityDeposit());
         occupancy.setExpectedCheckoutDate(request.expectedCheckoutDate());
         occupancy = facilityPartyRepository.save(occupancy);
+
+        // Ensure the tenant also has a property-level TENANT membership row so they
+        // appear in the property's tenant list even when created globally.
+        ensurePropertyTenantMembership(organizationId, request.partyId(), request.bedFacilityId(), fromDate);
+
         auditService.log(organizationId, userLoginId, "BED_ASSIGNED", "FACILITY_PARTY", occupancy.getFacilityPartyId(), "Bed assigned");
         return toResponse(occupancy);
+    }
+
+    private void ensurePropertyTenantMembership(Long orgId, Long partyId, Long bedId, LocalDate fromDate) {
+        Long propertyId = resolvePropertyId(bedId);
+        if (propertyId == null) return;
+        boolean exists = facilityPartyRepository
+                .findTenantsAtFacility(orgId, propertyId, OccupancyRole.TENANT)
+                .stream()
+                .anyMatch(fp -> fp.getPartyId().equals(partyId));
+        if (!exists) {
+            FacilityParty propertyMembership = new FacilityParty();
+            propertyMembership.setOrganizationId(orgId);
+            propertyMembership.setFacilityId(propertyId);
+            propertyMembership.setPartyId(partyId);
+            propertyMembership.setRoleTypeId(OccupancyRole.TENANT);
+            propertyMembership.setFromDate(fromDate);
+            facilityPartyRepository.save(propertyMembership);
+        }
+    }
+
+    private Long resolvePropertyId(Long bedId) {
+        var bedParents = facilityGroupMemberRepository.findByChildFacilityIdAndThruDateIsNull(bedId);
+        if (bedParents.isEmpty()) return null;
+        Long roomId = bedParents.get(0).getParentFacilityId();
+        var roomParents = facilityGroupMemberRepository.findByChildFacilityIdAndThruDateIsNull(roomId);
+        if (roomParents.isEmpty()) return null;
+        Long floorId = roomParents.get(0).getParentFacilityId();
+        var floorParents = facilityGroupMemberRepository.findByChildFacilityIdAndThruDateIsNull(floorId);
+        if (floorParents.isEmpty()) return null;
+        return floorParents.get(0).getParentFacilityId();
     }
 
     @Transactional

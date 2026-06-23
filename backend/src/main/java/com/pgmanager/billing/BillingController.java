@@ -34,57 +34,86 @@ public class BillingController {
     private final JdbcTemplate jdbc;
 
     @GetMapping("/dashboard")
-    ApiResponse<Map<String, Object>> dashboard() {
+    ApiResponse<Map<String, Object>> dashboard(@RequestParam(required = false) Long propertyId) {
         Long org = currentUser.organizationId();
+        String payProp = propertyId != null
+                ? " AND party_id IN (SELECT fp.party_id FROM facility_party fp WHERE fp.organization_id=? AND fp.facility_id=? AND fp.role_type_id='TENANT')"
+                : "";
+        String payAliasProp = propertyId != null
+                ? " AND p.party_id IN (SELECT fp.party_id FROM facility_party fp WHERE fp.organization_id=? AND fp.facility_id=? AND fp.role_type_id='TENANT')"
+                : "";
+        String invProp = propertyId != null
+                ? " AND ba.party_id IN (SELECT fp.party_id FROM facility_party fp WHERE fp.organization_id=? AND fp.facility_id=? AND fp.role_type_id='TENANT')"
+                : "";
+        String invScalarProp = propertyId != null
+                ? " AND billing_account_id IN (SELECT ba.billing_account_id FROM billing_account ba WHERE ba.organization_id=? AND ba.party_id IN (SELECT fp.party_id FROM facility_party fp WHERE fp.organization_id=? AND fp.facility_id=? AND fp.role_type_id='TENANT'))"
+                : "";
+        Object[] pp2 = propertyId != null ? new Object[]{org, propertyId} : new Object[0];
+        Object[] pp3 = propertyId != null ? new Object[]{org, org, propertyId} : new Object[0];
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("totalCollection", amount("SELECT COALESCE(SUM(amount),0) FROM payment WHERE organization_id=? AND status='RECEIVED' AND payment_date BETWEEN DATE_FORMAT(CURRENT_DATE,'%Y-%m-01') AND LAST_DAY(CURRENT_DATE)", org));
-        result.put("receivedToday", amount("SELECT COALESCE(SUM(amount),0) FROM payment WHERE organization_id=? AND payment_date=CURRENT_DATE AND status='RECEIVED'", org));
-        result.put("outstandingToday", amount("SELECT COALESCE(SUM(total_amount-paid_amount),0) FROM invoice WHERE organization_id=? AND due_date=CURRENT_DATE AND status IN ('PENDING','PARTIAL')", org));
-        result.put("overdue", amount("SELECT COALESCE(SUM(total_amount-paid_amount),0) FROM invoice WHERE organization_id=? AND due_date<CURRENT_DATE AND status IN ('PENDING','PARTIAL','OVERDUE')", org));
+        result.put("totalCollection", amount(
+                "SELECT COALESCE(SUM(amount),0) FROM payment WHERE organization_id=? AND status='RECEIVED' AND payment_date BETWEEN DATE_FORMAT(CURRENT_DATE,'%Y-%m-01') AND LAST_DAY(CURRENT_DATE)" + payProp,
+                cat(org, pp2)));
+        result.put("receivedToday", amount(
+                "SELECT COALESCE(SUM(amount),0) FROM payment WHERE organization_id=? AND payment_date=CURRENT_DATE AND status='RECEIVED'" + payProp,
+                cat(org, pp2)));
+        result.put("outstandingToday", amount(
+                "SELECT COALESCE(SUM(total_amount-paid_amount),0) FROM invoice WHERE organization_id=? AND due_date=CURRENT_DATE AND status IN ('PENDING','PARTIAL')" + invScalarProp,
+                cat(org, pp3)));
+        result.put("overdue", amount(
+                "SELECT COALESCE(SUM(total_amount-paid_amount),0) FROM invoice WHERE organization_id=? AND due_date<CURRENT_DATE AND status IN ('PENDING','PARTIAL','OVERDUE')" + invScalarProp,
+                cat(org, pp3)));
         result.put("recentPayments", jdbc.queryForList(
                 "SELECT p.payment_id,p.party_id,p.amount,p.payment_mode,p.payment_date,p.reference_number,p.status,pr.full_name " +
                 "FROM payment p JOIN person pr ON pr.party_id=p.party_id " +
-                "WHERE p.organization_id=? ORDER BY p.payment_date DESC,p.payment_id DESC LIMIT 10", org));
+                "WHERE p.organization_id=?" + payAliasProp + " ORDER BY p.payment_date DESC,p.payment_id DESC LIMIT 10",
+                cat(org, pp2)));
         result.put("todayPayments", jdbc.queryForList(
                 "SELECT p.payment_id,p.party_id,p.amount,p.payment_mode,p.payment_date,p.reference_number,p.status,COALESCE(pr.full_name,'') full_name " +
                 "FROM payment p LEFT JOIN person pr ON pr.party_id=p.party_id " +
-                "WHERE p.organization_id=? AND p.payment_date=CURRENT_DATE AND p.status='RECEIVED' " +
-                "ORDER BY p.payment_id DESC", org));
+                "WHERE p.organization_id=? AND p.payment_date=CURRENT_DATE AND p.status='RECEIVED'" + payAliasProp + " ORDER BY p.payment_id DESC",
+                cat(org, pp2)));
         result.put("outstandingTodayInvoices", jdbc.queryForList(
                 "SELECT i.invoice_id,i.invoice_number,i.invoice_month,i.total_amount,i.paid_amount," +
                 "(i.total_amount-i.paid_amount) balance,i.status,i.due_date,ba.party_id,p.full_name " +
                 "FROM invoice i JOIN billing_account ba ON ba.billing_account_id=i.billing_account_id " +
                 "JOIN person p ON p.party_id=ba.party_id " +
-                "WHERE i.organization_id=? AND i.due_date=CURRENT_DATE AND i.status IN ('PENDING','PARTIAL') " +
-                "ORDER BY i.invoice_id", org));
+                "WHERE i.organization_id=? AND i.due_date=CURRENT_DATE AND i.status IN ('PENDING','PARTIAL')" + invProp + " ORDER BY i.invoice_id",
+                cat(org, pp2)));
         result.put("overdueInvoices", jdbc.queryForList(
                 "SELECT i.invoice_id,i.invoice_number,i.invoice_month,i.total_amount,i.paid_amount," +
                 "(i.total_amount-i.paid_amount) balance,i.status,i.due_date,ba.party_id,p.full_name " +
                 "FROM invoice i JOIN billing_account ba ON ba.billing_account_id=i.billing_account_id " +
                 "JOIN person p ON p.party_id=ba.party_id " +
-                "WHERE i.organization_id=? AND i.due_date<CURRENT_DATE AND i.status IN ('PENDING','PARTIAL','OVERDUE') " +
-                "ORDER BY i.due_date,i.invoice_id", org));
+                "WHERE i.organization_id=? AND i.due_date<CURRENT_DATE AND i.status IN ('PENDING','PARTIAL','OVERDUE')" + invProp + " ORDER BY i.due_date,i.invoice_id",
+                cat(org, pp2)));
         return ApiResponse.ok(result);
     }
 
     @GetMapping("/invoices")
     ApiResponse<Map<String, Object>> invoices(@RequestParam(required = false) String status,
                                                @RequestParam(required = false) Long partyId,
+                                               @RequestParam(required = false) Long propertyId,
                                                @RequestParam(defaultValue = "0") int page,
                                                @RequestParam(defaultValue = "25") int size) {
+        Long org = currentUser.organizationId();
         int safeSize = Math.min(Math.max(size, 1), 100);
         String statusFilter = (status == null || status.isBlank()) ? "" : " AND i.status=?";
         String partyFilter = partyId != null ? " AND ba.party_id=?" : "";
+        String propFilter = propertyId != null
+                ? " AND ba.party_id IN (SELECT fp.party_id FROM facility_party fp WHERE fp.organization_id=? AND fp.facility_id=? AND fp.role_type_id='TENANT')"
+                : "";
         java.util.List<Object> argList = new java.util.ArrayList<>();
-        argList.add(currentUser.organizationId());
+        argList.add(org);
         if (status != null && !status.isBlank()) argList.add(status.toUpperCase());
         if (partyId != null) argList.add(partyId);
+        if (propertyId != null) { argList.add(org); argList.add(propertyId); }
         argList.add(safeSize);
         argList.add(Math.max(page, 0) * safeSize);
         List<Map<String, Object>> items = jdbc.queryForList("SELECT i.invoice_id,i.invoice_number,i.invoice_month,i.issue_date,i.due_date," +
                 "i.total_amount,i.paid_amount,(i.total_amount-i.paid_amount) balance,i.status,ba.party_id,p.full_name " +
                 "FROM invoice i JOIN billing_account ba ON ba.billing_account_id=i.billing_account_id " +
-                "JOIN person p ON p.party_id=ba.party_id WHERE i.organization_id=?" + statusFilter + partyFilter +
+                "JOIN person p ON p.party_id=ba.party_id WHERE i.organization_id=?" + statusFilter + partyFilter + propFilter +
                 " ORDER BY i.due_date DESC LIMIT ? OFFSET ?", argList.toArray());
         return ApiResponse.ok(Map.of("items", items, "page", page, "size", safeSize));
     }
@@ -106,23 +135,29 @@ public class BillingController {
     ApiResponse<Map<String, Object>> payments(@RequestParam(required = false) Long partyId,
                                                @RequestParam(required = false) String fromDate,
                                                @RequestParam(required = false) String toDate,
+                                               @RequestParam(required = false) Long propertyId,
                                                @RequestParam(defaultValue = "0") int page,
                                                @RequestParam(defaultValue = "200") int size) {
+        Long org = currentUser.organizationId();
         int safeSize = Math.min(Math.max(size, 1), 500);
         String partyFilter = (partyId != null) ? " AND p.party_id=?" : "";
         String fromFilter  = (fromDate != null && !fromDate.isBlank()) ? " AND p.payment_date>=?" : "";
         String toFilter    = (toDate   != null && !toDate.isBlank())   ? " AND p.payment_date<=?" : "";
+        String propFilter  = propertyId != null
+                ? " AND p.party_id IN (SELECT fp.party_id FROM facility_party fp WHERE fp.organization_id=? AND fp.facility_id=? AND fp.role_type_id='TENANT')"
+                : "";
         java.util.List<Object> argList = new java.util.ArrayList<>();
-        argList.add(currentUser.organizationId());
+        argList.add(org);
         if (partyId  != null) argList.add(partyId);
         if (fromDate != null && !fromDate.isBlank()) argList.add(fromDate);
         if (toDate   != null && !toDate.isBlank())   argList.add(toDate);
+        if (propertyId != null) { argList.add(org); argList.add(propertyId); }
         argList.add(safeSize);
         argList.add(Math.max(page, 0) * safeSize);
         List<Map<String, Object>> items = jdbc.queryForList(
                 "SELECT p.payment_id,p.party_id,p.amount,p.payment_mode,p.payment_date,p.reference_number,p.notes,p.status,pr.full_name " +
                 "FROM payment p JOIN person pr ON pr.party_id=p.party_id WHERE p.organization_id=?" +
-                partyFilter + fromFilter + toFilter +
+                partyFilter + fromFilter + toFilter + propFilter +
                 " ORDER BY p.payment_date DESC,p.payment_id DESC LIMIT ? OFFSET ?", argList.toArray());
         return ApiResponse.ok(Map.of("items", items, "page", page, "size", safeSize));
     }
@@ -251,6 +286,13 @@ public class BillingController {
     private BigDecimal amount(String sql, Object... args) {
         BigDecimal value = jdbc.queryForObject(sql, BigDecimal.class, args);
         return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private Object[] cat(Object first, Object[] rest) {
+        Object[] result = new Object[1 + rest.length];
+        result[0] = first;
+        System.arraycopy(rest, 0, result, 1, rest.length);
+        return result;
     }
 
     private BigDecimal decimal(Object value) {

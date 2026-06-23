@@ -83,7 +83,8 @@ IconData _modeIcon(String? mode) {
 
 class BillingScreen extends StatefulWidget {
   final bool embedded;
-  const BillingScreen({this.embedded = false, super.key});
+  final int? propertyId;
+  const BillingScreen({this.embedded = false, this.propertyId, super.key});
 
   @override
   State<BillingScreen> createState() => _BillingScreenState();
@@ -111,8 +112,9 @@ class _BillingScreenState extends State<BillingScreen>
 
   void _load() {
     final api = context.read<AppState>().apiClient;
-    _dashFuture = api.get('/billing/dashboard');
-    _invoicesFuture = api.get('/billing/invoices');
+    final pid = widget.propertyId;
+    _dashFuture = api.get('/billing/dashboard${pid != null ? '?propertyId=$pid' : ''}');
+    _invoicesFuture = api.get('/billing/invoices${pid != null ? '?propertyId=$pid' : ''}');
     _paymentsRefreshTrigger++;
   }
 
@@ -135,6 +137,7 @@ class _BillingScreenState extends State<BillingScreen>
               _PaymentsTab(
                 refreshTrigger: _paymentsRefreshTrigger,
                 onCollect: _openCollect,
+                propertyId: widget.propertyId,
               ),
               _InvoicesTab(
                 invoicesFuture: _invoicesFuture,
@@ -185,7 +188,7 @@ class _BillingScreenState extends State<BillingScreen>
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => const _CollectPaymentSheet(),
+      builder: (_) => CollectPaymentSheet(propertyId: widget.propertyId),
     );
     if (done == true) setState(_load);
   }
@@ -413,10 +416,12 @@ class _PaymentsTab extends StatefulWidget {
   const _PaymentsTab({
     required this.refreshTrigger,
     required this.onCollect,
+    this.propertyId,
   });
 
   final int refreshTrigger;
   final VoidCallback onCollect;
+  final int? propertyId;
 
   @override
   State<_PaymentsTab> createState() => _PaymentsTabState();
@@ -461,9 +466,10 @@ class _PaymentsTabState extends State<_PaymentsTab> {
   void _load() {
     final from = _isoDate(_fromDate);
     final to   = _isoDate(_toDate);
+    final pid  = widget.propertyId;
     setState(() {
       _future = context.read<AppState>().apiClient
-          .get('/billing/payments?fromDate=$from&toDate=$to&size=500');
+          .get('/billing/payments?fromDate=$from&toDate=$to&size=500${pid != null ? '&propertyId=$pid' : ''}');
     });
   }
 
@@ -958,7 +964,7 @@ class _InvoiceCard extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => _InvoiceDetailSheet(
+      builder: (_) => InvoiceDetailSheet(
         invoice: invoice,
         onRefresh: onRefresh,
       ),
@@ -968,8 +974,8 @@ class _InvoiceCard extends StatelessWidget {
 
 // ─── Invoice Detail Sheet ─────────────────────────────────────────────────
 
-class _InvoiceDetailSheet extends StatelessWidget {
-  const _InvoiceDetailSheet({required this.invoice, required this.onRefresh});
+class InvoiceDetailSheet extends StatelessWidget {
+  const InvoiceDetailSheet({required this.invoice, required this.onRefresh});
 
   final Map<String, dynamic> invoice;
   final VoidCallback onRefresh;
@@ -1026,7 +1032,7 @@ class _InvoiceDetailSheet extends StatelessWidget {
                   shape: const RoundedRectangleBorder(
                     borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
                   ),
-                  builder: (_) => _CollectPaymentSheet(preselectedInvoice: invoice),
+                  builder: (_) => CollectPaymentSheet(preselectedInvoice: invoice),
                 ).then((done) { if (done == true) onRefresh(); });
               },
             ),
@@ -1060,15 +1066,16 @@ class _DetailRow extends StatelessWidget {
 
 // ─── Collect Payment Sheet ────────────────────────────────────────────────
 
-class _CollectPaymentSheet extends StatefulWidget {
-  const _CollectPaymentSheet({this.preselectedInvoice});
+class CollectPaymentSheet extends StatefulWidget {
+  const CollectPaymentSheet({this.preselectedInvoice, this.propertyId});
   final Map<String, dynamic>? preselectedInvoice;
+  final int? propertyId;
 
   @override
-  State<_CollectPaymentSheet> createState() => _CollectPaymentSheetState();
+  State<CollectPaymentSheet> createState() => CollectPaymentSheetState();
 }
 
-class _CollectPaymentSheetState extends State<_CollectPaymentSheet> {
+class CollectPaymentSheetState extends State<CollectPaymentSheet> {
   final _formKey = GlobalKey<FormState>();
   final _amount = TextEditingController();
   final _ref = TextEditingController();
@@ -1083,7 +1090,9 @@ class _CollectPaymentSheetState extends State<_CollectPaymentSheet> {
   @override
   void initState() {
     super.initState();
-    _invoiceFuture = context.read<AppState>().apiClient.get('/billing/invoices?size=100');
+    final pid = widget.propertyId;
+    _invoiceFuture = context.read<AppState>().apiClient
+        .get('/billing/invoices?size=100${pid != null ? '&propertyId=$pid' : ''}');
     if (widget.preselectedInvoice != null) {
       _selectedInvoice = widget.preselectedInvoice;
       _step = 1;
@@ -1500,7 +1509,7 @@ class _DashboardInvoiceCard extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => _InvoiceDetailSheet(invoice: invoice, onRefresh: onRefresh),
+      builder: (_) => InvoiceDetailSheet(invoice: invoice, onRefresh: onRefresh),
     );
   }
 

@@ -31,32 +31,63 @@ class _PropertyWorkspaceScreenState extends State<PropertyWorkspaceScreen> {
         backgroundColor: Colors.white,
         foregroundColor: const Color(0xFF1A1A2E),
         elevation: 0,
-        centerTitle: true,
+        centerTitle: false,
+        titleSpacing: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
         title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(_propertyName,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            Text(
+              _propertyName,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF1A1A2E),
+                letterSpacing: 0.1,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
             if (_propertyDesc.isNotEmpty)
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.location_on_outlined, size: 11, color: Colors.grey),
+                  const Icon(Icons.location_on_outlined,
+                      size: 11, color: Color(0xFF9CA3AF)),
                   const SizedBox(width: 2),
-                  Text(_propertyDesc,
-                      style: const TextStyle(fontSize: 11, color: Colors.grey,
-                          fontWeight: FontWeight.w400)),
+                  Text(
+                    _propertyDesc,
+                    style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF9CA3AF),
+                        fontWeight: FontWeight.w400),
+                  ),
                 ],
               ),
           ],
         ),
         actions: [
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
+            icon: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF3F4F6),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.more_horiz_rounded,
+                  size: 20, color: Color(0xFF374151)),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            elevation: 8,
+            shadowColor: Colors.black.withValues(alpha: .12),
+            color: Colors.white,
+            offset: const Offset(0, 8),
             onSelected: (v) {
               if (v == 'floors') {
                 Navigator.push(
@@ -71,7 +102,8 @@ class _PropertyWorkspaceScreenState extends State<PropertyWorkspaceScreen> {
                   isScrollControlled: true,
                   backgroundColor: Colors.white,
                   shape: const RoundedRectangleBorder(
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                      borderRadius:
+                          BorderRadius.vertical(top: Radius.circular(20))),
                   builder: (_) => _EditPropertySheet(
                     property: widget.property,
                     onSaved: (name, desc) => setState(() {
@@ -84,10 +116,49 @@ class _PropertyWorkspaceScreenState extends State<PropertyWorkspaceScreen> {
             },
             itemBuilder: (_) => [
               if (_tab == 0)
-                const PopupMenuItem(value: 'edit', child: Text('Edit Property')),
-              const PopupMenuItem(value: 'floors', child: Text('Floors & Rooms')),
+                PopupMenuItem<String>(
+                  value: 'edit',
+                  child: Row(children: [
+                    Container(
+                      width: 32, height: 32,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEBF3FF),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.edit_outlined,
+                          size: 16, color: Color(0xFF2563EB)),
+                    ),
+                    const SizedBox(width: 12),
+                    const Text('Edit Property',
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF1A1A2E))),
+                  ]),
+                ),
+              PopupMenuItem<String>(
+                value: 'floors',
+                child: Row(children: [
+                  Container(
+                    width: 32, height: 32,
+                    decoration: BoxDecoration(
+                      color: PgColors.lavender,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.domain_outlined,
+                        size: 16, color: PgColors.primary),
+                  ),
+                  const SizedBox(width: 12),
+                  const Text('Floors & Rooms',
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1A1A2E))),
+                ]),
+              ),
             ],
           ),
+          const SizedBox(width: 8),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
@@ -97,7 +168,11 @@ class _PropertyWorkspaceScreenState extends State<PropertyWorkspaceScreen> {
       body: IndexedStack(
         index: _tab,
         children: [
-          _PropertyDashboardTab(propertyId: _propertyId, property: widget.property),
+          _PropertyDashboardTab(
+            propertyId: _propertyId,
+            property: widget.property,
+            onNavigateToTenants: () => setState(() => _tab = 1),
+          ),
           _PropertyTenantsTab(propertyId: _propertyId),
           _PropertyPaymentsTab(propertyId: _propertyId),
           const _PropertyReportsTab(),
@@ -141,7 +216,12 @@ class _PropertyWorkspaceScreenState extends State<PropertyWorkspaceScreen> {
 class _PropertyDashboardTab extends StatefulWidget {
   final int propertyId;
   final Map<String, dynamic> property;
-  const _PropertyDashboardTab({required this.propertyId, required this.property});
+  final VoidCallback onNavigateToTenants;
+  const _PropertyDashboardTab({
+    required this.propertyId,
+    required this.property,
+    required this.onNavigateToTenants,
+  });
 
   @override
   State<_PropertyDashboardTab> createState() => _PropertyDashboardTabState();
@@ -191,12 +271,8 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
             builder: (context, snap) {
               final stats = snap.data ?? {};
               final totalTenants = stats['totalTenants'] ?? 0;
-              final occupiedBeds = stats['occupiedBeds'] ?? 0;
               final vacantBeds = stats['vacantBeds'] ?? 0;
               final totalBeds = (stats['totalBeds'] as num?)?.toInt() ?? 1;
-              final occPct = totalBeds > 0
-                  ? '${((occupiedBeds / totalBeds) * 100).round()}%'
-                  : '0%';
               final vacPct = totalBeds > 0
                   ? '${((vacantBeds / totalBeds) * 100).round()}%'
                   : '0%';
@@ -222,18 +298,7 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
                             value: '$totalTenants',
                             sub: 'Active',
                             subColor: const Color(0xFF2563EB),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: _StatCard(
-                            icon: Icons.bed,
-                            iconBg: const Color(0xFFE6F9F0),
-                            iconColor: const Color(0xFF16A34A),
-                            label: 'Occupied Beds',
-                            value: '$occupiedBeds',
-                            sub: occPct,
-                            subColor: const Color(0xFF16A34A),
+                            onTap: widget.onNavigateToTenants,
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -272,74 +337,6 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
                 ),
               ),
             ),
-          ),
-          // ── Quick Summary ──────────────────────────────────────────
-          FutureBuilder<Map<String, dynamic>>(
-            future: _statsFuture,
-            builder: (context, snap) {
-              final stats = snap.data ?? {};
-              final totalFloors = stats['totalFloors'] ?? '—';
-              final totalRooms = stats['totalRooms'] ?? '—';
-              final totalBeds = stats['totalBeds'] ?? '—';
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Quick Summary',
-                        style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF1A1A2E))),
-                    const SizedBox(height: 12),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: .05),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        children: [
-                          _SummaryRow(
-                            icon: Icons.domain_outlined,
-                            label: 'Total Floors',
-                            value: '$totalFloors',
-                            onTap: null,
-                          ),
-                          const Divider(height: 1, indent: 56),
-                          _SummaryRow(
-                            icon: Icons.meeting_room_outlined,
-                            label: 'Total Rooms',
-                            value: '$totalRooms',
-                            onTap: null,
-                          ),
-                          const Divider(height: 1, indent: 56),
-                          _SummaryRow(
-                            icon: Icons.bed_outlined,
-                            label: 'Total Beds',
-                            value: '$totalBeds',
-                            onTap: null,
-                          ),
-                          const Divider(height: 1, indent: 56),
-                          _SummaryRow(
-                            icon: Icons.currency_rupee_outlined,
-                            label: 'Monthly Collection',
-                            value: '—',
-                            onTap: null,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
           ),
           // ── Shortcuts ──────────────────────────────────────────────
           Padding(
@@ -434,22 +431,29 @@ class _VacantBedsSheet extends StatefulWidget {
   State<_VacantBedsSheet> createState() => _VacantBedsSheetState();
 }
 
-class _VacantBedsSheetState extends State<_VacantBedsSheet> {
+class _VacantBedsSheetState extends State<_VacantBedsSheet>
+    with SingleTickerProviderStateMixin {
   late Future<List<Map<String, dynamic>>> _future;
+  List<Map<String, dynamic>> _beds = [];
   final _search = TextEditingController();
+  late TabController _tabs;
   String _query = '';
   String? _selectedFloorId;
   String? _selectedRoomId;
+  String? _selectedSharingType;
+  String? _checkoutFilter;
 
   @override
   void initState() {
     super.initState();
+    _tabs = TabController(length: 2, vsync: this);
     _load();
     _search.addListener(() => setState(() => _query = _search.text.toLowerCase()));
   }
 
   @override
   void dispose() {
+    _tabs.dispose();
     _search.dispose();
     super.dispose();
   }
@@ -459,15 +463,70 @@ class _VacantBedsSheetState extends State<_VacantBedsSheet> {
         .read<AppState>()
         .apiClient
         .get('/properties/${widget.propertyId}/vacant-beds')
-        .then((d) =>
-            (d['items'] is List ? d['items'] as List : []).cast<Map<String, dynamic>>());
+        .then((d) {
+          final items =
+              (d['items'] is List ? d['items'] as List : []).cast<Map<String, dynamic>>();
+          if (mounted) setState(() => _beds = items);
+          return items;
+        });
   }
 
-  void _selectFloor(String? floorId) =>
-      setState(() { _selectedFloorId = floorId; _selectedRoomId = null; });
+  int get _activeFilterCount =>
+      (_selectedFloorId != null ? 1 : 0) +
+      (_selectedRoomId != null ? 1 : 0) +
+      (_selectedSharingType != null ? 1 : 0) +
+      (_checkoutFilter != null ? 1 : 0);
 
-  void _selectRoom(String? roomId) =>
-      setState(() => _selectedRoomId = roomId);
+  void _clearAllFilters() => setState(() {
+        _selectedFloorId = null;
+        _selectedRoomId = null;
+        _selectedSharingType = null;
+        _checkoutFilter = null;
+      });
+
+  void _openFilterPanel() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _VacantBedsFilterPanel(
+        beds: _beds,
+        initialFloorId: _selectedFloorId,
+        initialRoomId: _selectedRoomId,
+        initialSharingType: _selectedSharingType,
+        initialCheckout: _checkoutFilter,
+        onApply: (floor, room, sharing, checkout) => setState(() {
+          _selectedFloorId = floor;
+          _selectedRoomId = room;
+          _selectedSharingType = sharing;
+          _checkoutFilter = checkout;
+        }),
+      ),
+    );
+  }
+
+  bool _passesCheckoutFilter(Map<String, dynamic> bed) {
+    if (_checkoutFilter == null) return true;
+    final raw = bed['expected_checkout_date'];
+    if (raw == null) return false;
+    final date = DateTime.tryParse('$raw');
+    if (date == null) return false;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final d = DateTime(date.year, date.month, date.day);
+    final diff = d.difference(today).inDays;
+    switch (_checkoutFilter) {
+      case 'today':  return diff == 0;
+      case '1day':   return diff >= 0 && diff <= 1;
+      case '2days':  return diff >= 0 && diff <= 2;
+      case '3days':  return diff >= 0 && diff <= 3;
+      case '7days':  return diff >= 0 && diff <= 7;
+      case 'month':  return diff >= 0 && diff <= 30;
+      default:       return true;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -478,6 +537,7 @@ class _VacantBedsSheetState extends State<_VacantBedsSheet> {
       expand: false,
       builder: (ctx, sc) => Column(
         children: [
+          // ── Handle ─────────────────────────────────────────────────
           const SizedBox(height: 8),
           Container(
             width: 40,
@@ -486,31 +546,132 @@ class _VacantBedsSheetState extends State<_VacantBedsSheet> {
                 color: Colors.grey.shade300,
                 borderRadius: BorderRadius.circular(2)),
           ),
+          // ── Title row ───────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 14, 8, 0),
-            child: Row(
-              children: [
-                const Text('Vacant Beds',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-                const Spacer(),
-                IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(ctx)),
-              ],
-            ),
+            child: Row(children: [
+              const Text('Vacant Beds',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+              const Spacer(),
+              IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(ctx)),
+            ]),
           ),
+          // ── Search bar + filter icon ────────────────────────────────
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: TextField(
-              controller: _search,
-              decoration: const InputDecoration(
-                hintText: 'Search bed, room or floor…',
-                prefixIcon: Icon(Icons.search),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: _search,
+                  decoration: InputDecoration(
+                    hintText: 'Search bed, room or floor…',
+                    hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+                    prefixIcon:
+                        Icon(Icons.search, size: 20, color: Colors.grey.shade400),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: Colors.grey.shade200),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: Colors.grey.shade200),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide:
+                          const BorderSide(color: PgColors.primary, width: 1.5),
+                    ),
+                    filled: true,
+                    fillColor: Colors.grey.shade50,
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(width: 10),
+              _FilterIconButton(
+                activeCount: _activeFilterCount,
+                onTap: _openFilterPanel,
+              ),
+            ]),
           ),
+          // ── Active filter pills ─────────────────────────────────────
+          if (_activeFilterCount > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Row(children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(children: [
+                      if (_selectedFloorId != null)
+                        _ActiveFilterPill(
+                          label: _floorLabelFor(_selectedFloorId!),
+                          onRemove: () => setState(() {
+                            _selectedFloorId = null;
+                            _selectedRoomId = null;
+                          }),
+                        ),
+                      if (_selectedRoomId != null) ...[
+                        const SizedBox(width: 6),
+                        _ActiveFilterPill(
+                          label: _roomLabelFor(_selectedRoomId!),
+                          onRemove: () =>
+                              setState(() => _selectedRoomId = null),
+                        ),
+                      ],
+                      if (_selectedSharingType != null) ...[
+                        const SizedBox(width: 6),
+                        _ActiveFilterPill(
+                          label: '$_selectedSharingType-Sharing',
+                          color: const Color(0xFF7C3AED),
+                          onRemove: () =>
+                              setState(() => _selectedSharingType = null),
+                        ),
+                      ],
+                      if (_checkoutFilter != null) ...[
+                        const SizedBox(width: 6),
+                        _ActiveFilterPill(
+                          label: _checkoutLabel(_checkoutFilter!),
+                          color: const Color(0xFF0D9488),
+                          onRemove: () =>
+                              setState(() => _checkoutFilter = null),
+                        ),
+                      ],
+                    ]),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _clearAllFilters,
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.red.shade400,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    textStyle: const TextStyle(fontSize: 12),
+                  ),
+                  child: const Text('Clear all'),
+                ),
+              ]),
+            ),
+          // ── Tab bar ──────────────────────────────────────────────────
+          TabBar(
+            controller: _tabs,
+            labelColor: PgColors.primary,
+            unselectedLabelColor: Colors.grey.shade500,
+            indicatorColor: PgColors.primary,
+            indicatorWeight: 3,
+            labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+            dividerColor: const Color(0xFFE5E7EB),
+            tabs: const [
+              Tab(text: 'Vacant'),
+              Tab(text: 'Upcoming Vacant'),
+            ],
+          ),
+          // ── Tab views ────────────────────────────────────────────────
           Expanded(
             child: FutureBuilder<List<Map<String, dynamic>>>(
               future: _future,
@@ -537,37 +698,7 @@ class _VacantBedsSheetState extends State<_VacantBedsSheet> {
                 }
 
                 final beds = snapshot.data ?? [];
-
-                // ── Build ordered floor options from data ──────────────
-                final floorOrder = <String>[];
-                final floorLabels = <String, String>{};
-                for (final b in beds) {
-                  final id = '${b['floor_id']}';
-                  if (!floorLabels.containsKey(id)) {
-                    floorOrder.add(id);
-                    final num = b['floor_number'];
-                    final name = '${b['floor_name'] ?? 'Floor'}';
-                    floorLabels[id] = num != null ? 'Floor $num' : name;
-                  }
-                }
-
-                // ── Build ordered room options for selected floor ───────
-                final roomOrder = <String>[];
-                final roomLabels = <String, String>{};
-                for (final b in beds) {
-                  if (_selectedFloorId != null &&
-                      '${b['floor_id']}' != _selectedFloorId) continue;
-                  final id = '${b['room_id']}';
-                  if (!roomLabels.containsKey(id)) {
-                    roomOrder.add(id);
-                    final num = b['room_number'];
-                    final name = '${b['room_name'] ?? 'Room'}';
-                    roomLabels[id] = num != null ? 'Room $num' : name;
-                  }
-                }
-
-                // ── Apply filters ──────────────────────────────────────
-                var filtered = beds.where((b) {
+                final filtered = beds.where((b) {
                   if (_query.isNotEmpty) {
                     final q = _query;
                     if (!'${b['bed_name']}'.toLowerCase().contains(q) &&
@@ -577,104 +708,83 @@ class _VacantBedsSheetState extends State<_VacantBedsSheet> {
                     }
                   }
                   if (_selectedFloorId != null &&
-                      '${b['floor_id']}' != _selectedFloorId) return false;
+                      '${b['floor_id']}' != _selectedFloorId) { return false; }
                   if (_selectedRoomId != null &&
-                      '${b['room_id']}' != _selectedRoomId) return false;
+                      '${b['room_id']}' != _selectedRoomId) { return false; }
+                  if (_selectedSharingType != null &&
+                      '${b['sharing_type']}' != _selectedSharingType) { return false; }
+                  if (!_passesCheckoutFilter(b)) { return false; }
                   return true;
                 }).toList();
 
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                final vacant = filtered
+                    .where((b) => '${b['bed_status']}' != 'UPCOMING')
+                    .toList();
+                final upcoming = filtered
+                    .where((b) => '${b['bed_status']}' == 'UPCOMING')
+                    .toList();
+
+                Widget buildTabList(
+                    List<Map<String, dynamic>> list, String emptyLabel, String emptySubLabel) {
+                  if (list.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 72, height: 72,
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            child: Icon(Icons.bed_outlined,
+                                size: 36, color: Colors.grey.shade400),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(emptyLabel,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w700, fontSize: 16)),
+                          const SizedBox(height: 6),
+                          Text(emptySubLabel,
+                              style: TextStyle(
+                                  color: Colors.grey.shade500, fontSize: 13)),
+                        ],
+                      ),
+                    );
+                  }
+                  return RefreshIndicator(
+                    onRefresh: () async => setState(_load),
+                    child: ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                      itemCount: list.length,
+                      itemBuilder: (context, i) => _VacantBedCard(
+                        bed: list[i],
+                        propertyId: widget.propertyId,
+                        onAssigned: () {
+                          setState(_load);
+                          widget.onAssigned();
+                        },
+                      ),
+                    ),
+                  );
+                }
+
+                return TabBarView(
+                  controller: _tabs,
                   children: [
-                    // ── Floor filter chips ─────────────────────────────
-                    if (floorOrder.length > 1) ...[
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                        child: Row(
-                          children: [
-                            _FilterChip(
-                              label: 'All Floors',
-                              selected: _selectedFloorId == null,
-                              onTap: () => _selectFloor(null),
-                            ),
-                            ...floorOrder.map((id) => _FilterChip(
-                                  label: floorLabels[id]!,
-                                  selected: _selectedFloorId == id,
-                                  onTap: () => _selectFloor(id),
-                                )),
-                          ],
-                        ),
-                      ),
-                    ],
-                    // ── Room filter chips ──────────────────────────────
-                    if (_selectedFloorId != null && roomOrder.length > 1) ...[
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-                        child: Row(
-                          children: [
-                            _FilterChip(
-                              label: 'All Rooms',
-                              selected: _selectedRoomId == null,
-                              onTap: () => _selectRoom(null),
-                              accent: const Color(0xFF0D9488),
-                            ),
-                            ...roomOrder.map((id) => _FilterChip(
-                                  label: roomLabels[id]!,
-                                  selected: _selectedRoomId == id,
-                                  onTap: () => _selectRoom(id),
-                                  accent: const Color(0xFF0D9488),
-                                )),
-                          ],
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    // ── Bed list ───────────────────────────────────────
-                    Expanded(
-                      child: filtered.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.bed_outlined,
-                                      size: 52, color: Colors.grey.shade300),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                      beds.isEmpty
-                                          ? 'No vacant beds'
-                                          : 'No results',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 16)),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                      beds.isEmpty
-                                          ? 'All beds are currently occupied.'
-                                          : 'Try adjusting your filters.',
-                                      style:
-                                          const TextStyle(color: Colors.grey)),
-                                ],
-                              ),
-                            )
-                          : RefreshIndicator(
-                              onRefresh: () async => setState(_load),
-                              child: ListView.builder(
-                                controller: sc,
-                                padding:
-                                    const EdgeInsets.fromLTRB(16, 0, 16, 32),
-                                itemCount: filtered.length,
-                                itemBuilder: (context, i) => _VacantBedRow(
-                                  bed: filtered[i],
-                                  propertyId: widget.propertyId,
-                                  onAssigned: () {
-                                    setState(_load);
-                                    widget.onAssigned();
-                                  },
-                                ),
-                              ),
-                            ),
+                    buildTabList(
+                      vacant,
+                      beds.isEmpty ? 'No vacant beds' : 'No results',
+                      beds.isEmpty
+                          ? 'All beds are currently occupied.'
+                          : 'Try adjusting your filters.',
+                    ),
+                    buildTabList(
+                      upcoming,
+                      beds.isEmpty ? 'No upcoming checkouts' : 'No results',
+                      beds.isEmpty
+                          ? 'No tenants have an upcoming checkout date.'
+                          : 'Try adjusting your filters.',
                     ),
                   ],
                 );
@@ -685,14 +795,446 @@ class _VacantBedsSheetState extends State<_VacantBedsSheet> {
       ),
     );
   }
+
+  String _floorLabelFor(String floorId) {
+    for (final b in _beds) {
+      if ('${b['floor_id']}' == floorId) {
+        final num = b['floor_number'];
+        return num != null ? 'Floor $num' : '${b['floor_name'] ?? 'Floor'}';
+      }
+    }
+    return 'Floor';
+  }
+
+  String _roomLabelFor(String roomId) {
+    for (final b in _beds) {
+      if ('${b['room_id']}' == roomId) {
+        final num = b['room_number'];
+        return num != null ? 'Room $num' : '${b['room_name'] ?? 'Room'}';
+      }
+    }
+    return 'Room';
+  }
 }
 
-class _FilterChip extends StatelessWidget {
+String _checkoutLabel(String filter) {
+  switch (filter) {
+    case 'today':  return 'Today';
+    case '1day':   return 'By Tomorrow';
+    case '2days':  return 'Within 2 Days';
+    case '3days':  return 'Within 3 Days';
+    case '7days':  return 'Within 7 Days';
+    case 'month':  return 'This Month';
+    default:       return filter;
+  }
+}
+
+// ─── Filter Icon Button ────────────────────────────────────────────────────────
+
+class _FilterIconButton extends StatelessWidget {
+  final int activeCount;
+  final VoidCallback onTap;
+  const _FilterIconButton({required this.activeCount, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final active = activeCount > 0;
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: active ? PgColors.primary : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                  color: active ? PgColors.primary : Colors.grey.shade200),
+            ),
+            child: Icon(
+              Icons.tune_rounded,
+              color: active ? Colors.white : Colors.grey.shade600,
+              size: 20,
+            ),
+          ),
+          if (active)
+            Positioned(
+              top: -5,
+              right: -5,
+              child: Container(
+                width: 18,
+                height: 18,
+                decoration: const BoxDecoration(
+                    color: Color(0xFFEF4444), shape: BoxShape.circle),
+                child: Center(
+                  child: Text('$activeCount',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Active Filter Pill ────────────────────────────────────────────────────────
+
+class _ActiveFilterPill extends StatelessWidget {
+  final String label;
+  final Color? color;
+  final VoidCallback onRemove;
+  const _ActiveFilterPill(
+      {required this.label, this.color, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = color ?? PgColors.primary;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 4, 6, 4),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: c.withValues(alpha: 0.3)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Text(label,
+            style: TextStyle(
+                color: c, fontSize: 12, fontWeight: FontWeight.w600)),
+        const SizedBox(width: 4),
+        GestureDetector(
+          onTap: onRemove,
+          child: Icon(Icons.close, size: 14, color: c),
+        ),
+      ]),
+    );
+  }
+}
+
+// ─── Vacant Beds Filter Panel ─────────────────────────────────────────────────
+
+class _VacantBedsFilterPanel extends StatefulWidget {
+  final List<Map<String, dynamic>> beds;
+  final String? initialFloorId;
+  final String? initialRoomId;
+  final String? initialSharingType;
+  final String? initialCheckout;
+  final void Function(String? floor, String? room, String? sharing, String? checkout) onApply;
+  const _VacantBedsFilterPanel({
+    required this.beds,
+    this.initialFloorId,
+    this.initialRoomId,
+    this.initialSharingType,
+    this.initialCheckout,
+    required this.onApply,
+  });
+
+  @override
+  State<_VacantBedsFilterPanel> createState() =>
+      _VacantBedsFilterPanelState();
+}
+
+class _VacantBedsFilterPanelState extends State<_VacantBedsFilterPanel> {
+  String? _floorId;
+  String? _roomId;
+  String? _sharingType;
+  String? _checkout;
+
+  @override
+  void initState() {
+    super.initState();
+    _floorId = widget.initialFloorId;
+    _roomId = widget.initialRoomId;
+    _sharingType = widget.initialSharingType;
+    _checkout = widget.initialCheckout;
+  }
+
+  List<String> get _floorOrder {
+    final order = <String>[];
+    final seen = <String>{};
+    for (final b in widget.beds) {
+      final id = '${b['floor_id']}';
+      if (!seen.contains(id)) {
+        seen.add(id);
+        order.add(id);
+      }
+    }
+    return order;
+  }
+
+  Map<String, String> get _floorLabels {
+    final labels = <String, String>{};
+    for (final b in widget.beds) {
+      final id = '${b['floor_id']}';
+      if (!labels.containsKey(id)) {
+        final num = b['floor_number'];
+        labels[id] = num != null ? 'Floor $num' : '${b['floor_name'] ?? 'Floor'}';
+      }
+    }
+    return labels;
+  }
+
+  List<String> get _roomOrder {
+    final order = <String>[];
+    final seen = <String>{};
+    for (final b in widget.beds) {
+      if (_floorId != null && '${b['floor_id']}' != _floorId) continue;
+      final id = '${b['room_id']}';
+      if (!seen.contains(id)) {
+        seen.add(id);
+        order.add(id);
+      }
+    }
+    return order;
+  }
+
+  Map<String, String> get _roomLabels {
+    final labels = <String, String>{};
+    for (final b in widget.beds) {
+      if (_floorId != null && '${b['floor_id']}' != _floorId) continue;
+      final id = '${b['room_id']}';
+      if (!labels.containsKey(id)) {
+        final num = b['room_number'];
+        labels[id] = num != null ? 'Room $num' : '${b['room_name'] ?? 'Room'}';
+      }
+    }
+    return labels;
+  }
+
+  List<String> get _sharingTypes {
+    final types = <String>[];
+    final seen = <String>{};
+    for (final b in widget.beds) {
+      final t = b['sharing_type']?.toString();
+      if (t != null && t.isNotEmpty && t != 'null' && !seen.contains(t)) {
+        seen.add(t);
+        types.add(t);
+      }
+    }
+    types.sort((a, b) {
+      final ai = int.tryParse(a);
+      final bi = int.tryParse(b);
+      if (ai != null && bi != null) { return ai.compareTo(bi); }
+      return a.compareTo(b);
+    });
+    return types;
+  }
+
+  static const _checkoutOptions = [
+    ['today', 'Today'],
+    ['1day', 'Tomorrow'],
+    ['2days', 'In 2 Days'],
+    ['3days', 'In 3 Days'],
+    ['7days', 'In 7 Days'],
+    ['month', 'This Month'],
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final floors = _floorOrder;
+    final floorLbls = _floorLabels;
+    final rooms = _roomOrder;
+    final roomLbls = _roomLabels;
+    final sharingTypes = _sharingTypes;
+    final pad = MediaQuery.viewInsetsOf(context).bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: pad),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle
+          const SizedBox(height: 8),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2)),
+          ),
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 8, 0),
+            child: Row(children: [
+              const Text('Filters',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+              const Spacer(),
+              TextButton(
+                onPressed: () => setState(() {
+                  _floorId = null;
+                  _roomId = null;
+                  _sharingType = null;
+                  _checkout = null;
+                }),
+                style: TextButton.styleFrom(
+                    foregroundColor: Colors.red.shade400,
+                    textStyle: const TextStyle(fontSize: 13)),
+                child: const Text('Reset'),
+              ),
+              IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context)),
+            ]),
+          ),
+          Container(height: 1, color: const Color(0xFFF3F4F6)),
+          // Scrollable content
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Floor ──────────────────────────────────────────
+                  _FilterSectionLabel(label: 'Floor'),
+                  const SizedBox(height: 10),
+                  if (floors.isEmpty)
+                    Text('No floors available',
+                        style: TextStyle(color: Colors.grey.shade400, fontSize: 13))
+                  else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: floors
+                          .map((id) => _PanelFilterChip(
+                                label: floorLbls[id]!,
+                                selected: _floorId == id,
+                                onTap: () => setState(() {
+                                  _floorId = _floorId == id ? null : id;
+                                  _roomId = null;
+                                }),
+                              ))
+                          .toList(),
+                    ),
+                  // ── Room (appears after floor is chosen) ───────────
+                  if (_floorId != null && rooms.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _FilterSectionLabel(label: 'Room'),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: rooms
+                          .map((id) => _PanelFilterChip(
+                                label: roomLbls[id]!,
+                                selected: _roomId == id,
+                                onTap: () => setState(() {
+                                  _roomId = _roomId == id ? null : id;
+                                }),
+                              ))
+                          .toList(),
+                    ),
+                  ],
+                  // ── Sharing Type ───────────────────────────────────
+                  if (sharingTypes.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _FilterSectionLabel(label: 'Sharing Type'),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: sharingTypes
+                          .map((t) => _PanelFilterChip(
+                                label: '$t-Sharing',
+                                selected: _sharingType == t,
+                                accent: const Color(0xFF7C3AED),
+                                onTap: () => setState(() {
+                                  _sharingType = _sharingType == t ? null : t;
+                                }),
+                              ))
+                          .toList(),
+                    ),
+                  ],
+                  // ── Expected Checkout ──────────────────────────────
+                  const SizedBox(height: 20),
+                  Row(children: [
+                    _FilterSectionLabel(label: 'Expected Checkout'),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF0FDF4),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFFBBF7D0)),
+                      ),
+                      child: const Text('Upcoming',
+                          style: TextStyle(
+                              fontSize: 10,
+                              color: Color(0xFF16A34A),
+                              fontWeight: FontWeight.w600)),
+                    ),
+                  ]),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _checkoutOptions
+                        .map((opt) => _PanelFilterChip(
+                              label: opt[1],
+                              selected: _checkout == opt[0],
+                              accent: const Color(0xFF0D9488),
+                              onTap: () => setState(() {
+                                _checkout = _checkout == opt[0] ? null : opt[0];
+                              }),
+                            ))
+                        .toList(),
+                  ),
+                  const SizedBox(height: 24),
+                ],
+              ),
+            ),
+          ),
+          // Apply button
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+            child: FilledButton(
+              onPressed: () {
+                widget.onApply(_floorId, _roomId, _sharingType, _checkout);
+                Navigator.pop(context);
+              },
+              style: FilledButton.styleFrom(
+                backgroundColor: PgColors.primary,
+                minimumSize: const Size(double.infinity, 48),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                textStyle: const TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w700),
+              ),
+              child: const Text('Apply Filters'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FilterSectionLabel extends StatelessWidget {
+  final String label;
+  const _FilterSectionLabel({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(label,
+        style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 14,
+            color: Color(0xFF111827)));
+  }
+}
+
+class _PanelFilterChip extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
   final Color? accent;
-  const _FilterChip({
+  const _PanelFilterChip({
     required this.label,
     required this.selected,
     required this.onTap,
@@ -702,26 +1244,23 @@ class _FilterChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = accent ?? PgColors.primary;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-          decoration: BoxDecoration(
-            color: selected ? color : Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-                color: selected ? color : Colors.grey.shade300, width: 1.5),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: selected ? Colors.white : Colors.grey.shade700,
-            ),
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? color : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+              color: selected ? color : Colors.grey.shade300, width: 1.5),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: selected ? Colors.white : Colors.grey.shade700,
           ),
         ),
       ),
@@ -729,11 +1268,13 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-class _VacantBedRow extends StatelessWidget {
+// ─── Vacant Bed Card ──────────────────────────────────────────────────────────
+
+class _VacantBedCard extends StatelessWidget {
   final Map<String, dynamic> bed;
   final int propertyId;
   final VoidCallback onAssigned;
-  const _VacantBedRow(
+  const _VacantBedCard(
       {required this.bed, required this.propertyId, required this.onAssigned});
 
   @override
@@ -744,112 +1285,226 @@ class _VacantBedRow extends StatelessWidget {
     final floorName = '${bed['floor_name'] ?? ''}';
     final sharingType = bed['sharing_type']?.toString();
     final rent = bed['monthly_rent'];
+    final expectedCheckout = bed['expected_checkout_date'];
+    final isUpcoming = '${bed['bed_status']}' == 'UPCOMING';
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    // Visual tokens per status
+    final iconBg = isUpcoming ? const Color(0xFFFFF7ED) : const Color(0xFFDCFCE7);
+    final iconColor = isUpcoming ? const Color(0xFFEA580C) : const Color(0xFF16A34A);
+    final badgeBg = isUpcoming ? const Color(0xFFFFF7ED) : const Color(0xFFF0FDF4);
+    final badgeBorder = isUpcoming ? const Color(0xFFFED7AA) : const Color(0xFFBBF7D0);
+    final badgeText = isUpcoming ? const Color(0xFFEA580C) : const Color(0xFF16A34A);
+    final badgeLabel = isUpcoming ? 'Checking Out' : 'Available';
+    final borderColor = isUpcoming ? const Color(0xFFFED7AA) : const Color(0xFFE5E7EB);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: .04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-        child: Row(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: const Color(0xFFDCFCE7),
-                borderRadius: BorderRadius.circular(10),
+            // ── Top row: icon · name · status badge ──────────────────
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: iconBg,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  isUpcoming ? Icons.bed : Icons.bed_outlined,
+                  color: iconColor,
+                  size: 24,
+                ),
               ),
-              child: const Icon(Icons.bed_outlined,
-                  color: Color(0xFF16A34A), size: 22),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(bedName,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700, fontSize: 14)),
-                  const SizedBox(height: 2),
-                  Text('$roomName · $floorName',
-                      style: TextStyle(
-                          color: Colors.grey.shade600, fontSize: 12)),
-                  if (sharingType != null || rent != null) ...[
-                    const SizedBox(height: 5),
-                    Row(
-                      children: [
-                        if (sharingType != null)
-                          _VacantBedChip(
-                              label: '$sharingType-Sharing',
-                              color: PgColors.primary),
-                        if (rent != null) ...[
-                          if (sharingType != null) const SizedBox(width: 6),
-                          _VacantBedChip(
-                              label: '₹$rent/mo',
-                              color: PgColors.success),
-                        ],
-                      ],
-                    ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(bedName,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                            color: Color(0xFF111827))),
+                    const SizedBox(height: 3),
+                    Row(children: [
+                      Icon(Icons.location_on_outlined,
+                          size: 12, color: Colors.grey.shade500),
+                      const SizedBox(width: 3),
+                      Expanded(
+                        child: Text('$roomName  ·  $floorName',
+                            style: TextStyle(
+                                color: Colors.grey.shade500, fontSize: 12),
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                    ]),
                   ],
-                ],
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-            FilledButton(
-              onPressed: () async {
-                final done = await showModalBottomSheet<bool>(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.white,
-                  shape: const RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.vertical(top: Radius.circular(20))),
-                  builder: (_) => AssignBedSheet(
-                    bedId: bedId,
-                    bedName: bedName,
-                    propertyId: propertyId,
-                    sharingType: sharingType,
-                  ),
-                );
-                if (done == true) onAssigned();
-              },
-              style: FilledButton.styleFrom(
-                backgroundColor: PgColors.primary,
-                foregroundColor: Colors.white,
+              const SizedBox(width: 8),
+              Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                textStyle: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w600),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-                minimumSize: const Size(0, 36),
+                    const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: badgeBg,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: badgeBorder),
+                ),
+                child: Text(badgeLabel,
+                    style: TextStyle(
+                        color: badgeText,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600)),
               ),
-              child: const Text('Assign'),
-            ),
+            ]),
+            // ── Expected checkout banner (UPCOMING only) ─────────────
+            if (isUpcoming && expectedCheckout != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF7ED),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFED7AA)),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.schedule_outlined,
+                      size: 14, color: Color(0xFFEA580C)),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text('Checking out on  $expectedCheckout',
+                        style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF9A3412),
+                            fontWeight: FontWeight.w600)),
+                  ),
+                ]),
+              ),
+            ],
+            // ── Divider ──────────────────────────────────────────────
+            const SizedBox(height: 10),
+            Container(height: 1, color: const Color(0xFFF3F4F6)),
+            const SizedBox(height: 10),
+            // ── Meta chips + action button ───────────────────────────
+            Row(children: [
+              if (sharingType != null) ...[
+                _BedMetaChip(
+                  icon: Icons.people_outline,
+                  label: '$sharingType-Sharing',
+                  color: PgColors.primary,
+                ),
+                const SizedBox(width: 7),
+              ],
+              if (rent != null)
+                _BedMetaChip(
+                  icon: Icons.currency_rupee,
+                  label: '${_fmtRent(rent)}/mo',
+                  color: const Color(0xFF0D9488),
+                ),
+              const Spacer(),
+              if (isUpcoming)
+                // Upcoming bed is still occupied — show informational label
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF7ED),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFFED7AA)),
+                  ),
+                  child: const Text('Soon',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFFEA580C),
+                          fontWeight: FontWeight.w600)),
+                )
+              else
+                FilledButton.icon(
+                  onPressed: () async {
+                    final done = await showModalBottomSheet<bool>(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.white,
+                      shape: const RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.vertical(top: Radius.circular(20))),
+                      builder: (_) => AssignBedSheet(
+                        bedId: bedId,
+                        bedName: bedName,
+                        propertyId: propertyId,
+                        sharingType: sharingType,
+                      ),
+                    );
+                    if (done == true) onAssigned();
+                  },
+                  icon: const Icon(Icons.person_add_outlined, size: 15),
+                  label: const Text('Assign'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: PgColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    textStyle: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    minimumSize: const Size(0, 36),
+                  ),
+                ),
+            ]),
           ],
         ),
       ),
     );
   }
+
+  String _fmtRent(dynamic value) {
+    final n = double.tryParse('$value');
+    if (n == null) return '$value';
+    if (n >= 1000) {
+      final s = (n / 1000).toStringAsFixed(1);
+      return '₹${s.endsWith('.0') ? s.replaceAll('.0', '') : s}K';
+    }
+    return '₹${n.toStringAsFixed(0)}';
+  }
 }
 
-class _VacantBedChip extends StatelessWidget {
+class _BedMetaChip extends StatelessWidget {
+  final IconData icon;
   final String label;
   final Color color;
-  const _VacantBedChip({required this.label, required this.color});
+  const _BedMetaChip(
+      {required this.icon, required this.label, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      padding: const EdgeInsets.fromLTRB(8, 4, 10, 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(6),
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
       ),
-      child: Text(label,
-          style: TextStyle(
-              fontSize: 11, color: color, fontWeight: FontWeight.w600)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 13, color: color),
+        const SizedBox(width: 4),
+        Text(label,
+            style: TextStyle(
+                fontSize: 12, color: color, fontWeight: FontWeight.w600)),
+      ]),
     );
   }
 }
@@ -998,73 +1653,164 @@ class _PropertyHeroCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = '${property['facilityName'] ?? 'Property'}';
+    final desc = '${property['description'] ?? ''}';
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Container(
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [Color(0xFF6C5CE7), Color(0xFF4A3FA6)],
+            colors: [Color(0xFF7C6FF7), Color(0xFF4A3FA6)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            // Building image placeholder
-            Container(
-              width: 90,
-              height: 90,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: .2),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white.withValues(alpha: .3), width: 1.5),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.apartment, color: Colors.white, size: 36),
-                  const SizedBox(height: 4),
-                  Text(
-                    name.isNotEmpty ? name[0].toUpperCase() : 'P',
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name,
-                      style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 10),
-                  const Text('Total Rooms',
-                      style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  const SizedBox(height: 4),
-                  FutureBuilder<Map<String, dynamic>>(
-                    future: statsFuture,
-                    builder: (context, snap) {
-                      final rooms = snap.data?['totalRooms'] ?? '—';
-                      return Text('$rooms',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 32));
-                    },
-                  ),
-                ],
-              ),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF6C5CE7).withValues(alpha: .35),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
             ),
           ],
         ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Stack(
+            children: [
+              // Background decoration — faded building
+              Positioned(
+                right: -10,
+                bottom: -10,
+                child: Opacity(
+                  opacity: 0.12,
+                  child: const Icon(Icons.location_city,
+                      color: Colors.white, size: 160),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── Top: icon + name + location ──────────────────
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 64,
+                          height: 64,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: .2),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                                color: Colors.white.withValues(alpha: .35),
+                                width: 1.5),
+                          ),
+                          child: const Icon(Icons.apartment,
+                              color: Colors.white, size: 32),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(name,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 24,
+                                      letterSpacing: 0.3),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis),
+                              if (desc.isNotEmpty) ...[
+                                const SizedBox(height: 5),
+                                Row(children: [
+                                  const Icon(Icons.location_on_outlined,
+                                      color: Colors.white70, size: 13),
+                                  const SizedBox(width: 3),
+                                  Expanded(
+                                    child: Text(desc,
+                                        style: const TextStyle(
+                                            color: Colors.white70, fontSize: 12),
+                                        overflow: TextOverflow.ellipsis),
+                                  ),
+                                ]),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
+                    // ── Stats row ────────────────────────────────────
+                    FutureBuilder<Map<String, dynamic>>(
+                      future: statsFuture,
+                      builder: (context, snap) {
+                        final s = snap.data ?? {};
+                        return Row(
+                          children: [
+                            _HeroStat(
+                                value: '${s['totalFloors'] ?? '—'}',
+                                label: 'Floors'),
+                            _HeroStatDivider(),
+                            _HeroStat(
+                                value: '${s['totalRooms'] ?? '—'}',
+                                label: 'Rooms'),
+                            _HeroStatDivider(),
+                            _HeroStat(
+                                value: '${s['totalBeds'] ?? '—'}',
+                                label: 'Beds'),
+                            _HeroStatDivider(),
+                            _HeroStat(
+                                value: '${s['occupiedBeds'] ?? '—'}',
+                                label: 'Occupied Beds'),
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
+    );
+  }
+}
+
+class _HeroStat extends StatelessWidget {
+  final String value;
+  final String label;
+  const _HeroStat({required this.value, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 22)),
+          const SizedBox(height: 4),
+          Text(label,
+              style: const TextStyle(color: Colors.white70, fontSize: 10),
+              textAlign: TextAlign.center),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroStatDivider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 1,
+      height: 38,
+      margin: const EdgeInsets.symmetric(horizontal: 2),
+      color: Colors.white.withValues(alpha: .3),
     );
   }
 }
@@ -1149,52 +1895,6 @@ class _StatCard extends StatelessWidget {
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Summary Row ──────────────────────────────────────────────────────────────
-
-class _SummaryRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final VoidCallback? onTap;
-  const _SummaryRow(
-      {required this.icon, required this.label, required this.value, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                  color: PgColors.lavender, borderRadius: BorderRadius.circular(8)),
-              child: Icon(icon, size: 16, color: PgColors.primary),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Text(label,
-                  style: const TextStyle(fontSize: 14, color: Color(0xFF374151))),
-            ),
-            Text(value,
-                style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF1A1A2E))),
-            if (onTap != null) ...[
-              const SizedBox(width: 6),
-              const Icon(Icons.chevron_right, size: 18, color: Colors.grey),
-            ],
-          ],
         ),
       ),
     );
@@ -1955,7 +2655,7 @@ class _PropertyPaymentsTab extends StatelessWidget {
   const _PropertyPaymentsTab({required this.propertyId});
 
   @override
-  Widget build(BuildContext context) => const BillingScreen(embedded: true);
+  Widget build(BuildContext context) => BillingScreen(embedded: true, propertyId: propertyId);
 }
 
 // ─── Reports Tab ──────────────────────────────────────────────────────────────
