@@ -102,7 +102,7 @@ public class FacilityController {
                 "JOIN facility_party fp ON fp.facility_id=bed.facility_id AND fp.role_type_id='OCCUPANT' AND fp.thru_date IS NULL " +
                 "WHERE fgm.parent_facility_id=? AND bed.facility_type_id='BED' AND bed.organization_id=? " +
                 "AND fp.expected_checkout_date IS NOT NULL AND fp.expected_checkout_date>=CURDATE() " +
-                "ORDER BY bed_status,floor_number,room_number,bed_id",
+                "ORDER BY bed_status,expected_checkout_date ASC,floor_number,room_number,bed_id",
                 propertyId, org, propertyId, org);
         return ApiResponse.ok(beds);
     }

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
@@ -6,13 +6,15 @@ import '../app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/date_utils.dart';
 import '../widgets/async_action_button.dart';
+import '../widgets/error_retry_view.dart';
+import 'checkout_sheet.dart' show CheckoutSheet;
 import 'tenant_screen.dart' show AddTenantScreen;
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-String _rupees(dynamic v) => v != null ? '₹$v' : '—';
+String _rupees(dynamic v) => v != null ? 'â‚¹$v' : 'â€”';
 
-// ─── Room Screen (facility tree: property → floor → room → bed) ───────────
+// â”€â”€â”€ Room Screen (facility tree: property â†’ floor â†’ room â†’ bed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class RoomScreen extends StatefulWidget {
   const RoomScreen({super.key});
@@ -72,7 +74,7 @@ class _RoomScreenState extends State<RoomScreen> {
             TextField(
               controller: _search,
               decoration: const InputDecoration(
-                hintText: 'Search properties, rooms…',
+                hintText: 'Search properties, roomsâ€¦',
                 prefixIcon: Icon(Icons.search),
                 contentPadding:
                     EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -135,7 +137,7 @@ class _RoomScreenState extends State<RoomScreen> {
   }
 }
 
-// ─── Property Node ────────────────────────────────────────────────────────
+// â”€â”€â”€ Property Node â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _PropertyNode extends StatefulWidget {
   const _PropertyNode({required this.property, required this.query});
@@ -179,7 +181,7 @@ class _PropertyNodeState extends State<_PropertyNode> {
             subtitle: Text([
               if (code.isNotEmpty) code,
               if (capacity != null) '$capacity beds',
-            ].join(' · ')),
+            ].join(' Â· ')),
             trailing: Icon(
                 _expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
             onTap: _expand,
@@ -196,7 +198,7 @@ class _PropertyNodeState extends State<_PropertyNode> {
   }
 }
 
-// ─── Floors Section ───────────────────────────────────────────────────────
+// â”€â”€â”€ Floors Section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _FloorsSection extends StatelessWidget {
   const _FloorsSection({
@@ -241,7 +243,7 @@ class _FloorsSection extends StatelessWidget {
   }
 }
 
-// ─── Floor Node ───────────────────────────────────────────────────────────
+// â”€â”€â”€ Floor Node â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _FloorNode extends StatefulWidget {
   const _FloorNode({required this.floor, required this.query});
@@ -331,7 +333,7 @@ class _FloorNodeState extends State<_FloorNode> {
   }
 }
 
-// ─── Rooms Section ────────────────────────────────────────────────────────
+// â”€â”€â”€ Rooms Section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _RoomsSection extends StatelessWidget {
   const _RoomsSection({
@@ -380,7 +382,7 @@ class _RoomsSection extends StatelessWidget {
   }
 }
 
-// ─── Room Tile ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Room Tile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _RoomTile extends StatelessWidget {
   const _RoomTile({required this.room});
@@ -414,7 +416,7 @@ class _RoomTile extends StatelessWidget {
                       if (number != null) 'No. $number',
                       if (sharing != null) '$sharing-Sharing',
                       if (capacity != null) '$capacity beds',
-                    ].join(' · '),
+                    ].join(' Â· '),
                     style: TextStyle(color: Colors.grey[600], fontSize: 12),
                   ),
                 ],
@@ -433,7 +435,7 @@ class _RoomTile extends StatelessWidget {
   }
 }
 
-// ─── Room Detail Screen ───────────────────────────────────────────────────
+// â”€â”€â”€ Room Detail Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class RoomDetailScreen extends StatefulWidget {
   const RoomDetailScreen({required this.room, super.key});
@@ -617,41 +619,21 @@ class _BedTile extends StatelessWidget {
   final VoidCallback onAssigned;
 
   Future<void> _confirmCheckout(BuildContext context) async {
-    final name = '${bed['facilityName'] ?? 'Bed'}';
-    final tenant = '${bed['occupantName'] ?? 'tenant'}';
     final partyId = bed['occupantPartyId'];
-    final confirmed = await showDialog<bool>(
+    final tenant = '${bed['occupantName'] ?? 'Tenant'}';
+    if (partyId == null) return;
+    await showModalBottomSheet<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Checkout Tenant',
-            style: TextStyle(fontWeight: FontWeight.w800)),
-        content: Text('Check out $tenant from $name?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: PgColors.primary)),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: PgColors.danger),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Checkout'),
-          ),
-        ],
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => CheckoutSheet(
+        partyId: (partyId as num).toInt(),
+        tenantName: tenant,
+        onCheckedOut: onAssigned,
       ),
     );
-    if (confirmed != true || partyId == null) return;
-    try {
-      await context.read<AppState>().apiClient.post('/occupancy/checkout', {
-        'partyId': partyId,
-      });
-      onAssigned();
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', ''))));
-      }
-    }
   }
 
   @override
@@ -731,7 +713,7 @@ class _BedTile extends StatelessWidget {
   }
 }
 
-// ─── Add Room Sheet ───────────────────────────────────────────────────────
+// â”€â”€â”€ Add Room Sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _AddRoomSheet extends StatefulWidget {
   const _AddRoomSheet({this.floorId});
@@ -796,7 +778,7 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
               ]),
               const SizedBox(height: 16),
 
-              // Cascading Property → Floor when opened without a pre-set floorId
+              // Cascading Property â†’ Floor when opened without a pre-set floorId
               if (widget.floorId == null) ...[
                 FutureBuilder<Map<String, dynamic>>(
                   future: _propFuture,
@@ -901,7 +883,7 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
                     child: TextFormField(
                       controller: _rent,
                       decoration: const InputDecoration(
-                          labelText: 'Monthly Rent (₹)',
+                          labelText: 'Monthly Rent (â‚¹)',
                           prefixIcon: Icon(Icons.currency_rupee)),
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
@@ -914,7 +896,7 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
                   Expanded(
                     child: TextFormField(
                       controller: _deposit,
-                      decoration: const InputDecoration(labelText: 'Deposit (₹)'),
+                      decoration: const InputDecoration(labelText: 'Deposit (â‚¹)'),
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [
@@ -934,7 +916,7 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 validator: (v) {
                   final n = int.tryParse(v ?? '');
-                  return n == null || n < 1 ? 'Enter ≥ 1' : null;
+                  return n == null || n < 1 ? 'Enter â‰¥ 1' : null;
                 },
               ),
               const SizedBox(height: 20),
@@ -980,7 +962,7 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
   }
 }
 
-// ─── Assign Tenant Sheet ──────────────────────────────────────────────────
+// â”€â”€â”€ Assign Tenant Sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _AssignTenantSheet extends StatefulWidget {
   const _AssignTenantSheet({required this.room});
@@ -1140,7 +1122,7 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
                   child: TextFormField(
                     controller: _rent,
                     decoration: const InputDecoration(
-                        labelText: 'Monthly Rent (₹)',
+                        labelText: 'Monthly Rent (â‚¹)',
                         prefixIcon: Icon(Icons.currency_rupee)),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
@@ -1150,7 +1132,7 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
                 Expanded(
                   child: TextFormField(
                     controller: _deposit,
-                    decoration: const InputDecoration(labelText: 'Deposit (₹)'),
+                    decoration: const InputDecoration(labelText: 'Deposit (â‚¹)'),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
                   ),
@@ -1191,7 +1173,7 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
   }
 }
 
-// ─── Assign Bed Sheet (public — used from workspace) ─────────────────────
+// â”€â”€â”€ Assign Bed Sheet (public â€” used from workspace) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class AssignBedSheet extends StatefulWidget {
   const AssignBedSheet({
@@ -1293,7 +1275,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ── Header ──────────────────────────────────────────────
+            // â”€â”€ Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             Row(children: [
               const Text('Assign Tenant',
                   style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
@@ -1307,7 +1289,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                 style: const TextStyle(
                     color: PgColors.primary, fontWeight: FontWeight.w600)),
             const SizedBox(height: 16),
-            // ── Select Tenant label + New Tenant button ──────────────
+            // â”€â”€ Select Tenant label + New Tenant button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             Row(
               children: [
                 const Text('Select Tenant',
@@ -1341,7 +1323,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
               ],
             ),
             const SizedBox(height: 10),
-            // ── Tenant list section ──────────────────────────────────
+            // â”€â”€ Tenant list section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             FutureBuilder<Map<String, dynamic>>(
               future: _tenantFuture,
               builder: (context, snapshot) {
@@ -1388,7 +1370,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                     TextField(
                       controller: _search,
                       decoration: InputDecoration(
-                        hintText: 'Search by name or phone…',
+                        hintText: 'Search by name or phoneâ€¦',
                         hintStyle: TextStyle(
                             color: Colors.grey.shade400, fontSize: 13),
                         prefixIcon: Icon(Icons.search,
@@ -1570,7 +1552,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
             TextFormField(
               controller: _checkoutDate,
               decoration: const InputDecoration(
-                  labelText: 'Expected Checkout Date (DD-MM-YYYY) — Optional',
+                  labelText: 'Expected Checkout Date (DD-MM-YYYY) â€” Optional',
                   prefixIcon: Icon(Icons.event_available_outlined),
                   helperText: 'Leave blank for open-ended stay'),
               keyboardType: TextInputType.number,
@@ -1583,10 +1565,10 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                   child: TextFormField(
                     controller: _rent,
                     decoration: InputDecoration(
-                      labelText: 'Monthly Rent (₹)',
+                      labelText: 'Monthly Rent (â‚¹)',
                       prefixIcon: const Icon(Icons.currency_rupee),
                       helperText: _standardRent != null
-                          ? 'Standard: ₹${_standardRent!.toStringAsFixed(0)}/mo'
+                          ? 'Standard: â‚¹${_standardRent!.toStringAsFixed(0)}/mo'
                           : null,
                       helperStyle: const TextStyle(color: Color(0xFF2563EB), fontSize: 11),
                     ),
@@ -1602,7 +1584,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                   child: TextFormField(
                     controller: _deposit,
                     decoration:
-                        const InputDecoration(labelText: 'Deposit (₹)'),
+                        const InputDecoration(labelText: 'Deposit (â‚¹)'),
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [
@@ -1650,7 +1632,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
   }
 }
 
-// ─── Shared Widgets ───────────────────────────────────────────────────────
+// â”€â”€â”€ Shared Widgets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _RoomBadge extends StatelessWidget {
   const _RoomBadge({required this.label, required this.icon});
@@ -1679,21 +1661,8 @@ class _RoomErrorState extends StatelessWidget {
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.cloud_off, size: 48, color: PgColors.danger),
-          const SizedBox(height: 12),
-          const Text('Could not load rooms',
-              style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 12),
-          OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      ErrorRetryView(error: error ?? Exception('Unknown error'), onRetry: onRetry);
 }
 
 class _RoomEmptyState extends StatelessWidget {
@@ -1720,3 +1689,5 @@ class _RoomEmptyState extends StatelessWidget {
     );
   }
 }
+
+// CheckoutSheet lives in checkout_sheet.dart (imported above) to avoid circular imports.

@@ -440,7 +440,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _SettingTile(
                 icon: Icons.notifications_outlined,
                 title: 'Notification Settings',
-                onTap: () => context.go('/notifications/settings')),
+                onTap: () => context.push('/notifications/settings')),
             FutureBuilder<Map<String, dynamic>>(
               future: _prefFuture,
               builder: (context, snapshot) => _SettingTile(
@@ -528,13 +528,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       elevation: 0,
       leading: IconButton(
         icon: const Icon(Icons.arrow_back),
-        onPressed: () => context.go('/settings'),
+        onPressed: () => context.canPop() ? context.pop() : context.go('/properties'),
       ),
       title: Text(
         filter == 'ARCHIVED' ? 'Archived Notifications' : 'Notifications',
         style: const TextStyle(fontWeight: FontWeight.w700),
       ),
-      actions: [IconButton(tooltip: 'Notification settings', onPressed: () => context.go('/notifications/settings'), icon: const Icon(Icons.settings_outlined))],
+      actions: const [],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),
         child: Container(height: 1, color: const Color(0xFFE5E7EB)),
@@ -598,7 +598,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
       elevation: 0,
       leading: IconButton(
         icon: const Icon(Icons.arrow_back),
-        onPressed: () => context.go('/settings'),
+        onPressed: () => context.canPop() ? context.pop() : context.go('/notifications'),
       ),
       title: const Text('Notification Settings', style: TextStyle(fontWeight: FontWeight.w700)),
       bottom: PreferredSize(

@@ -283,6 +283,66 @@ public class BillingController {
         return ApiResponse.ok(Map.of("paymentId", paymentId, "refundedAmount", refunded.add(request.amount()), "method", "CASH"));
     }
 
+    @PostMapping("/invoices/{invoiceId}/mark-paid")
+    @Transactional
+    ApiResponse<Map<String, Object>> markPaid(@PathVariable Long invoiceId) {
+        Long org = currentUser.organizationId();
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT i.invoice_id,i.billing_account_id,i.total_amount,i.paid_amount," +
+                "(i.total_amount-i.paid_amount) balance,ba.party_id " +
+                "FROM invoice i JOIN billing_account ba ON ba.billing_account_id=i.billing_account_id " +
+                "WHERE i.invoice_id=? AND i.organization_id=? AND i.status IN ('PENDING','PARTIAL','OVERDUE') FOR UPDATE",
+                invoiceId, org);
+        if (rows.isEmpty()) throw new NotFoundException("Invoice not found or already settled");
+        Map<String, Object> inv = rows.getFirst();
+        BigDecimal balance = decimal(inv.get("balance"));
+        Long partyId = ((Number) inv.get("party_id")).longValue();
+        if (balance.compareTo(BigDecimal.ZERO) > 0) {
+            String ikey = "checkout-markpaid-" + invoiceId + "-" + org;
+            try {
+                jdbc.update("INSERT INTO payment(organization_id,party_id,amount,payment_mode,payment_date," +
+                                "idempotency_key,status,created_at,updated_at) VALUES(?,?,?,'CASH',CURRENT_DATE,?,'RECEIVED',NOW(),NOW())",
+                        org, partyId, balance, ikey);
+                Long payId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+                jdbc.update("INSERT INTO payment_allocation(organization_id,payment_id,invoice_id,amount,allocated_at) " +
+                        "VALUES(?,?,?,?,NOW())", org, payId, invoiceId, balance);
+            } catch (DuplicateKeyException ignored) {
+            }
+        }
+        jdbc.update("UPDATE invoice SET paid_amount=total_amount,status='PAID',updated_at=NOW(),version=version+1 " +
+                "WHERE invoice_id=? AND organization_id=?", invoiceId, org);
+        return ApiResponse.ok("Invoice marked as paid", Map.of("invoiceId", invoiceId, "status", "PAID"));
+    }
+
+    @PostMapping("/invoices/{invoiceId}/write-off")
+    @Transactional
+    ApiResponse<Void> writeOff(@PathVariable Long invoiceId) {
+        Long org = currentUser.organizationId();
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT i.invoice_id,(i.total_amount-i.paid_amount) balance,ba.party_id " +
+                "FROM invoice i JOIN billing_account ba ON ba.billing_account_id=i.billing_account_id " +
+                "WHERE i.invoice_id=? AND i.organization_id=? AND i.status IN ('PENDING','PARTIAL','OVERDUE') FOR UPDATE",
+                invoiceId, org);
+        if (rows.isEmpty()) throw new NotFoundException("Invoice not found or already settled");
+        BigDecimal balance = decimal(rows.getFirst().get("balance"));
+        Long partyId = ((Number) rows.getFirst().get("party_id")).longValue();
+        if (balance.compareTo(BigDecimal.ZERO) > 0) {
+            String ikey = "checkout-writeoff-" + invoiceId + "-" + org;
+            try {
+                jdbc.update("INSERT INTO payment(organization_id,party_id,amount,payment_mode,payment_date," +
+                                "idempotency_key,status,created_at,updated_at) VALUES(?,?,?,'WRITE_OFF',CURRENT_DATE,?,'WRITTEN_OFF',NOW(),NOW())",
+                        org, partyId, balance, ikey);
+                Long payId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+                jdbc.update("INSERT INTO payment_allocation(organization_id,payment_id,invoice_id,amount,allocated_at) " +
+                        "VALUES(?,?,?,?,NOW())", org, payId, invoiceId, balance);
+            } catch (DuplicateKeyException ignored) {
+            }
+        }
+        jdbc.update("UPDATE invoice SET status='WRITTEN_OFF',updated_at=NOW(),version=version+1 " +
+                "WHERE invoice_id=? AND organization_id=?", invoiceId, org);
+        return ApiResponse.ok("Invoice written off", null);
+    }
+
     private BigDecimal amount(String sql, Object... args) {
         BigDecimal value = jdbc.queryForObject(sql, BigDecimal.class, args);
         return value == null ? BigDecimal.ZERO : value;

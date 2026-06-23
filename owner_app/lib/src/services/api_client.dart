@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+import '../utils/app_exception.dart';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
@@ -88,6 +91,9 @@ class ApiClient {
       print(s);
       print('══════════════════════════════');
 
+      if (e is SocketException || e is HandshakeException || e is OSError) {
+        throw const NetworkException();
+      }
       rethrow;
     }
   }
@@ -126,6 +132,14 @@ class ApiClient {
     }
 
     final body = jsonDecode(response.body);
+
+    if (response.statusCode >= 500) {
+      throw ServerException(
+        body is Map
+            ? body['message'] ?? 'Server error'
+            : 'Server error (${response.statusCode})',
+      );
+    }
 
     if (response.statusCode >= 400) {
 

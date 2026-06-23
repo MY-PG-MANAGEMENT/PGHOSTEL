@@ -6,7 +6,9 @@ import '../app_state.dart';
 import '../theme/app_theme.dart';
 import 'tenant_screen.dart';
 import 'billing_screen.dart';
+import 'checkout_sheet.dart' show CheckoutSheet;
 import 'room_screen.dart' show AssignBedSheet;
+import '../widgets/error_retry_view.dart';
 
 class PropertyWorkspaceScreen extends StatefulWidget {
   final Map<String, dynamic> property;
@@ -23,9 +25,22 @@ class _PropertyWorkspaceScreenState extends State<PropertyWorkspaceScreen> {
   String get _propertyName => '${widget.property['facilityName'] ?? 'Property'}';
   String get _propertyDesc => '${widget.property['description'] ?? ''}';
 
+  void _handleBack() {
+    if (_tab != 0) {
+      setState(() => _tab = 0);
+    } else {
+      Navigator.pop(context);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _handleBack();
+      },
+      child: Scaffold(
       backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -35,7 +50,7 @@ class _PropertyWorkspaceScreenState extends State<PropertyWorkspaceScreen> {
         titleSpacing: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-          onPressed: () => Navigator.pop(context),
+          onPressed: _handleBack,
         ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -207,7 +222,7 @@ class _PropertyWorkspaceScreenState extends State<PropertyWorkspaceScreen> {
           ),
         ],
       ),
-    );
+    ));
   }
 }
 
@@ -680,21 +695,9 @@ class _VacantBedsSheetState extends State<_VacantBedsSheet>
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (snapshot.hasError) {
-                  return Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.cloud_off, size: 40, color: Colors.grey),
-                        const SizedBox(height: 8),
-                        Text('${snapshot.error}',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(color: Colors.grey)),
-                        TextButton(
-                            onPressed: () => setState(_load),
-                            child: const Text('Retry')),
-                      ],
-                    ),
-                  );
+                  return _WsError(
+                      error: snapshot.error,
+                      onRetry: () => setState(_load));
                 }
 
                 final beds = snapshot.data ?? [];
@@ -2528,41 +2531,21 @@ class _BedTile extends StatelessWidget {
                   );
                   if (done == true) onChanged();
                 } else if (v == 'checkout') {
-                  final confirm = await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Checkout Tenant'),
-                      content: Text(
-                          'Check out ${occupantName ?? 'this tenant'} from $name?'),
-                      actions: [
-                        TextButton(
-                            onPressed: () => Navigator.pop(ctx, false),
-                            child: const Text('Cancel')),
-                        FilledButton(
-                            style: FilledButton.styleFrom(
-                                backgroundColor: PgColors.danger),
-                            onPressed: () => Navigator.pop(ctx, true),
-                            child: const Text('Checkout')),
-                      ],
-                    ),
-                  );
-                  if (confirm == true && occupantPartyId != null) {
-                    try {
-                      await context
-                          .read<AppState>()
-                          .apiClient
-                          .post('/occupancy/checkout', {
-                        'partyId': occupantPartyId,
-                      });
-                      onChanged();
-                    } catch (e) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                            content: Text(e
-                                .toString()
-                                .replaceFirst('Exception: ', ''))));
-                      }
-                    }
+                  if (occupantPartyId != null) {
+                    await showModalBottomSheet<bool>(
+                      context: context,
+                      isScrollControlled: true,
+                      useSafeArea: true,
+                      backgroundColor: Colors.white,
+                      shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.vertical(
+                              top: Radius.circular(20))),
+                      builder: (_) => CheckoutSheet(
+                        partyId: occupantPartyId,
+                        tenantName: occupantName ?? 'Tenant',
+                        onCheckedOut: onChanged,
+                      ),
+                    );
                   }
                 } else if (v == 'edit') {
                   final saved = await showModalBottomSheet<bool>(
@@ -3504,24 +3487,8 @@ class _WsError extends StatelessWidget {
   const _WsError({required this.error, required this.onRetry});
 
   @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.cloud_off, size: 48, color: PgColors.danger),
-              const SizedBox(height: 12),
-              const Text('Could not load data',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 6),
-              Text('$error', textAlign: TextAlign.center),
-              const SizedBox(height: 12),
-              OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
-            ],
-          ),
-        ),
-      );
+  Widget build(BuildContext context) =>
+      ErrorRetryView(error: error ?? Exception('Unknown error'), onRetry: onRetry);
 }
 
 // ─── Sharing Prices Screen ────────────────────────────────────────────────────

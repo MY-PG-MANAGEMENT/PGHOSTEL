@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/async_action_button.dart';
+import '../widgets/error_retry_view.dart';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -61,6 +62,8 @@ Color _modeColor(String? mode) {
       return const Color(0xFF2563EB);
     case 'CHEQUE':
       return PgColors.warning;
+    case 'WRITE_OFF':
+      return const Color(0xFFF59E0B); // amber/yellow
     default:
       return PgColors.success; // CASH
   }
@@ -74,6 +77,8 @@ IconData _modeIcon(String? mode) {
       return Icons.account_balance_outlined;
     case 'CHEQUE':
       return Icons.description_outlined;
+    case 'WRITE_OFF':
+      return Icons.remove_circle_outline;
     default:
       return Icons.payments_outlined; // CASH
   }
@@ -852,7 +857,7 @@ class _PaymentCard extends StatelessWidget {
             ),
             Text(
               _rupees(amount),
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: PgColors.success),
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: color),
             ),
           ],
         ),
@@ -871,6 +876,7 @@ class _ModeBadge extends StatelessWidget {
       'BANK_TRANSFER' => 'Bank',
       'UPI' => 'UPI',
       'CHEQUE' => 'Cheque',
+      'WRITE_OFF' => 'Write Off',
       _ => 'Cash',
     };
     final color = _modeColor(mode);
@@ -1583,20 +1589,8 @@ class _BillingErrorState extends StatelessWidget {
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.cloud_off, size: 48, color: PgColors.danger),
-          const SizedBox(height: 12),
-          const Text('Could not load data', style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 12),
-          OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      ErrorRetryView(error: error ?? Exception('Unknown error'), onRetry: onRetry);
 }
 
 class _BillingEmptyState extends StatelessWidget {
