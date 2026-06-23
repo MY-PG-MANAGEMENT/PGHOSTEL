@@ -15,7 +15,6 @@ class AppShell extends StatelessWidget {
   static const destinations = <_Destination>[
     _Destination('Dashboard', '/dashboard', Icons.dashboard_outlined, Icons.dashboard),
     _Destination('Properties', '/properties', Icons.apartment_outlined, Icons.apartment),
-    _Destination('Rooms', '/rooms', Icons.bed_outlined, Icons.bed),
     _Destination('Tenants', '/tenants', Icons.people_outline, Icons.people),
     _Destination('Payments', '/billing', Icons.currency_rupee_outlined, Icons.currency_rupee),
     _Destination('Notifications', '/notifications', Icons.notifications_outlined, Icons.notifications),
@@ -42,7 +41,7 @@ class AppShell extends StatelessWidget {
             if (!wide) Builder(builder: (context) => IconButton(icon: const Icon(Icons.menu), onPressed: () => Scaffold.of(context).openDrawer())),
             Expanded(child: Text(title, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700))),
             ...actions,
-            IconButton(tooltip: 'Notifications', onPressed: () => context.go('/notifications'), icon: const Icon(Icons.notifications_none)),
+            IconButton(tooltip: 'Notifications', onPressed: () => context.push('/notifications'), icon: const Icon(Icons.notifications_none)),
           ]),
         ),
         const Divider(height: 1),

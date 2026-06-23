@@ -7,12 +7,8 @@ import 'src/screens/auth/login_screen.dart';
 import 'src/screens/auth/register_screen.dart';
 import 'src/screens/account_screens.dart';
 import 'src/screens/billing_screen.dart';
-import 'src/screens/facility_screen.dart';
 import 'src/screens/onboarding_screen.dart';
-import 'src/screens/occupancy_screen.dart';
 import 'src/screens/property_screen.dart';
-import 'src/screens/rent_screen.dart';
-import 'src/screens/room_screen.dart';
 import 'src/screens/splash_screen.dart';
 import 'src/screens/tenant_screen.dart';
 import 'src/screens/responsive_modules.dart';
@@ -52,13 +48,8 @@ class PgManagerOwnerApp extends StatelessWidget {
               GoRoute(path: '/dashboard/analytics', builder: (_, __) => const AnalyticsScreen()),
               GoRoute(path: '/onboarding', builder: (_, __) => const OnboardingScreen()),
               GoRoute(path: '/properties', builder: (_, __) => const PropertyScreen()),
-              GoRoute(path: '/properties/manage', builder: (_, __) => const FacilityScreen()),
-              GoRoute(path: '/facilities', redirect: (_, __) => '/properties'),
-              GoRoute(path: '/rooms', builder: (_, __) => const RoomScreen()),
               GoRoute(path: '/tenants', builder: (_, __) => const TenantScreen()),
               GoRoute(path: '/tenants/manage', redirect: (_, __) => '/tenants'),
-              GoRoute(path: '/occupancy', builder: (_, __) => const OccupancyScreen()),
-              GoRoute(path: '/rents', builder: (_, __) => const RentScreen()),
               GoRoute(path: '/billing', builder: (_, __) => const BillingScreen()),
               GoRoute(path: '/billing/manage', redirect: (_, __) => '/billing'),
               GoRoute(path: '/payments', redirect: (_, __) => '/billing'),

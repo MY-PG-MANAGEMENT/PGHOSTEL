@@ -6,7 +6,9 @@ import '../app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/date_utils.dart';
 import '../widgets/async_action_button.dart';
+import '../widgets/error_retry_view.dart';
 import 'billing_screen.dart' show InvoiceDetailSheet;
+import 'checkout_sheet.dart' show CheckoutSheet;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -375,7 +377,11 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
             child: TabBarView(
               controller: _tabs,
               children: [
-                _ProfileTab(tenant: _tenant, onCheckoutDateSet: _refreshTenant),
+                _ProfileTab(
+                  tenant: _tenant,
+                  onCheckoutDateSet: _refreshTenant,
+                  onCheckedOut: _refreshTenant,
+                ),
                 _TenantPaymentsTab(tenantId: (_tenant['tenantId'] as num).toInt()),
                 _EmergencyTab(tenant: _tenant),
                 _EmploymentTab(tenant: _tenant),
@@ -482,16 +488,38 @@ class _TenantHeader extends StatelessWidget {
 // ─── Profile Tab ──────────────────────────────────────────────────────────
 
 class _ProfileTab extends StatefulWidget {
-  const _ProfileTab({required this.tenant, required this.onCheckoutDateSet});
+  const _ProfileTab({
+    required this.tenant,
+    required this.onCheckoutDateSet,
+    required this.onCheckedOut,
+  });
 
   final Map<String, dynamic> tenant;
   final VoidCallback onCheckoutDateSet;
+  final VoidCallback onCheckedOut;
 
   @override
   State<_ProfileTab> createState() => _ProfileTabState();
 }
 
 class _ProfileTabState extends State<_ProfileTab> {
+  Future<void> _openCheckout() async {
+    final tenantId = widget.tenant['tenantId'];
+    final name = '${widget.tenant['fullName'] ?? 'Tenant'}';
+    await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => CheckoutSheet(
+        partyId: (tenantId as num).toInt(),
+        tenantName: name,
+        onCheckedOut: widget.onCheckedOut,
+      ),
+    );
+  }
+
   Future<void> _setCheckoutDate() async {
     final tenantId = widget.tenant['tenantId'];
     final existing = widget.tenant['expectedCheckoutDate'] as String?;
@@ -529,6 +557,18 @@ class _ProfileTabState extends State<_ProfileTab> {
               textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
             onPressed: _setCheckoutDate,
+          ),
+        if (hasAdmission) const SizedBox(height: 8),
+        if (hasAdmission)
+          OutlinedButton.icon(
+            icon: const Icon(Icons.logout_outlined, size: 16),
+            label: const Text('Checkout Tenant'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: PgColors.danger,
+              side: const BorderSide(color: PgColors.danger),
+              textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            onPressed: _openCheckout,
           ),
         if (hasAdmission) const SizedBox(height: 12),
         _InfoSection(title: 'Personal Details', items: [
@@ -898,21 +938,9 @@ class _TenantPaymentsTabState extends State<_TenantPaymentsTab> {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.cloud_off, size: 48, color: PgColors.danger),
-                  const SizedBox(height: 12),
-                  const Text('Could not load payments', style: TextStyle(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 12),
-                  OutlinedButton(onPressed: () => setState(_load), child: const Text('Try again')),
-                ],
-              ),
-            ),
-          );
+          return ErrorRetryView(
+              error: snapshot.error ?? Exception('Unknown error'),
+              onRetry: () => setState(_load));
         }
         final raw = (snapshot.data?['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
         // Sort newest invoice month first
@@ -1690,24 +1718,8 @@ class _TenantErrorState extends StatelessWidget {
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.cloud_off, size: 48, color: PgColors.danger),
-          const SizedBox(height: 12),
-          const Text('Could not load tenants',
-              style: TextStyle(fontWeight: FontWeight.w700)),
-          Text('$error',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          const SizedBox(height: 12),
-          OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      ErrorRetryView(error: error ?? Exception('Unknown error'), onRetry: onRetry);
 }
 
 class _TenantEmptyState extends StatelessWidget {

@@ -60,7 +60,7 @@ class _PgDashboardScreenState extends State<PgDashboardScreen> {
                     icon: const Icon(Icons.notifications_outlined, size: 24),
                     style: IconButton.styleFrom(
                         padding: EdgeInsets.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                    onPressed: () => context.go('/notifications'),
+                    onPressed: () => context.push('/notifications'),
                   ),
                 ],
               ),
