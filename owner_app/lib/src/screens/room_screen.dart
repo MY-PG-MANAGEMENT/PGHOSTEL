@@ -1218,6 +1218,8 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
   final _checkoutDate = TextEditingController();
   final _rent = TextEditingController();
   final _deposit = TextEditingController();
+  final _search = TextEditingController();
+  String _searchQuery = '';
   double? _standardRent;
 
   @override
@@ -1226,6 +1228,8 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
     _tenantFuture = context.read<AppState>().apiClient.get('/tenants');
     _fromDate.text = todayDmy();
     _loadStandardPrice();
+    _search.addListener(() =>
+        setState(() => _searchQuery = _search.text.toLowerCase().trim()));
   }
 
   void _reloadTenants() {
@@ -1236,7 +1240,8 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
 
   Future<void> _goToAddTenant() async {
     final created = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const AddTenantScreen()),
+      MaterialPageRoute(
+          builder: (_) => AddTenantScreen(propertyId: widget.propertyId)),
     );
     if (created == true && mounted) _reloadTenants();
   }
@@ -1258,9 +1263,14 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
           _deposit.text = deposit.toStringAsFixed(0);
         }
       });
-    } catch (_) {
-      // No price configured — ignore
-    }
+    } catch (_) {}
+  }
+
+  String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts[0][0].toUpperCase();
+    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
   }
 
   @override
@@ -1269,6 +1279,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
     _checkoutDate.dispose();
     _rent.dispose();
     _deposit.dispose();
+    _search.dispose();
     super.dispose();
   }
 
@@ -1282,6 +1293,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // ── Header ──────────────────────────────────────────────
             Row(children: [
               const Text('Assign Tenant',
                   style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
@@ -1292,63 +1304,256 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
             ]),
             const SizedBox(height: 4),
             Text('Bed: ${widget.bedName}',
-                style: const TextStyle(color: PgColors.primary, fontWeight: FontWeight.w600)),
+                style: const TextStyle(
+                    color: PgColors.primary, fontWeight: FontWeight.w600)),
             const SizedBox(height: 16),
-            const Text('Select Tenant', style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
+            // ── Select Tenant label + New Tenant button ──────────────
+            Row(
+              children: [
+                const Text('Select Tenant',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                const Spacer(),
+                GestureDetector(
+                  onTap: _goToAddTenant,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: PgColors.lavender,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.person_add_outlined,
+                            size: 14, color: PgColors.primary),
+                        SizedBox(width: 5),
+                        Text('New Tenant',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: PgColors.primary,
+                                fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // ── Tenant list section ──────────────────────────────────
             FutureBuilder<Map<String, dynamic>>(
               future: _tenantFuture,
               builder: (context, snapshot) {
-                if (!snapshot.hasData) return const LinearProgressIndicator();
+                if (!snapshot.hasData && !snapshot.hasError) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: LinearProgressIndicator(),
+                  );
+                }
                 if (snapshot.hasError) {
                   return Text('Failed to load tenants: ${snapshot.error}',
-                      style: const TextStyle(color: Colors.red));
+                      style: const TextStyle(color: Colors.red, fontSize: 13));
                 }
-                final tenants = (snapshot.data?['items'] is List
+
+                // All inactive tenants, newest first
+                final all = (snapshot.data?['items'] is List
                         ? snapshot.data!['items'] as List
                         : [])
                     .cast<Map<String, dynamic>>()
                     .where((t) => t['hasActiveAdmission'] != true)
-                    .toList();
-                if (tenants.isEmpty) {
-                  return Card(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 10, 8, 12),
-                      child: Row(
-                        children: [
-                          const Expanded(
-                            child: Text(
-                              'No tenants available to assign.\nCreate a tenant first.',
-                              style: TextStyle(color: Colors.grey, fontSize: 13),
-                            ),
-                          ),
-                          TextButton.icon(
-                            onPressed: _goToAddTenant,
-                            icon: const Icon(Icons.person_add_outlined, size: 16),
-                            label: const Text('Add Tenant',
-                                style: TextStyle(fontSize: 12)),
-                            style: TextButton.styleFrom(
-                              foregroundColor: PgColors.primary,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 6),
-                            ),
-                          ),
-                        ],
+                    .toList()
+                  ..sort((a, b) {
+                    final ai = (a['tenantId'] as num?)?.toInt() ?? 0;
+                    final bi = (b['tenantId'] as num?)?.toInt() ?? 0;
+                    return bi.compareTo(ai);
+                  });
+
+                // Search filter
+                final tenants = _searchQuery.isEmpty
+                    ? all
+                    : all.where((t) {
+                        final name =
+                            '${t['fullName']}'.toLowerCase();
+                        final phone =
+                            '${t['mobileNumber'] ?? ''}'.toLowerCase();
+                        return name.contains(_searchQuery) ||
+                            phone.contains(_searchQuery);
+                      }).toList();
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Search bar
+                    TextField(
+                      controller: _search,
+                      decoration: InputDecoration(
+                        hintText: 'Search by name or phone…',
+                        hintStyle: TextStyle(
+                            color: Colors.grey.shade400, fontSize: 13),
+                        prefixIcon: Icon(Icons.search,
+                            size: 18, color: Colors.grey.shade400),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 16),
+                                onPressed: () => _search.clear(),
+                              )
+                            : null,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide:
+                              BorderSide(color: Colors.grey.shade200),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide:
+                              BorderSide(color: Colors.grey.shade200),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(
+                              color: PgColors.primary, width: 1.5),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey.shade50,
                       ),
                     ),
-                  );
-                }
-                return Column(
-                  children: tenants
-                      .map((t) => RadioListTile<Map<String, dynamic>>(
-                            title: Text('${t['fullName']}'),
-                            subtitle: Text('${t['mobileNumber'] ?? ''}'),
-                            value: t,
-                            groupValue: _selectedTenant,
-                            onChanged: (v) => setState(() => _selectedTenant = v),
-                            activeColor: PgColors.primary,
-                          ))
-                      .toList(),
+                    const SizedBox(height: 8),
+                    // Tenant cards
+                    if (all.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade50,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.grey.shade200),
+                          ),
+                          child: const Text(
+                            'No inactive tenants available.\nUse "New Tenant" to create one.',
+                            style: TextStyle(
+                                color: Colors.grey, fontSize: 13),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      )
+                    else if (tenants.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Text(
+                          'No tenants match "$_searchQuery".',
+                          style: const TextStyle(
+                              color: Colors.grey, fontSize: 13),
+                          textAlign: TextAlign.center,
+                        ),
+                      )
+                    else
+                      ConstrainedBox(
+                        constraints:
+                            const BoxConstraints(maxHeight: 220),
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: tenants.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 6),
+                          itemBuilder: (context, i) {
+                            final t = tenants[i];
+                            final selected = _selectedTenant != null &&
+                                _selectedTenant!['tenantId'] ==
+                                    t['tenantId'];
+                            final initials =
+                                _initials('${t['fullName']}');
+                            return GestureDetector(
+                              onTap: () =>
+                                  setState(() => _selectedTenant = t),
+                              child: AnimatedContainer(
+                                duration:
+                                    const Duration(milliseconds: 160),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: selected
+                                      ? PgColors.lavender
+                                      : Colors.white,
+                                  borderRadius:
+                                      BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: selected
+                                        ? PgColors.primary
+                                        : Colors.grey.shade200,
+                                    width: selected ? 1.5 : 1,
+                                  ),
+                                ),
+                                child: Row(children: [
+                                  // Avatar
+                                  Container(
+                                    width: 38,
+                                    height: 38,
+                                    decoration: BoxDecoration(
+                                      color: selected
+                                          ? PgColors.primary
+                                          : const Color(0xFFE5E7EB),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        initials,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: selected
+                                              ? Colors.white
+                                              : const Color(0xFF374151),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${t['fullName']}',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: selected
+                                                ? PgColors.primary
+                                                : const Color(
+                                                    0xFF1A1A2E),
+                                          ),
+                                        ),
+                                        if ((t['mobileNumber'] ?? '')
+                                            .toString()
+                                            .isNotEmpty)
+                                          Text(
+                                            '${t['mobileNumber']}',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: selected
+                                                  ? PgColors.primary
+                                                      .withValues(alpha: .7)
+                                                  : Colors.grey.shade500,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (selected)
+                                    const Icon(Icons.check_circle_rounded,
+                                        color: PgColors.primary, size: 20),
+                                ]),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
                 );
               },
             ),

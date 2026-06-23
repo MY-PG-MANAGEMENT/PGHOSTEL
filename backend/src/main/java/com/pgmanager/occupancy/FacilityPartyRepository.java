@@ -14,6 +14,8 @@ public interface FacilityPartyRepository extends JpaRepository<FacilityParty, Lo
 
     List<FacilityParty> findByOrganizationIdAndPartyIdOrderByFromDateDesc(Long organizationId, Long partyId);
 
+    List<FacilityParty> findByOrganizationIdAndPartyIdAndRoleTypeId(Long organizationId, Long partyId, String roleTypeId);
+
     List<FacilityParty> findByOrganizationIdAndRoleTypeIdAndThruDateIsNull(Long organizationId, String roleTypeId);
 
     long countByOrganizationIdAndRoleTypeIdAndThruDateIsNull(Long organizationId, String roleTypeId);

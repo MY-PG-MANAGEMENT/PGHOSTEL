@@ -6,6 +6,7 @@ import '../app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/date_utils.dart';
 import '../widgets/async_action_button.dart';
+import 'billing_screen.dart' show InvoiceDetailSheet;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -913,7 +914,13 @@ class _TenantPaymentsTabState extends State<_TenantPaymentsTab> {
             ),
           );
         }
-        final items = (snapshot.data?['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+        final raw = (snapshot.data?['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+        // Sort newest invoice month first
+        final items = [...raw]..sort((a, b) {
+            final am = '${a['invoice_month'] ?? ''}';
+            final bm = '${b['invoice_month'] ?? ''}';
+            return bm.compareTo(am);
+          });
         if (items.isEmpty) {
           return const Center(
             child: Padding(
@@ -938,7 +945,20 @@ class _TenantPaymentsTabState extends State<_TenantPaymentsTab> {
             padding: const EdgeInsets.all(16),
             itemCount: items.length,
             separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (_, i) => _InvoiceCard(invoice: items[i]),
+            itemBuilder: (_, i) => _InvoiceCard(
+              invoice: items[i],
+              onTap: () => showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.white,
+                shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                builder: (_) => InvoiceDetailSheet(
+                  invoice: items[i],
+                  onRefresh: () => setState(_load),
+                ),
+              ),
+            ),
           ),
         );
       },
@@ -948,7 +968,8 @@ class _TenantPaymentsTabState extends State<_TenantPaymentsTab> {
 
 class _InvoiceCard extends StatelessWidget {
   final Map<String, dynamic> invoice;
-  const _InvoiceCard({required this.invoice});
+  final VoidCallback? onTap;
+  const _InvoiceCard({required this.invoice, this.onTap});
 
   static const _statusColor = {
     'PAID': Color(0xFF16A34A),
@@ -994,52 +1015,63 @@ class _InvoiceCard extends StatelessWidget {
     final total = invoice['total_amount'] ?? 0;
     final paid = invoice['paid_amount'] ?? 0;
     final balance = invoice['balance'] ?? 0;
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .05), blurRadius: 8, offset: const Offset(0, 2))],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Expanded(
-                child: Text(_month(invoice['invoice_month']),
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: bgColor,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: color.withValues(alpha: .3)),
-                ),
-                child: Text(status, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
-              ),
-            ]),
-            const SizedBox(height: 10),
-            Row(children: [
-              _AmountChip(label: 'Total', value: '₹$total', color: Colors.grey.shade700),
-              const SizedBox(width: 14),
-              _AmountChip(label: 'Paid', value: '₹$paid', color: const Color(0xFF16A34A)),
-              const SizedBox(width: 14),
-              _AmountChip(
-                label: 'Balance',
-                value: '₹$balance',
-                color: (balance is num && balance > 0) ? const Color(0xFFDC2626) : Colors.grey.shade600,
-              ),
-            ]),
-            const SizedBox(height: 8),
-            Row(children: [
-              Icon(Icons.calendar_today_outlined, size: 12, color: Colors.grey[500]),
-              const SizedBox(width: 4),
-              Text('Due: ${_fmtDate(invoice['due_date'])}',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-            ]),
-          ],
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .05), blurRadius: 8, offset: const Offset(0, 2))],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Expanded(
+                    child: Text(_month(invoice['invoice_month']),
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: bgColor,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: color.withValues(alpha: .3)),
+                    ),
+                    child: Text(status, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
+                  ),
+                  if (onTap != null) ...[
+                    const SizedBox(width: 6),
+                    Icon(Icons.chevron_right_rounded, size: 18, color: Colors.grey[400]),
+                  ],
+                ]),
+                const SizedBox(height: 10),
+                Row(children: [
+                  _AmountChip(label: 'Total', value: '₹$total', color: Colors.grey.shade700),
+                  const SizedBox(width: 14),
+                  _AmountChip(label: 'Paid', value: '₹$paid', color: const Color(0xFF16A34A)),
+                  const SizedBox(width: 14),
+                  _AmountChip(
+                    label: 'Balance',
+                    value: '₹$balance',
+                    color: (balance is num && balance > 0) ? const Color(0xFFDC2626) : Colors.grey.shade600,
+                  ),
+                ]),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Icon(Icons.calendar_today_outlined, size: 12, color: Colors.grey[500]),
+                  const SizedBox(width: 4),
+                  Text('Due: ${_fmtDate(invoice['due_date'])}',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                ]),
+              ],
+            ),
+          ),
         ),
       ),
     );
