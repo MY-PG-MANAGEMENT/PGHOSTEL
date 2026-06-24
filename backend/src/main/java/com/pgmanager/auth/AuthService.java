@@ -157,7 +157,7 @@ public class AuthService {
         refreshToken.setExpiresAt(LocalDateTime.now().plusDays(refreshTokenDays));
         refreshTokenRepository.save(refreshToken);
 
-        return new AuthResponse(accessToken, refreshTokenValue, principal.organizationId(), principal.roleTypeId());
+        return new AuthResponse(accessToken, refreshTokenValue, principal.organizationId(), principal.roleTypeId(), principal.fullName());
     }
 
     private String randomToken() {

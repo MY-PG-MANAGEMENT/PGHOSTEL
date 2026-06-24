@@ -13,6 +13,7 @@ class AppState extends ChangeNotifier {
   bool initialized = false;
   bool isLoggedIn = false;
   String? roleTypeId;
+  String? ownerName;
   final LocalAuthentication localAuthentication = LocalAuthentication();
 
   Future<void> restoreSession() async {
@@ -20,6 +21,8 @@ class AppState extends ChangeNotifier {
     final biometricEnabled = await storage.read(key: 'biometricEnabled') == 'true';
     isLoggedIn = hasToken && !biometricEnabled;
     roleTypeId = await storage.read(key: 'roleTypeId');
+    ownerName = await storage.read(key: 'fullName');
+    if (isLoggedIn) await _fetchOwnerName();
     initialized = true;
     notifyListeners();
   }
@@ -34,6 +37,7 @@ class AppState extends ChangeNotifier {
       if (authenticated) {
         isLoggedIn = true;
         roleTypeId = await storage.read(key: 'roleTypeId');
+        await _fetchOwnerName();
         notifyListeners();
       }
       return authenticated;
@@ -59,7 +63,7 @@ class AppState extends ChangeNotifier {
 
       isLoggedIn = true;
       roleTypeId = await storage.read(key: 'roleTypeId');
-
+      await _fetchOwnerName();
       notifyListeners();
     } catch (e) {
       isLoggedIn = false;
@@ -84,13 +88,25 @@ class AppState extends ChangeNotifier {
     );
     isLoggedIn = true;
     roleTypeId = await storage.read(key: 'roleTypeId');
+    await _fetchOwnerName();
     notifyListeners();
+  }
+
+  Future<void> _fetchOwnerName() async {
+    try {
+      final data = await apiClient.get('/account/profile');
+      ownerName = data['fullName'] as String?;
+      if (ownerName != null) {
+        await storage.write(key: 'fullName', value: ownerName);
+      }
+    } catch (_) {}
   }
 
   Future<void> logout() async {
     await storage.deleteAll();
     isLoggedIn = false;
     roleTypeId = null;
+    ownerName = null;
     notifyListeners();
   }
 }

@@ -35,5 +35,6 @@ class AuthRepository {
     await storage.write(key: 'refreshToken', value: data['refreshToken'] as String?);
     await storage.write(key: 'organizationId', value: '${data['organizationId']}');
     await storage.write(key: 'roleTypeId', value: data['roleTypeId'] as String?);
+    await storage.write(key: 'fullName', value: data['fullName'] as String?);
   }
 }
