@@ -36,15 +36,9 @@ public class BillingController {
     @GetMapping("/dashboard")
     ApiResponse<Map<String, Object>> dashboard(@RequestParam(required = false) Long propertyId) {
         Long org = currentUser.organizationId();
-        String payProp = propertyId != null
-                ? " AND party_id IN (SELECT fp.party_id FROM facility_party fp WHERE fp.organization_id=? AND fp.facility_id=? AND fp.role_type_id='TENANT')"
-                : "";
-        String payAliasProp = propertyId != null
-                ? " AND p.party_id IN (SELECT fp.party_id FROM facility_party fp WHERE fp.organization_id=? AND fp.facility_id=? AND fp.role_type_id='TENANT')"
-                : "";
-        String invProp = propertyId != null
-                ? " AND ba.party_id IN (SELECT fp.party_id FROM facility_party fp WHERE fp.organization_id=? AND fp.facility_id=? AND fp.role_type_id='TENANT')"
-                : "";
+        String payProp       = partyPropFilter(null, propertyId);
+        String payAliasProp  = partyPropFilter("p",  propertyId);
+        String invProp       = partyPropFilter("ba", propertyId);
         String invScalarProp = propertyId != null
                 ? " AND billing_account_id IN (SELECT ba.billing_account_id FROM billing_account ba WHERE ba.organization_id=? AND ba.party_id IN (SELECT fp.party_id FROM facility_party fp WHERE fp.organization_id=? AND fp.facility_id=? AND fp.role_type_id='TENANT'))"
                 : "";
@@ -100,9 +94,7 @@ public class BillingController {
         int safeSize = Math.min(Math.max(size, 1), 100);
         String statusFilter = (status == null || status.isBlank()) ? "" : " AND i.status=?";
         String partyFilter = partyId != null ? " AND ba.party_id=?" : "";
-        String propFilter = propertyId != null
-                ? " AND ba.party_id IN (SELECT fp.party_id FROM facility_party fp WHERE fp.organization_id=? AND fp.facility_id=? AND fp.role_type_id='TENANT')"
-                : "";
+        String propFilter = partyPropFilter("ba", propertyId);
         java.util.List<Object> argList = new java.util.ArrayList<>();
         argList.add(org);
         if (status != null && !status.isBlank()) argList.add(status.toUpperCase());
@@ -143,9 +135,7 @@ public class BillingController {
         String partyFilter = (partyId != null) ? " AND p.party_id=?" : "";
         String fromFilter  = (fromDate != null && !fromDate.isBlank()) ? " AND p.payment_date>=?" : "";
         String toFilter    = (toDate   != null && !toDate.isBlank())   ? " AND p.payment_date<=?" : "";
-        String propFilter  = propertyId != null
-                ? " AND p.party_id IN (SELECT fp.party_id FROM facility_party fp WHERE fp.organization_id=? AND fp.facility_id=? AND fp.role_type_id='TENANT')"
-                : "";
+        String propFilter  = partyPropFilter("p", propertyId);
         java.util.List<Object> argList = new java.util.ArrayList<>();
         argList.add(org);
         if (partyId  != null) argList.add(partyId);
@@ -341,6 +331,12 @@ public class BillingController {
         jdbc.update("UPDATE invoice SET status='WRITTEN_OFF',updated_at=NOW(),version=version+1 " +
                 "WHERE invoice_id=? AND organization_id=?", invoiceId, org);
         return ApiResponse.ok("Invoice written off", null);
+    }
+
+    private String partyPropFilter(String alias, Long propertyId) {
+        if (propertyId == null) return "";
+        String col = (alias == null || alias.isBlank()) ? "party_id" : alias + ".party_id";
+        return " AND " + col + " IN (SELECT fp.party_id FROM facility_party fp WHERE fp.organization_id=? AND fp.facility_id=? AND fp.role_type_id='TENANT')";
     }
 
     private BigDecimal amount(String sql, Object... args) {

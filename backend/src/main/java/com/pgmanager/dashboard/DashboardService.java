@@ -34,14 +34,13 @@ public class DashboardService {
     }
 
     private BigDecimal pendingRent(Long organizationId) {
-        return rentRepository.findByOrganizationIdOrderByRentMonthDesc(organizationId).stream()
+        return rentRepository.findByOrganizationId(organizationId).stream()
                 .map(rent -> rent.totalDue().subtract(rent.getPaidAmount()).max(BigDecimal.ZERO))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     private BigDecimal revenue(Long organizationId) {
-        return paymentRepository.findByOrganizationIdOrderByPaymentDateDesc(organizationId).stream()
-                .map(payment -> payment.getAmount() == null ? BigDecimal.ZERO : payment.getAmount())
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal total = paymentRepository.sumAmountByOrganizationId(organizationId);
+        return total == null ? BigDecimal.ZERO : total;
     }
 }

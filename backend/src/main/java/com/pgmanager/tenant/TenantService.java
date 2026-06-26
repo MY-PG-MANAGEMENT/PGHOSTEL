@@ -24,7 +24,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -77,40 +79,64 @@ public class TenantService {
     @Transactional(readOnly = true)
     public List<TenantResponse> list(Long organizationId) {
         // Query only org-level TENANT rows (facilityId = organizationId) so that
-        // property-scoped TENANT rows (written at creation time for the workspace flow)
-        // don't produce a duplicate entry per tenant.
-        return facilityPartyRepository
-                .findTenantsAtFacility(organizationId, organizationId, OccupancyRole.TENANT)
-                .stream()
+        // property-scoped TENANT rows don't produce duplicate entries.
+        List<FacilityParty> tenantRows = facilityPartyRepository
+                .findTenantsAtFacility(organizationId, organizationId, OccupancyRole.TENANT);
+        if (tenantRows.isEmpty()) return List.of();
+
+        List<Long> partyIds = tenantRows.stream().map(FacilityParty::getPartyId).toList();
+
+        // Batch-load all required data in 5 queries instead of 4 per tenant
+        Map<Long, Person> personMap = personRepository.findAllById(partyIds).stream()
+                .collect(Collectors.toMap(Person::getPartyId, p -> p));
+
+        Map<Long, FacilityParty> occupantMap = facilityPartyRepository
+                .findActiveOccupantsByPartyIds(organizationId, partyIds, OccupancyRole.OCCUPANT).stream()
+                .collect(Collectors.toMap(FacilityParty::getPartyId, fp -> fp));
+
+        List<Long> bedIds = occupantMap.values().stream()
+                .map(FacilityParty::getFacilityId).distinct().toList();
+
+        Map<Long, Facility> bedMap = bedIds.isEmpty() ? Map.of()
+                : facilityRepository.findAllById(bedIds).stream()
+                        .collect(Collectors.toMap(Facility::getFacilityId, f -> f));
+
+        Map<Long, Long> bedToRoomId = bedIds.isEmpty() ? Map.of()
+                : facilityGroupMemberRepository.findByChildFacilityIdInAndThruDateIsNull(bedIds).stream()
+                        .collect(Collectors.toMap(
+                                fgm -> fgm.getChildFacilityId(), fgm -> fgm.getParentFacilityId(), (a, b) -> a));
+
+        List<Long> roomIds = bedToRoomId.values().stream().distinct().toList();
+        Map<Long, Facility> roomMap = roomIds.isEmpty() ? Map.of()
+                : facilityRepository.findAllById(roomIds).stream()
+                        .collect(Collectors.toMap(Facility::getFacilityId, f -> f));
+
+        return tenantRows.stream()
                 .map(fp -> {
-                    Person person = personRepository.findById(fp.getPartyId()).orElseThrow();
-                    String bedName = null;
-                    String roomName = null;
+                    Person person = personMap.get(fp.getPartyId());
+                    if (person == null) return null;
+                    FacilityParty occupant = occupantMap.get(fp.getPartyId());
+                    String bedName = null, roomName = null;
                     boolean hasAdmission = false;
-                    Optional<FacilityParty> bedAssignment = facilityPartyRepository
-                            .findByOrganizationIdAndPartyIdAndRoleTypeIdAndThruDateIsNull(
-                                    organizationId, fp.getPartyId(), OccupancyRole.OCCUPANT);
                     LocalDate moveInDate = null;
-                    BigDecimal monthlyRent = null;
-                    BigDecimal securityDeposit = null;
+                    BigDecimal monthlyRent = null, securityDeposit = null;
                     LocalDate expectedCheckoutDate = null;
-                    if (bedAssignment.isPresent()) {
+                    if (occupant != null) {
                         hasAdmission = true;
-                        Long bedId = bedAssignment.get().getFacilityId();
-                        moveInDate = bedAssignment.get().getFromDate();
-                        monthlyRent = bedAssignment.get().getMonthlyRent();
-                        securityDeposit = bedAssignment.get().getSecurityDeposit();
-                        expectedCheckoutDate = bedAssignment.get().getExpectedCheckoutDate();
-                        bedName = facilityRepository.findById(bedId)
-                                .map(Facility::getFacilityName).orElse(null);
-                        roomName = facilityGroupMemberRepository
-                                .findByChildFacilityIdAndThruDateIsNull(bedId)
-                                .stream().findFirst()
-                                .flatMap(fgm -> facilityRepository.findById(fgm.getParentFacilityId()))
-                                .map(Facility::getFacilityName).orElse(null);
+                        Long bedId = occupant.getFacilityId();
+                        moveInDate = occupant.getFromDate();
+                        monthlyRent = occupant.getMonthlyRent();
+                        securityDeposit = occupant.getSecurityDeposit();
+                        expectedCheckoutDate = occupant.getExpectedCheckoutDate();
+                        Facility bed = bedMap.get(bedId);
+                        bedName = bed != null ? bed.getFacilityName() : null;
+                        Long roomId = bedToRoomId.get(bedId);
+                        Facility room = roomId != null ? roomMap.get(roomId) : null;
+                        roomName = room != null ? room.getFacilityName() : null;
                     }
                     return toResponse(person, bedName, roomName, hasAdmission, moveInDate, monthlyRent, securityDeposit, expectedCheckoutDate);
                 })
+                .filter(r -> r != null)
                 .toList();
     }
 

@@ -9,5 +9,7 @@ public interface FacilityGroupMemberRepository extends JpaRepository<FacilityGro
 
     List<FacilityGroupMember> findByChildFacilityIdAndThruDateIsNull(Long childFacilityId);
 
+    List<FacilityGroupMember> findByChildFacilityIdInAndThruDateIsNull(List<Long> childFacilityIds);
+
     void deleteAllByChildFacilityId(Long childFacilityId);
 }
