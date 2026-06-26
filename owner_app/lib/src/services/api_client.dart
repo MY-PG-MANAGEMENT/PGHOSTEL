@@ -44,7 +44,7 @@ class ApiClient {
     try {
       print('');
       print('══════════════════════════════');
-      print('REQUEST');
+      print('REQUEST')
       print('$method $url');
 
 
