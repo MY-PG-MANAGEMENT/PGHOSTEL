@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../app_state.dart';
+import '../../theme/app_theme.dart';
 import '../../widgets/async_action_button.dart';
+import 'auth_brand_header.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -38,104 +40,147 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Owner Registration')),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: Form(
-              key: _formKey,
-              child: ListView(
-                padding: const EdgeInsets.all(24),
-                children: [
-                  _field(
-                    _fullName,
-                    'Full Name',
-                    prefixIcon: Icons.person_outline,
-                    textInputAction: TextInputAction.next,
-                    validator: _validateName,
-                  ),
-                  _field(
-                    _mobile,
-                    'Mobile Number',
-                    prefixIcon: Icons.phone_outlined,
-                    keyboardType: TextInputType.phone,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
-                      LengthLimitingTextInputFormatter(10),
-                    ],
-                    textInputAction: TextInputAction.next,
-                    validator: _validateMobile,
-                  ),
-                  _field(
-                    _username,
-                    'Username',
-                    prefixIcon: Icons.alternate_email,
-                    textInputAction: TextInputAction.next,
-                    validator: _validateUsername,
-                  ),
-                  _passwordField(
-                    _password,
-                    'Password',
-                    obscure: _obscurePassword,
-                    onToggle: () => setState(() => _obscurePassword = !_obscurePassword),
-                    textInputAction: TextInputAction.next,
-                    validator: _validatePassword,
-                  ),
-                  _passwordField(
-                    _confirmPassword,
-                    'Confirm Password',
-                    obscure: _obscureConfirm,
-                    onToggle: () => setState(() => _obscureConfirm = !_obscureConfirm),
-                    textInputAction: TextInputAction.next,
-                    validator: (v) {
-                      if (v == null || v.isEmpty) return 'Required';
-                      if (v != _password.text) return 'Passwords do not match';
-                      return null;
-                    },
-                  ),
-                  _field(
-                    _orgName,
-                    'Organization Name',
-                    prefixIcon: Icons.business_outlined,
-                    textInputAction: TextInputAction.done,
-                    validator: _validateRequired,
-                  ),
-                  const SizedBox(height: 16),
-                  AsyncActionButton(
-                    label: 'Create Account',
-                    onPressed: () async {
-                      if (!_formKey.currentState!.validate()) return;
-                      try {
-                        await context.read<AppState>().registerOwner(
-                          fullName: _fullName.text.trim(),
-                          mobileNumber: _mobile.text.trim(),
-                          username: _username.text.trim(),
-                          password: _password.text,
-                          organizationName: _orgName.text.trim(),
-                        );
-                        if (context.mounted) context.go('/onboarding');
-                      } catch (e) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(e.toString().replaceFirst('Exception: ', '')),
-                            ),
-                          );
-                        }
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: () => context.go('/login'),
-                    child: const Text('Already have an account? Sign in'),
-                  ),
-                ],
+      backgroundColor: PgColors.primaryDark,
+      body: Column(
+        children: [
+          AuthBrandHeader(
+            subtitle: 'Set up your owner account',
+            onBack: () => context.go('/login'),
+          ),
+          Expanded(
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFFF9F9FD),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Form(
+                key: _formKey,
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
+                  children: [
+                    Text(
+                      'Create account',
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: PgColors.ink,
+                            letterSpacing: -0.3,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Your properties, tenants, and payments — all in one place.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: const Color(0xFF6B7280),
+                          ),
+                    ),
+                    const SizedBox(height: 24),
+                    _field(
+                      _fullName,
+                      'Full Name',
+                      prefixIcon: Icons.person_outline,
+                      textInputAction: TextInputAction.next,
+                      validator: _validateName,
+                    ),
+                    _field(
+                      _mobile,
+                      'Mobile Number',
+                      prefixIcon: Icons.phone_outlined,
+                      keyboardType: TextInputType.phone,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(10),
+                      ],
+                      textInputAction: TextInputAction.next,
+                      validator: _validateMobile,
+                    ),
+                    _field(
+                      _username,
+                      'Username',
+                      prefixIcon: Icons.alternate_email,
+                      textInputAction: TextInputAction.next,
+                      validator: _validateUsername,
+                    ),
+                    _passwordField(
+                      _password,
+                      'Password',
+                      obscure: _obscurePassword,
+                      onToggle: () =>
+                          setState(() => _obscurePassword = !_obscurePassword),
+                      textInputAction: TextInputAction.next,
+                      validator: _validatePassword,
+                    ),
+                    _passwordField(
+                      _confirmPassword,
+                      'Confirm Password',
+                      obscure: _obscureConfirm,
+                      onToggle: () =>
+                          setState(() => _obscureConfirm = !_obscureConfirm),
+                      textInputAction: TextInputAction.next,
+                      validator: (v) {
+                        if (v == null || v.isEmpty) return 'Required';
+                        if (v != _password.text) return 'Passwords do not match';
+                        return null;
+                      },
+                    ),
+                    _field(
+                      _orgName,
+                      'Organization Name',
+                      prefixIcon: Icons.business_outlined,
+                      textInputAction: TextInputAction.done,
+                      validator: _validateRequired,
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: AsyncActionButton(
+                        label: 'Create Account',
+                        onPressed: () async {
+                          if (!_formKey.currentState!.validate()) return;
+                          try {
+                            await context.read<AppState>().registerOwner(
+                                  fullName: _fullName.text.trim(),
+                                  mobileNumber: _mobile.text.trim(),
+                                  username: _username.text.trim(),
+                                  password: _password.text,
+                                  organizationName: _orgName.text.trim(),
+                                );
+                            if (context.mounted) context.go('/onboarding');
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                      e.toString().replaceFirst('Exception: ', '')),
+                                ),
+                              );
+                            }
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          'Already have an account?',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: const Color(0xFF6B7280),
+                              ),
+                        ),
+                        TextButton(
+                          onPressed: () => context.go('/login'),
+                          child: const Text('Sign in'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -183,7 +228,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
           labelText: label,
           prefixIcon: const Icon(Icons.lock_outline),
           suffixIcon: IconButton(
-            icon: Icon(obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+            icon: Icon(
+                obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined),
             onPressed: onToggle,
           ),
         ),
@@ -203,7 +249,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   String? _validateMobile(String? v) {
     if (v == null || v.trim().isEmpty) return 'Required';
-    if (!RegExp(r'^[0-9]{10}$').hasMatch(v.trim())) return 'Enter a valid 10-digit mobile number';
+    if (!RegExp(r'^[0-9]{10}$').hasMatch(v.trim()))
+      return 'Enter a valid 10-digit mobile number';
     return null;
   }
 

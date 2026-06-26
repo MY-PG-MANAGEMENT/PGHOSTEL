@@ -24,6 +24,6 @@ public final class AuthDtos {
     public record RefreshTokenRequest(@NotBlank String refreshToken) {
     }
 
-    public record AuthResponse(String accessToken, String refreshToken, Long organizationId, String roleTypeId) {
+    public record AuthResponse(String accessToken, String refreshToken, Long organizationId, String roleTypeId, String fullName) {
     }
 }

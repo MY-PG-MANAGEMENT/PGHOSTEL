@@ -2,6 +2,7 @@ package com.pgmanager.security;
 
 import com.pgmanager.auth.UserLogin;
 import com.pgmanager.auth.UserLoginRepository;
+import com.pgmanager.party.PersonRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class AppUserDetailsService implements UserDetailsService {
     private final UserLoginRepository userLoginRepository;
+    private final PersonRepository personRepository;
     private static final Logger log = LoggerFactory.getLogger(AppUserDetailsService.class);
 
 
@@ -22,6 +24,9 @@ public class AppUserDetailsService implements UserDetailsService {
     	log.info("username : {}", username);
         UserLogin user = userLoginRepository.findByUsername(username)
                 .orElseThrow(() -> new UsernameNotFoundException("Invalid username"));
+        String fullName = personRepository.findById(user.getPartyId())
+                .map(p -> p.getFullName())
+                .orElse(user.getUsername());
         return new AppUserPrincipal(
                 user.getUserLoginId(),
                 user.getPartyId(),
@@ -29,7 +34,8 @@ public class AppUserDetailsService implements UserDetailsService {
                 user.getUsername(),
                 user.getPasswordHash(),
                 user.getRoleTypeId(),
-                user.getStatus()
+                user.getStatus(),
+                fullName
         );
     }
 }

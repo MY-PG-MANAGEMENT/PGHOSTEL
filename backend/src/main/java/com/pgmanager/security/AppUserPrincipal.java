@@ -14,7 +14,8 @@ public record AppUserPrincipal(
         String username,
         String password,
         String roleTypeId,
-        String status
+        String status,
+        String fullName
 ) implements UserDetails {
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {

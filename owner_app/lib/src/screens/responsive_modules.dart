@@ -75,8 +75,10 @@ class _PgDashboardScreenState extends State<PgDashboardScreen> {
                       style: TextStyle(
                           fontSize: 28, fontWeight: FontWeight.w800, color: Color(0xFF1A1A2E))),
                   const SizedBox(height: 4),
-                  Text('Welcome back, Owner!',
-                      style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+                  Text(
+                    'Welcome back, ${context.watch<AppState>().ownerName ?? 'Owner'}!',
+                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                  ),
                 ],
               ),
             ),
