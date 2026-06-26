@@ -28,5 +28,11 @@ public interface FacilityPartyRepository extends JpaRepository<FacilityParty, Lo
     @Query("SELECT fp FROM FacilityParty fp WHERE fp.organizationId = :orgId AND fp.facilityId = :orgId AND fp.partyId = :partyId AND fp.roleTypeId = :roleTypeId AND fp.thruDate IS NULL")
     Optional<FacilityParty> findOrgMembership(@Param("orgId") Long organizationId, @Param("partyId") Long partyId, @Param("roleTypeId") String roleTypeId);
 
+    @Query("SELECT fp FROM FacilityParty fp WHERE fp.organizationId = :orgId AND fp.partyId IN :partyIds AND fp.roleTypeId = :role AND fp.thruDate IS NULL")
+    List<FacilityParty> findActiveOccupantsByPartyIds(@Param("orgId") Long orgId, @Param("partyIds") List<Long> partyIds, @Param("role") String role);
+
+    boolean existsByOrganizationIdAndFacilityIdAndPartyIdAndRoleTypeIdAndThruDateIsNull(
+            Long organizationId, Long facilityId, Long partyId, String roleTypeId);
+
     void deleteAllByFacilityId(Long facilityId);
 }

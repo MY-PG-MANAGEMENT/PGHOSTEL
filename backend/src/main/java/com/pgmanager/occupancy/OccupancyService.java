@@ -76,9 +76,8 @@ public class OccupancyService {
         Long propertyId = resolvePropertyId(bedId);
         if (propertyId == null) return;
         boolean exists = facilityPartyRepository
-                .findTenantsAtFacility(orgId, propertyId, OccupancyRole.TENANT)
-                .stream()
-                .anyMatch(fp -> fp.getPartyId().equals(partyId));
+                .existsByOrganizationIdAndFacilityIdAndPartyIdAndRoleTypeIdAndThruDateIsNull(
+                        orgId, propertyId, partyId, OccupancyRole.TENANT);
         if (!exists) {
             FacilityParty propertyMembership = new FacilityParty();
             propertyMembership.setOrganizationId(orgId);

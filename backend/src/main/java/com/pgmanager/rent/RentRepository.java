@@ -8,6 +8,8 @@ import java.util.Optional;
 public interface RentRepository extends JpaRepository<Rent, Long> {
     List<Rent> findByOrganizationIdOrderByRentMonthDesc(Long organizationId);
 
+    List<Rent> findByOrganizationId(Long organizationId);
+
     Optional<Rent> findByRentIdAndOrganizationId(Long rentId, Long organizationId);
 
 }
