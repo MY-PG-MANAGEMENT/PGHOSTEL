@@ -69,6 +69,8 @@ public final class TenantDtos {
             String workAddress,
             String currentBedName,
             String currentRoomName,
+            Long currentPropertyId,
+            Long currentBedFacilityId,
             boolean hasActiveAdmission,
             LocalDate moveInDate,
             BigDecimal monthlyRent,

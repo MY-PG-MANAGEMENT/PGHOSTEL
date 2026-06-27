@@ -30,8 +30,18 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: PgColors.primaryDark,
-      body: Column(
+      body: Stack(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [PgColors.primaryDark, PgColors.primary],
+              ),
+            ),
+          ),
+          Column(
         children: [
           const AuthBrandHeader(subtitle: 'Rooms · Rent · Residents'),
           Expanded(
@@ -159,6 +169,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
             ),
+          ),
+        ],
           ),
         ],
       ),

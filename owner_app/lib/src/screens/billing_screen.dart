@@ -201,9 +201,11 @@ class _BillingScreenState extends State<BillingScreen>
   Future<void> _generateInvoices() async {
     final now = DateTime.now();
     final month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    final pid = widget.propertyId;
+    final query = 'month=$month${pid != null ? '&propertyId=$pid' : ''}';
     try {
       final result = await context.read<AppState>().apiClient
-          .post('/billing/generate-invoices?month=$month', {});
+          .post('/billing/generate-invoices?$query', {});
       if (mounted) {
         final gen = result['generated'] ?? 0;
         final skip = result['skipped'] ?? 0;

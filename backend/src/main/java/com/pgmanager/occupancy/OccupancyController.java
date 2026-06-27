@@ -97,6 +97,25 @@ public class OccupancyController {
                 throw new com.pgmanager.common.exception.BadRequestException("Invalid date format; expected YYYY-MM-DD");
             }
         }
+        if (checkoutDate != null) {
+            List<Map<String, Object>> fp = jdbc.queryForList(
+                    "SELECT from_date FROM facility_party WHERE organization_id=? AND party_id=? AND role_type_id='OCCUPANT' AND thru_date IS NULL",
+                    org, request.partyId());
+            if (!fp.isEmpty()) {
+                LocalDate fromDate = ((java.sql.Date) fp.get(0).get("from_date")).toLocalDate();
+                int moveInDay = fromDate.getDayOfMonth();
+                LocalDate today = LocalDate.now();
+                int daysInThisMonth = today.lengthOfMonth();
+                LocalDate thisMonthDue = today.withDayOfMonth(Math.min(moveInDay, daysInThisMonth));
+                LocalDate nextDue = !thisMonthDue.isAfter(today)
+                        ? today.plusMonths(1).withDayOfMonth(Math.min(moveInDay, today.plusMonths(1).lengthOfMonth()))
+                        : thisMonthDue;
+                if (!checkoutDate.isBefore(nextDue)) {
+                    throw new com.pgmanager.common.exception.BadRequestException(
+                            "Expected checkout date must be before next payment date (" + nextDue + ")");
+                }
+            }
+        }
         int updated = jdbc.update(
                 "UPDATE facility_party SET expected_checkout_date=?,updated_at=NOW() " +
                 "WHERE organization_id=? AND party_id=? AND role_type_id='OCCUPANT' AND thru_date IS NULL",

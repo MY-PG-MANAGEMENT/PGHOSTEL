@@ -40,22 +40,26 @@ public class TenantService {
 
     @Transactional
     public TenantResponse create(Long organizationId, Long userLoginId, TenantCreateRequest request) {
-        Party party = new Party();
-        party.setPartyTypeId(PartyType.PERSON);
-        party = partyRepository.save(party);
+        Person person;
+        Party party;
+        java.util.Optional<Person> existing = personRepository.findByMobileNumber(request.mobileNumber());
+        if (existing.isPresent()) {
+            person = existing.get();
+            party = partyRepository.findById(person.getPartyId())
+                    .orElseThrow(() -> new com.pgmanager.common.exception.NotFoundException("Party not found for existing person"));
+            applyFields(person, request);
+            personRepository.save(person);
+        } else {
+            party = new Party();
+            party.setPartyTypeId(PartyType.PERSON);
+            party = partyRepository.save(party);
+            person = new Person();
+            person.setPartyId(party.getPartyId());
+            applyFields(person, request);
+            personRepository.save(person);
+        }
 
-        Person person = new Person();
-        person.setPartyId(party.getPartyId());
-        applyFields(person, request);
-        personRepository.save(person);
-
-        FacilityParty orgMembership = new FacilityParty();
-        orgMembership.setOrganizationId(organizationId);
-        orgMembership.setFacilityId(organizationId);
-        orgMembership.setPartyId(party.getPartyId());
-        orgMembership.setRoleTypeId(OccupancyRole.TENANT);
-        orgMembership.setFromDate(LocalDate.now());
-        facilityPartyRepository.save(orgMembership);
+        ensureOrgTenantMembership(organizationId, party.getPartyId());
 
         if (request.propertyId() != null) {
             Facility property = facilityRepository.findById(request.propertyId())
@@ -63,17 +67,37 @@ public class TenantService {
             if (!organizationId.equals(property.getOrganizationId())) {
                 throw new com.pgmanager.common.exception.BadRequestException("Property not in current organization");
             }
-            FacilityParty propertyMembership = new FacilityParty();
-            propertyMembership.setOrganizationId(organizationId);
-            propertyMembership.setFacilityId(request.propertyId());
-            propertyMembership.setPartyId(party.getPartyId());
-            propertyMembership.setRoleTypeId(OccupancyRole.TENANT);
-            propertyMembership.setFromDate(LocalDate.now());
-            facilityPartyRepository.save(propertyMembership);
+            if (facilityPartyRepository.findOrgMembership(organizationId, party.getPartyId(), OccupancyRole.TENANT)
+                    .map(fp -> !fp.getFacilityId().equals(request.propertyId())).orElse(true)) {
+                boolean propMemberExists = facilityPartyRepository
+                        .findByOrganizationIdAndPartyIdAndRoleTypeId(organizationId, party.getPartyId(), OccupancyRole.TENANT)
+                        .stream().anyMatch(fp -> fp.getFacilityId().equals(request.propertyId()));
+                if (!propMemberExists) {
+                    FacilityParty propertyMembership = new FacilityParty();
+                    propertyMembership.setOrganizationId(organizationId);
+                    propertyMembership.setFacilityId(request.propertyId());
+                    propertyMembership.setPartyId(party.getPartyId());
+                    propertyMembership.setRoleTypeId(OccupancyRole.TENANT);
+                    propertyMembership.setFromDate(LocalDate.now());
+                    facilityPartyRepository.save(propertyMembership);
+                }
+            }
         }
 
         auditService.log(organizationId, userLoginId, "TENANT_CREATED", "PARTY", party.getPartyId(), "Tenant created");
-        return toResponse(person, null, null, false, null, null, null, null);
+        return toResponse(person, null, null, null, null, false, null, null, null, null);
+    }
+
+    public void ensureOrgTenantMembership(Long organizationId, Long partyId) {
+        if (facilityPartyRepository.findOrgMembership(organizationId, partyId, OccupancyRole.TENANT).isEmpty()) {
+            FacilityParty fp = new FacilityParty();
+            fp.setOrganizationId(organizationId);
+            fp.setFacilityId(organizationId);
+            fp.setPartyId(partyId);
+            fp.setRoleTypeId(OccupancyRole.TENANT);
+            fp.setFromDate(LocalDate.now());
+            facilityPartyRepository.save(fp);
+        }
     }
 
     @Transactional(readOnly = true)
@@ -134,7 +158,7 @@ public class TenantService {
                         Facility room = roomId != null ? roomMap.get(roomId) : null;
                         roomName = room != null ? room.getFacilityName() : null;
                     }
-                    return toResponse(person, bedName, roomName, hasAdmission, moveInDate, monthlyRent, securityDeposit, expectedCheckoutDate);
+                    return toResponse(person, bedName, roomName, null, null, hasAdmission, moveInDate, monthlyRent, securityDeposit, expectedCheckoutDate);
                 })
                 .filter(r -> r != null)
                 .toList();
@@ -190,7 +214,7 @@ public class TenantService {
                                 .flatMap(m -> facilityRepository.findById(m.getParentFacilityId()))
                                 .map(Facility::getFacilityName).orElse(null);
                     }
-                    return toResponse(person, bedName, roomName, hasAdmission, moveInDate, monthlyRent, securityDeposit, expectedCheckoutDate);
+                    return toResponse(person, bedName, roomName, null, null, hasAdmission, moveInDate, monthlyRent, securityDeposit, expectedCheckoutDate);
                 })
                 .filter(r -> r != null)
                 .toList();
@@ -211,9 +235,13 @@ public class TenantService {
         BigDecimal monthlyRent = null;
         BigDecimal securityDeposit = null;
         LocalDate expectedCheckoutDate = null;
+        Long currentBedFacilityId = null;
+        Long currentPropertyId = null;
         if (bedAssignment.isPresent()) {
             hasAdmission = true;
             Long bedId = bedAssignment.get().getFacilityId();
+            currentBedFacilityId = bedId;
+            currentPropertyId = resolvePropertyId(bedId);
             moveInDate = bedAssignment.get().getFromDate();
             monthlyRent = bedAssignment.get().getMonthlyRent();
             securityDeposit = bedAssignment.get().getSecurityDeposit();
@@ -224,7 +252,7 @@ public class TenantService {
                     .flatMap(fgm -> facilityRepository.findById(fgm.getParentFacilityId()))
                     .map(Facility::getFacilityName).orElse(null);
         }
-        return toResponse(person, bedName, roomName, hasAdmission, moveInDate, monthlyRent, securityDeposit, expectedCheckoutDate);
+        return toResponse(person, bedName, roomName, currentPropertyId, currentBedFacilityId, hasAdmission, moveInDate, monthlyRent, securityDeposit, expectedCheckoutDate);
     }
 
     @Transactional
@@ -233,7 +261,7 @@ public class TenantService {
         Person person = personRepository.findById(partyId)
                 .orElseThrow(() -> new NotFoundException("Tenant not found"));
         applyFields(person, request);
-        return toResponse(person, null, null, false, null, null, null, null);
+        return toResponse(person, null, null, null, null, false, null, null, null, null);
     }
 
     @Transactional
@@ -247,7 +275,7 @@ public class TenantService {
         if (request.employerName() != null) person.setEmployerName(request.employerName());
         if (request.designation() != null) person.setDesignation(request.designation());
         if (request.workAddress() != null) person.setWorkAddress(request.workAddress());
-        return toResponse(person, null, null, false, null, null, null, null);
+        return toResponse(person, null, null, null, null, false, null, null, null, null);
     }
 
     // Walks bed → room → floor → property to check if a bed belongs to a property.
@@ -304,6 +332,7 @@ public class TenantService {
     }
 
     public TenantResponse toResponse(Person person, String currentBedName, String currentRoomName,
+            Long currentPropertyId, Long currentBedFacilityId,
             boolean hasActiveAdmission, LocalDate moveInDate, BigDecimal monthlyRent, BigDecimal securityDeposit,
             LocalDate expectedCheckoutDate) {
         return new TenantResponse(
@@ -323,11 +352,26 @@ public class TenantService {
                 person.getWorkAddress(),
                 currentBedName,
                 currentRoomName,
+                currentPropertyId,
+                currentBedFacilityId,
                 hasActiveAdmission,
                 moveInDate,
                 monthlyRent,
                 securityDeposit,
                 expectedCheckoutDate
         );
+    }
+
+    private Long resolvePropertyId(Long bedId) {
+        return facilityGroupMemberRepository.findByChildFacilityIdAndThruDateIsNull(bedId)
+                .stream().findFirst()
+                .flatMap(rgm -> facilityGroupMemberRepository
+                        .findByChildFacilityIdAndThruDateIsNull(rgm.getParentFacilityId())
+                        .stream().findFirst())
+                .flatMap(fgm -> facilityGroupMemberRepository
+                        .findByChildFacilityIdAndThruDateIsNull(fgm.getParentFacilityId())
+                        .stream().findFirst())
+                .map(pgm -> pgm.getParentFacilityId())
+                .orElse(null);
     }
 }

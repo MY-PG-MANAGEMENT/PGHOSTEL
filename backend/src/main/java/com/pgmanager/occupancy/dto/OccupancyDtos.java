@@ -19,8 +19,12 @@ public final class OccupancyDtos {
             LocalDate expectedCheckoutDate
     ) {}
 
-    public record BedTransferRequest(@NotNull Long partyId, @NotNull Long newBedFacilityId, LocalDate transferDate) {
-    }
+    public record BedTransferRequest(
+            @NotNull Long partyId,
+            @NotNull Long newBedFacilityId,
+            LocalDate transferDate,
+            @DecimalMin("0") BigDecimal monthlyRent
+    ) {}
 
     public record CheckoutRequest(@NotNull Long partyId, LocalDate checkoutDate) {
     }

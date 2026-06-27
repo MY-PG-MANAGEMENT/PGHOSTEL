@@ -4,6 +4,7 @@ import com.pgmanager.auth.dto.AuthDtos.AuthResponse;
 import com.pgmanager.auth.dto.AuthDtos.LoginRequest;
 import com.pgmanager.auth.dto.AuthDtos.RefreshTokenRequest;
 import com.pgmanager.auth.dto.AuthDtos.RegisterOwnerRequest;
+import com.pgmanager.auth.dto.AuthDtos.RegisterSuperAdminRequest;
 import com.pgmanager.common.api.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +18,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class AuthController {
     private final AuthService authService;
+
+    @PostMapping("/register-super-admin")
+    ApiResponse<AuthResponse> registerSuperAdmin(@Valid @RequestBody RegisterSuperAdminRequest request) {
+        return ApiResponse.ok("Super admin created", authService.registerSuperAdmin(request));
+    }
 
     @PostMapping("/register-owner")
     ApiResponse<AuthResponse> registerOwner(@Valid @RequestBody RegisterOwnerRequest request) {

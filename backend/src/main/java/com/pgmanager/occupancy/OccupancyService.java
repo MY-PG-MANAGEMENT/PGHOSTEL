@@ -11,6 +11,7 @@ import com.pgmanager.occupancy.dto.OccupancyDtos.BedAssignRequest;
 import com.pgmanager.occupancy.dto.OccupancyDtos.BedTransferRequest;
 import com.pgmanager.occupancy.dto.OccupancyDtos.CheckoutRequest;
 import com.pgmanager.occupancy.dto.OccupancyDtos.OccupancyResponse;
+import com.pgmanager.notification.NotificationService;
 import com.pgmanager.pricing.PropertySharingPriceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,7 @@ public class OccupancyService {
     private final FacilityGroupMemberRepository facilityGroupMemberRepository;
     private final PropertySharingPriceRepository sharingPriceRepository;
     private final AuditService auditService;
+    private final NotificationService notificationService;
 
     @Transactional
     public OccupancyResponse assign(Long organizationId, Long userLoginId, BedAssignRequest request) {
@@ -69,6 +71,7 @@ public class OccupancyService {
         ensurePropertyTenantMembership(organizationId, request.partyId(), request.bedFacilityId(), fromDate);
 
         auditService.log(organizationId, userLoginId, "BED_ASSIGNED", "FACILITY_PARTY", occupancy.getFacilityPartyId(), "Bed assigned");
+        notificationService.notifyCheckIn(organizationId, request.partyId(), request.bedFacilityId());
         return toResponse(occupancy);
     }
 
@@ -119,12 +122,17 @@ public class OccupancyService {
         });
         active.setThruDate(transferDate.minusDays(1));
 
+        BigDecimal effectiveRent = request.monthlyRent() != null
+                ? request.monthlyRent()
+                : resolveRent(organizationId, request.newBedFacilityId());
+
         FacilityParty next = new FacilityParty();
         next.setOrganizationId(organizationId);
         next.setFacilityId(request.newBedFacilityId());
         next.setPartyId(request.partyId());
         next.setRoleTypeId(OccupancyRole.OCCUPANT);
         next.setFromDate(transferDate);
+        next.setMonthlyRent(effectiveRent);
         next = facilityPartyRepository.save(next);
         auditService.log(organizationId, userLoginId, "BED_TRANSFERRED", "FACILITY_PARTY", next.getFacilityPartyId(), "Bed transferred");
         return toResponse(next);

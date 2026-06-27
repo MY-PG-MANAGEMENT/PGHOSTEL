@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../theme/app_theme.dart';
-
 class AuthBrandHeader extends StatelessWidget {
   const AuthBrandHeader({
     super.key,
@@ -16,13 +14,7 @@ class AuthBrandHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [PgColors.primaryDark, PgColors.primary],
-        ),
-      ),
+      color: Colors.transparent,
       child: SafeArea(
         bottom: false,
         child: Stack(

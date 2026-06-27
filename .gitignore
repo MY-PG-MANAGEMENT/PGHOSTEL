@@ -22,3 +22,4 @@ backend/.settings/
 owner_app/.metadata
 
 *.class
+/bin/

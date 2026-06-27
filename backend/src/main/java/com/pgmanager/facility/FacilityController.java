@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -105,6 +106,64 @@ public class FacilityController {
                 "ORDER BY bed_status,expected_checkout_date ASC,floor_number,room_number,bed_id",
                 propertyId, org, propertyId, org);
         return ApiResponse.ok(beds);
+    }
+
+    @GetMapping("/properties/{propertyId}/report")
+    ApiResponse<Map<String, Object>> propertyReport(@PathVariable Long propertyId) {
+        Long org = currentUser.organizationId();
+
+        String bedToProperty =
+                "JOIN facility_group_member bgm ON bgm.child_facility_id=fp.facility_id AND bgm.thru_date IS NULL " +
+                "JOIN facility room ON room.facility_id=bgm.parent_facility_id AND room.facility_type_id='ROOM' " +
+                "JOIN facility_group_member rgm ON rgm.child_facility_id=room.facility_id AND rgm.thru_date IS NULL " +
+                "JOIN facility floor ON floor.facility_id=rgm.parent_facility_id AND floor.facility_type_id='FLOOR' " +
+                "JOIN facility_group_member fgm ON fgm.child_facility_id=floor.facility_id AND fgm.thru_date IS NULL ";
+
+        List<Map<String, Object>> upcoming = jdbc.queryForList(
+                "SELECT per.full_name,fp.expected_checkout_date,fp.party_id,fp.monthly_rent " +
+                "FROM facility_party fp JOIN person per ON per.party_id=fp.party_id " + bedToProperty +
+                "WHERE fgm.parent_facility_id=? AND fp.organization_id=? " +
+                "AND fp.role_type_id='OCCUPANT' AND fp.thru_date IS NULL " +
+                "AND fp.expected_checkout_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(),INTERVAL 30 DAY) " +
+                "ORDER BY fp.expected_checkout_date",
+                propertyId, org);
+
+        List<Map<String, Object>> joiners = jdbc.queryForList(
+                "SELECT per.full_name,fp.from_date,fp.monthly_rent,fp.party_id " +
+                "FROM facility_party fp JOIN person per ON per.party_id=fp.party_id " + bedToProperty +
+                "WHERE fgm.parent_facility_id=? AND fp.organization_id=? " +
+                "AND fp.role_type_id='OCCUPANT' AND fp.thru_date IS NULL " +
+                "AND fp.from_date >= DATE_SUB(CURDATE(),INTERVAL 30 DAY) " +
+                "ORDER BY fp.from_date DESC",
+                propertyId, org);
+
+        List<Map<String, Object>> defaulters = jdbc.queryForList(
+                "SELECT per.full_name,i.total_amount,i.paid_amount," +
+                "(i.total_amount-i.paid_amount) balance,i.status,i.due_date,ba.party_id " +
+                "FROM invoice i " +
+                "JOIN billing_account ba ON ba.billing_account_id=i.billing_account_id AND ba.organization_id=? " +
+                "JOIN person per ON per.party_id=ba.party_id " +
+                "JOIN facility_party fp ON fp.party_id=ba.party_id AND fp.role_type_id='OCCUPANT' " +
+                "  AND fp.thru_date IS NULL AND fp.organization_id=? " + bedToProperty +
+                "WHERE fgm.parent_facility_id=? AND i.organization_id=? " +
+                "AND i.status IN ('PENDING','OVERDUE','PARTIAL') " +
+                "AND YEAR(i.invoice_month)=YEAR(CURDATE()) AND MONTH(i.invoice_month)=MONTH(CURDATE()) " +
+                "ORDER BY i.status,per.full_name",
+                org, org, propertyId, org);
+
+        List<Map<String, Object>> trend = jdbc.queryForList(
+                "SELECT DATE_FORMAT(payment_date,'%Y-%m') month,SUM(amount) collected " +
+                "FROM payment WHERE organization_id=? " +
+                "AND payment_date >= DATE_SUB(CURDATE(),INTERVAL 6 MONTH) " +
+                "GROUP BY DATE_FORMAT(payment_date,'%Y-%m') ORDER BY month",
+                org);
+
+        Map<String, Object> report = new LinkedHashMap<>();
+        report.put("upcomingCheckouts", upcoming);
+        report.put("recentJoiners", joiners);
+        report.put("defaulters", defaulters);
+        report.put("monthlyTrend", trend);
+        return ApiResponse.ok("Report generated", report);
     }
 
     @GetMapping("/properties/{propertyId}/room-summary")

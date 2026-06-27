@@ -5,6 +5,7 @@ import com.pgmanager.auth.dto.AuthDtos.AuthResponse;
 import com.pgmanager.auth.dto.AuthDtos.LoginRequest;
 import com.pgmanager.auth.dto.AuthDtos.RefreshTokenRequest;
 import com.pgmanager.auth.dto.AuthDtos.RegisterOwnerRequest;
+import com.pgmanager.auth.dto.AuthDtos.RegisterSuperAdminRequest;
 import com.pgmanager.common.exception.BadRequestException;
 import com.pgmanager.common.util.HashUtil;
 import com.pgmanager.facility.Facility;
@@ -50,6 +51,36 @@ public class AuthService {
 
     @Value("${app.security.refresh-token-days}")
     private long refreshTokenDays;
+
+    @Transactional
+    public AuthResponse registerSuperAdmin(RegisterSuperAdminRequest request) {
+        if (userLoginRepository.existsByRoleTypeId(RoleType.SUPER_ADMIN)) {
+            throw new BadRequestException("Super admin already exists. Use the admin panel to manage accounts.");
+        }
+        if (userLoginRepository.existsByUsername(request.username())) {
+            throw new BadRequestException("Username already exists");
+        }
+        Party party = new Party();
+        party.setPartyTypeId(PartyType.PERSON);
+        party = partyRepository.save(party);
+
+        Person person = new Person();
+        person.setPartyId(party.getPartyId());
+        person.setFullName(request.fullName());
+        person.setMobileNumber(request.mobileNumber());
+        personRepository.save(person);
+
+        UserLogin user = new UserLogin();
+        user.setPartyId(party.getPartyId());
+        user.setUsername(request.username());
+        user.setPasswordHash(passwordEncoder.encode(request.password()));
+        user.setRoleTypeId(RoleType.SUPER_ADMIN);
+        user.setOrganizationId(null);
+        user = userLoginRepository.save(user);
+
+        log.info("Super admin created: {}", user.getUsername());
+        return issueTokens((AppUserPrincipal) userDetailsService.loadUserByUsername(user.getUsername()));
+    }
 
     @Transactional
     public AuthResponse registerOwner(RegisterOwnerRequest request) {
