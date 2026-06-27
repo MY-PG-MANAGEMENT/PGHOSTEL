@@ -1,3 +1,5 @@
+export 'admin_screen.dart' show SuperAdminScreen;
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -5,7 +7,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
-import '../widgets/app_shell.dart';
 import '../widgets/async_action_button.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
@@ -519,6 +520,26 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   void initState() { super.initState(); _load(); }
   void _load() { future = context.read<AppState>().apiClient.get('/notifications?state=$filter'); }
+
+  static (IconData, Color) _notifStyle(String category) => switch (category) {
+    'RENT_REMINDER'    => (Icons.schedule, Color(0xFFF97316)),
+    'CHECKOUT_REMINDER'=> (Icons.logout_outlined, Color(0xFF2563EB)),
+    'PAYMENT_RECEIPT'  => (Icons.receipt_long_outlined, Color(0xFF16A34A)),
+    'CHECK_IN'         => (Icons.person_add_outlined, Color(0xFF7C3AED)),
+    _                  => (Icons.notifications_outlined, PgColors.primary),
+  };
+
+  static String _formatTime(Object? raw) {
+    if (raw == null) return '';
+    try {
+      final dt = DateTime.parse(raw.toString().replaceAll(' ', 'T'));
+      final diff = DateTime.now().difference(dt);
+      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+      if (diff.inHours < 24)   return '${diff.inHours}h ago';
+      if (diff.inDays < 7)     return '${diff.inDays}d ago';
+      return '${dt.day}/${dt.month}/${dt.year}';
+    } catch (_) { return raw.toString(); }
+  }
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: const Color(0xFFF5F6FA),
@@ -561,19 +582,60 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         if (items.isEmpty) return const EmptyState(icon: Icons.notifications_none, title: 'No notifications', message: 'Updates will appear here.');
         return ListView.separated(padding: const EdgeInsets.all(12), itemCount: items.length, separatorBuilder: (_, __) => const SizedBox(height: 8), itemBuilder: (context, index) {
           final item = items[index] as Map<String, dynamic>;
-          return Card(child: ListTile(
-            leading: const CircleAvatar(backgroundColor: PgColors.lavender, child: Icon(Icons.notifications_outlined, color: PgColors.primary)),
-            title: Text('${item['title']}', style: const TextStyle(fontWeight: FontWeight.w700)),
-            subtitle: Text('${item['message']}'),
-            trailing: PopupMenuButton<String>(onSelected: (action) async {
-              final id = item['notification_id'];
-              await context.read<AppState>().apiClient.patch('/notifications/$id/${action == 'read' ? 'read' : 'archive'}', {});
-              setState(_load);
-            }, itemBuilder: (_) => const [
-              PopupMenuItem(value: 'read', child: Text('Mark as read')),
-              PopupMenuItem(value: 'archive', child: Text('Archive')),
-            ]),
-          ));
+          final category = '${item['category_id'] ?? ''}';
+          final isUnread = item['read_at'] == null;
+          final isImportant = item['important'] == true || item['important'] == 1;
+          final (icon, color) = _notifStyle(category);
+          return Card(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () async {
+                if (isUnread) {
+                  await context.read<AppState>().apiClient.patch('/notifications/${item['notification_id']}/read', {});
+                  setState(_load);
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Stack(children: [
+                    Container(
+                      width: 42, height: 42,
+                      decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
+                      child: Icon(icon, color: color, size: 20),
+                    ),
+                    if (isUnread) Positioned(right: 0, top: 0, child: Container(
+                      width: 10, height: 10,
+                      decoration: BoxDecoration(color: PgColors.primary, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 1.5)),
+                    )),
+                  ]),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Expanded(child: Text('${item['title']}', style: TextStyle(fontWeight: isUnread ? FontWeight.w700 : FontWeight.w600, fontSize: 13, color: const Color(0xFF111827)))),
+                      if (isImportant) const Icon(Icons.priority_high, size: 14, color: PgColors.danger),
+                    ]),
+                    const SizedBox(height: 3),
+                    Text('${item['message']}', style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)), maxLines: 2, overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 4),
+                    Text(_formatTime(item['created_at']), style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+                  ])),
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, size: 18, color: Color(0xFF9CA3AF)),
+                    onSelected: (action) async {
+                      final id = item['notification_id'];
+                      await context.read<AppState>().apiClient.patch('/notifications/$id/${action == 'read' ? 'read' : 'archive'}', {});
+                      setState(_load);
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'read', child: Text('Mark as read')),
+                      PopupMenuItem(value: 'archive', child: Text('Archive')),
+                    ],
+                  ),
+                ]),
+              ),
+            ),
+          );
         });
       })),
     ]),
@@ -619,52 +681,6 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
       }).toList());
     }),
   );
-}
-
-// ─── Super Admin Screen ───────────────────────────────────────────────────────
-
-class SuperAdminScreen extends StatefulWidget {
-  const SuperAdminScreen({super.key});
-  @override
-  State<SuperAdminScreen> createState() => _SuperAdminScreenState();
-}
-class _SuperAdminScreenState extends State<SuperAdminScreen> {
-  int selected = 0;
-  static const sections = [
-    ('Dashboard', '/super-admin/dashboard', Icons.dashboard_outlined),
-    ('Properties', '/super-admin/properties', Icons.apartment_outlined),
-    ('Customers', '/super-admin/organizations', Icons.business_outlined),
-    ('Users', '/super-admin/users', Icons.people_outline),
-    ('Plans & Pricing', '/super-admin/plans', Icons.sell_outlined),
-    ('Reports', '/super-admin/reports/revenue', Icons.bar_chart),
-    ('Audit Logs', '/super-admin/audit-logs', Icons.history),
-    ('System Settings', '/super-admin/system-settings', Icons.settings_outlined),
-  ];
-  @override
-  Widget build(BuildContext context) {
-    final section = sections[selected];
-    return AppShell(title: section.$1, child: Row(children: [
-      NavigationRail(
-        selectedIndex: selected,
-        labelType: NavigationRailLabelType.none,
-        onDestinationSelected: (value) => setState(() => selected = value),
-        destinations: sections.map((s) => NavigationRailDestination(icon: Icon(s.$3), label: Text(s.$1))).toList(),
-      ),
-      const VerticalDivider(width: 1),
-      Expanded(child: Padding(padding: const EdgeInsets.only(left: 20), child: FutureBuilder<Map<String, dynamic>>(
-        key: ValueKey(selected),
-        future: context.read<AppState>().apiClient.get(section.$2),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-          if (snapshot.hasError) return ErrorState(error: snapshot.error, retry: () => setState(() {}));
-          final data = snapshot.data ?? const <String, dynamic>{};
-          final items = data['items'];
-          if (items is List) return RecordList(items: items);
-          return ListView(children: [KeyValueSummary(values: data)]);
-        },
-      ))),
-    ]));
-  }
 }
 
 // ─── Shared Widgets ───────────────────────────────────────────────────────────

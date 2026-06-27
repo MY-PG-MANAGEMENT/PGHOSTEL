@@ -190,7 +190,7 @@ class _PropertyWorkspaceScreenState extends State<PropertyWorkspaceScreen> {
           ),
           _PropertyTenantsTab(propertyId: _propertyId),
           _PropertyPaymentsTab(propertyId: _propertyId),
-          const _PropertyReportsTab(),
+          _PropertyReportsTab(propertyId: _propertyId),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -2449,7 +2449,9 @@ class _BedTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           onTap: isOccupied && occupantPartyId != null
               ? () => _goToTenant(context, occupantPartyId)
-              : null,
+              : !isOccupied
+                  ? () => _openAssign(context, bedId, name)
+                  : null,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
             child: Row(
@@ -2515,21 +2517,7 @@ class _BedTile extends StatelessWidget {
               padding: EdgeInsets.zero,
               onSelected: (v) async {
                 if (v == 'assign') {
-                  final done = await showModalBottomSheet<bool>(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: Colors.white,
-                    shape: const RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.vertical(top: Radius.circular(20))),
-                    builder: (_) => AssignBedSheet(
-                      bedId: bedId,
-                      bedName: name,
-                      propertyId: propertyId,
-                      sharingType: sharingType,
-                    ),
-                  );
-                  if (done == true) onChanged();
+                  _openAssign(context, bedId, name);
                 } else if (v == 'checkout') {
                   if (occupantPartyId != null) {
                     await showModalBottomSheet<bool>(
@@ -2594,6 +2582,23 @@ class _BedTile extends StatelessWidget {
     );
   }
 
+  Future<void> _openAssign(BuildContext context, int bedId, String name) async {
+    final done = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => AssignBedSheet(
+        bedId: bedId,
+        bedName: name,
+        propertyId: propertyId,
+        sharingType: sharingType,
+      ),
+    );
+    if (done == true) onChanged();
+  }
+
   Future<void> _goToTenant(BuildContext context, int partyId) async {
     showDialog(
       context: context,
@@ -2643,35 +2648,349 @@ class _PropertyPaymentsTab extends StatelessWidget {
 
 // ─── Reports Tab ──────────────────────────────────────────────────────────────
 
-class _PropertyReportsTab extends StatelessWidget {
-  const _PropertyReportsTab();
+class _PropertyReportsTab extends StatefulWidget {
+  const _PropertyReportsTab({required this.propertyId});
+  final int propertyId;
+
+  @override
+  State<_PropertyReportsTab> createState() => _PropertyReportsTabState();
+}
+
+class _PropertyReportsTabState extends State<_PropertyReportsTab> {
+  Map<String, dynamic>? _data;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() { _error = null; });
+    try {
+      final raw = await context.read<AppState>().apiClient
+          .get('/properties/${widget.propertyId}/report');
+      setState(() => _data = Map<String, dynamic>.from(raw));
+    } catch (e) {
+      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Center(
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(_error!, style: const TextStyle(color: Colors.red)),
+            const SizedBox(height: 12),
+            FilledButton(onPressed: _load, child: const Text('Retry')),
+          ]),
+        ),
+      );
+    }
+    if (_data == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final upcoming = (_data!['upcomingCheckouts'] as List? ?? []).cast<Map<String, dynamic>>();
+    final joiners  = (_data!['recentJoiners']      as List? ?? []).cast<Map<String, dynamic>>();
+    final defaulters = (_data!['defaulters']        as List? ?? []).cast<Map<String, dynamic>>();
+    final trend    = (_data!['monthlyTrend']        as List? ?? []).cast<Map<String, dynamic>>();
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _ReportCard(
+            icon: Icons.logout_outlined,
+            iconColor: PgColors.warning,
+            title: 'Upcoming Checkouts',
+            subtitle: 'Next 30 days',
+            count: upcoming.length,
+            emptyText: 'No checkouts expected in the next 30 days',
+            children: upcoming.map((r) => _ReportRow(
+              leading: Icons.person_outlined,
+              title: '${r['full_name']}',
+              trailing: _fmtDate(r['expected_checkout_date']?.toString()),
+              trailingColor: PgColors.warning,
+            )).toList(),
+          ),
+          const SizedBox(height: 12),
+          _ReportCard(
+            icon: Icons.person_add_outlined,
+            iconColor: PgColors.success,
+            title: 'New Joiners',
+            subtitle: 'Last 30 days',
+            count: joiners.length,
+            emptyText: 'No new tenants in the last 30 days',
+            children: joiners.map((r) => _ReportRow(
+              leading: Icons.person_outlined,
+              title: '${r['full_name']}',
+              trailing: _fmtDate(r['from_date']?.toString()),
+              sub: r['monthly_rent'] != null ? '₹${r['monthly_rent']}/mo' : null,
+            )).toList(),
+          ),
+          const SizedBox(height: 12),
+          _ReportCard(
+            icon: Icons.warning_amber_rounded,
+            iconColor: PgColors.danger,
+            title: 'Unpaid This Month',
+            subtitle: 'Pending / overdue invoices',
+            count: defaulters.length,
+            emptyText: 'All tenants have paid this month',
+            emptyColor: PgColors.success,
+            children: defaulters.map((r) {
+              final status = '${r['status']}';
+              final color = status == 'OVERDUE' ? PgColors.danger : PgColors.warning;
+              return _ReportRow(
+                leading: Icons.receipt_long_outlined,
+                leadingColor: color,
+                title: '${r['full_name']}',
+                trailing: '₹${_fmt(r['balance'])} due',
+                trailingColor: color,
+                sub: status,
+                subColor: color,
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
+          _MonthlyTrendCard(trend: trend),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  String _fmtDate(String? iso) {
+    if (iso == null) return '—';
+    try {
+      final d = DateTime.parse(iso);
+      const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return '${d.day} ${m[d.month - 1]} ${d.year}';
+    } catch (_) { return iso; }
+  }
+
+  String _fmt(dynamic v) {
+    if (v == null) return '0';
+    final n = double.tryParse('$v') ?? 0;
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}k';
+    return n.toStringAsFixed(0);
+  }
+}
+
+class _ReportCard extends StatelessWidget {
+  const _ReportCard({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.count,
+    required this.emptyText,
+    required this.children,
+    this.emptyColor,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final int count;
+  final String emptyText;
+  final List<Widget> children;
+  final Color? emptyColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: PgColors.border),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(16),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                  color: PgColors.lavender, borderRadius: BorderRadius.circular(18)),
-              child: const Icon(Icons.bar_chart, size: 36, color: PgColors.primary),
-            ),
-            const SizedBox(height: 16),
-            const Text('Reports',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
-            const SizedBox(height: 8),
-            Text('Reports & analytics coming soon.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey[600])),
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, color: iconColor, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                  Text(subtitle, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                ],
+              )),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: count > 0 ? iconColor.withValues(alpha: 0.1) : Colors.grey.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text('$count',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        color: count > 0 ? iconColor : Colors.grey)),
+              ),
+            ]),
+            if (children.isNotEmpty) ...[
+              const Divider(height: 20),
+              ...children,
+            ] else ...[
+              const SizedBox(height: 12),
+              Row(children: [
+                Icon(Icons.check_circle_outline, size: 15, color: emptyColor ?? Colors.grey[400]),
+                const SizedBox(width: 6),
+                Text(emptyText, style: TextStyle(fontSize: 12, color: emptyColor ?? Colors.grey[500])),
+              ]),
+            ],
           ],
         ),
       ),
     );
+  }
+}
+
+class _ReportRow extends StatelessWidget {
+  const _ReportRow({
+    required this.leading,
+    required this.title,
+    required this.trailing,
+    this.leadingColor,
+    this.trailingColor,
+    this.sub,
+    this.subColor,
+  });
+
+  final IconData leading;
+  final String title;
+  final String trailing;
+  final Color? leadingColor;
+  final Color? trailingColor;
+  final String? sub;
+  final Color? subColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(children: [
+        Icon(leading, size: 15, color: leadingColor ?? Colors.grey[400]),
+        const SizedBox(width: 8),
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+            if (sub != null)
+              Text(sub!, style: TextStyle(fontSize: 11, color: subColor ?? Colors.grey[500])),
+          ],
+        )),
+        Text(trailing,
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: trailingColor ?? Colors.grey[700])),
+      ]),
+    );
+  }
+}
+
+class _MonthlyTrendCard extends StatelessWidget {
+  const _MonthlyTrendCard({required this.trend});
+  final List<Map<String, dynamic>> trend;
+
+  @override
+  Widget build(BuildContext context) {
+    if (trend.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final maxVal = trend.fold<double>(
+        1, (m, r) => (double.tryParse('${r['collected']}') ?? 0) > m
+            ? double.tryParse('${r['collected']}') ?? 0
+            : m);
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: PgColors.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: PgColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.bar_chart, color: PgColors.primary, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Monthly Collection', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                Text('Last 6 months', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+              ]),
+            ]),
+            const SizedBox(height: 16),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: trend.map((r) {
+                final val = double.tryParse('${r['collected']}') ?? 0;
+                final ratio = maxVal > 0 ? val / maxVal : 0.0;
+                final label = '${r['month']}'.substring(5); // "MM" from "YYYY-MM"
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                    child: Column(
+                      children: [
+                        Text(_fmt(val),
+                            style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w600),
+                            textAlign: TextAlign.center),
+                        const SizedBox(height: 3),
+                        Container(
+                          height: 60 * ratio + 4,
+                          decoration: BoxDecoration(
+                            color: PgColors.primary.withValues(alpha: 0.7 + 0.3 * ratio),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(label,
+                            style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                            textAlign: TextAlign.center),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _fmt(double v) {
+    if (v >= 100000) return '${(v / 100000).toStringAsFixed(1)}L';
+    if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}k';
+    return v.toStringAsFixed(0);
   }
 }
 

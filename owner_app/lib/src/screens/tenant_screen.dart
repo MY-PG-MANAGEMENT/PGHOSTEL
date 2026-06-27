@@ -4,11 +4,10 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
-import '../utils/date_utils.dart';
 import '../widgets/async_action_button.dart';
 import '../widgets/error_retry_view.dart';
 import 'billing_screen.dart' show InvoiceDetailSheet;
-import 'checkout_sheet.dart' show CheckoutSheet;
+import 'checkout_sheet.dart' show CheckoutSheet, TransferBedSheet;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -350,10 +349,12 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
         actions: [
           PopupMenuButton<String>(
             onSelected: _onMenuAction,
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'edit', child: Text('Edit Profile')),
-              PopupMenuItem(value: 'emergency', child: Text('Emergency Contact')),
-              PopupMenuItem(value: 'employment', child: Text('Employment')),
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'edit', child: Text('Edit Profile')),
+              const PopupMenuItem(value: 'emergency', child: Text('Emergency Contact')),
+              const PopupMenuItem(value: 'employment', child: Text('Employment')),
+              if (_tenant['hasActiveAdmission'] == true)
+                const PopupMenuItem(value: 'transfer', child: Text('Transfer Bed')),
             ],
           ),
         ],
@@ -427,6 +428,26 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         builder: (_) => _EditEmploymentSheet(tenant: _tenant),
+      );
+    } else if (action == 'transfer') {
+      // Refresh first so we have the latest currentPropertyId from the detail API
+      await _refreshTenant();
+      if (!mounted) return;
+      final propertyId = _tenant['currentPropertyId'];
+      changed = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (_) => TransferBedSheet(
+          partyId: (_tenant['tenantId'] as num).toInt(),
+          tenantName: '${_tenant['fullName'] ?? 'Tenant'}',
+          currentPropertyId: propertyId != null ? (propertyId as num).toInt() : null,
+          onTransferred: _refreshTenant,
+        ),
       );
     }
     if (changed == true && mounted) {
@@ -523,11 +544,13 @@ class _ProfileTabState extends State<_ProfileTab> {
   Future<void> _setCheckoutDate() async {
     final tenantId = widget.tenant['tenantId'];
     final existing = widget.tenant['expectedCheckoutDate'] as String?;
+    final moveIn = widget.tenant['moveInDate'] as String?;
     final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => _SetCheckoutDateDialog(
         partyId: tenantId,
         existingIso: existing,
+        moveInDateIso: moveIn,
       ),
     );
     if (saved == true) widget.onCheckoutDateSet();
@@ -600,49 +623,74 @@ class _ProfileTabState extends State<_ProfileTab> {
 // ─── Set Checkout Date Dialog ─────────────────────────────────────────────
 
 class _SetCheckoutDateDialog extends StatefulWidget {
-  const _SetCheckoutDateDialog({required this.partyId, this.existingIso});
+  const _SetCheckoutDateDialog({
+    required this.partyId,
+    this.existingIso,
+    this.moveInDateIso,
+  });
 
   final dynamic partyId;
   final String? existingIso;
+  final String? moveInDateIso;
 
   @override
   State<_SetCheckoutDateDialog> createState() => _SetCheckoutDateDialogState();
 }
 
 class _SetCheckoutDateDialogState extends State<_SetCheckoutDateDialog> {
-  late final TextEditingController _ctrl;
+  DateTime? _selected;
   bool _saving = false;
+
+  DateTime? get _maxDate {
+    if (widget.moveInDateIso == null) return null;
+    try {
+      final moveIn = DateTime.parse(widget.moveInDateIso!);
+      final now = DateTime.now();
+      DateTime thisMonthDue;
+      try {
+        thisMonthDue = DateTime(now.year, now.month, moveIn.day);
+      } catch (_) {
+        thisMonthDue = DateTime(now.year, now.month + 1, 1);
+      }
+      final nextDue = !thisMonthDue.isAfter(now)
+          ? DateTime(now.year, now.month + 1, moveIn.day)
+          : thisMonthDue;
+      return nextDue.subtract(const Duration(days: 1));
+    } catch (_) {
+      return null;
+    }
+  }
 
   @override
   void initState() {
     super.initState();
-    String initial = '';
     if (widget.existingIso != null) {
       try {
-        final d = DateTime.parse(widget.existingIso!);
-        initial = '${d.day.toString().padLeft(2, '0')}-${d.month.toString().padLeft(2, '0')}-${d.year}';
+        _selected = DateTime.parse(widget.existingIso!);
       } catch (_) {}
     }
-    _ctrl = TextEditingController(text: initial);
   }
 
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
+  Future<void> _pickDate() async {
+    final max = _maxDate;
+    final now = DateTime.now();
+    final initial = _selected ?? now;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: (max != null && initial.isAfter(max)) ? max : initial,
+      firstDate: now,
+      lastDate: max ?? DateTime(now.year + 5),
+      helpText: max != null
+          ? 'Max: ${max.day.toString().padLeft(2, '0')}-${max.month.toString().padLeft(2, '0')}-${max.year}'
+          : 'Select expected checkout date',
+    );
+    if (picked != null) setState(() => _selected = picked);
   }
 
   Future<void> _save() async {
-    final text = _ctrl.text.trim();
-    String? iso;
-    if (text.isNotEmpty) {
-      iso = dmyToIso(text);
-      if (iso == text) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Enter date as DD-MM-YYYY (e.g. 30-06-2026)')));
-        return;
-      }
-    }
+    final iso = _selected != null
+        ? '${_selected!.year}-${_selected!.month.toString().padLeft(2, '0')}-${_selected!.day.toString().padLeft(2, '0')}'
+        : null;
     setState(() => _saving = true);
     try {
       await context.read<AppState>().apiClient.put('/occupancy/expected-checkout', {
@@ -661,25 +709,42 @@ class _SetCheckoutDateDialogState extends State<_SetCheckoutDateDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final max = _maxDate;
+    final label = _selected != null
+        ? '${_selected!.day.toString().padLeft(2, '0')}-${_selected!.month.toString().padLeft(2, '0')}-${_selected!.year}'
+        : 'Tap to select date';
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: const Text('Set Checkout Date', style: TextStyle(fontWeight: FontWeight.w800)),
       content: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Enter the expected checkout date, or leave blank to clear it.'),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _ctrl,
-            decoration: const InputDecoration(
-              labelText: 'Checkout Date (DD-MM-YYYY)',
-              prefixIcon: Icon(Icons.event_available_outlined),
-              helperText: 'Leave blank if tenant will continue indefinitely',
+          if (max != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(
+                'Must be before next payment date (${max.day.toString().padLeft(2, '0')}-${max.month.toString().padLeft(2, '0')}-${max.year})',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
             ),
-            keyboardType: TextInputType.number,
-            inputFormatters: [DateDmyFormatter()],
-            autofocus: true,
+          InkWell(
+            onTap: _saving ? null : _pickDate,
+            borderRadius: BorderRadius.circular(8),
+            child: InputDecorator(
+              decoration: const InputDecoration(
+                labelText: 'Expected Checkout Date',
+                prefixIcon: Icon(Icons.event_available_outlined),
+                border: OutlineInputBorder(),
+              ),
+              child: Text(label),
+            ),
           ),
+          if (_selected != null)
+            TextButton(
+              onPressed: _saving ? null : () => setState(() => _selected = null),
+              child: const Text('Clear date'),
+            ),
         ],
       ),
       actions: [
@@ -1140,7 +1205,7 @@ class _AddTenantScreenState extends State<AddTenantScreen> {
   final _mobile = TextEditingController();
   final _email = TextEditingController();
   final _aadhaar = TextEditingController();
-  final _dob = TextEditingController();
+  DateTime? _dob;
   final _address = TextEditingController();
   String? _gender;
 
@@ -1150,9 +1215,20 @@ class _AddTenantScreenState extends State<AddTenantScreen> {
     _mobile.dispose();
     _email.dispose();
     _aadhaar.dispose();
-    _dob.dispose();
     _address.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickDob() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _dob ?? DateTime(now.year - 20),
+      firstDate: DateTime(now.year - 100),
+      lastDate: now,
+      helpText: 'Select date of birth',
+    );
+    if (picked != null) setState(() => _dob = picked);
   }
 
   @override
@@ -1238,14 +1314,28 @@ class _AddTenantScreenState extends State<AddTenantScreen> {
                     },
                   ),
                   const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _dob,
-                    decoration: const InputDecoration(
-                        labelText: 'Date of Birth (DD-MM-YYYY)',
-                        prefixIcon: Icon(Icons.cake_outlined)),
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.next,
-                    inputFormatters: [DateDmyFormatter()],
+                  InkWell(
+                    onTap: _pickDob,
+                    borderRadius: BorderRadius.circular(8),
+                    child: InputDecorator(
+                      decoration: InputDecoration(
+                        labelText: 'Date of Birth',
+                        prefixIcon: const Icon(Icons.cake_outlined),
+                        border: const OutlineInputBorder(),
+                        suffixIcon: _dob != null
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                onPressed: () => setState(() => _dob = null),
+                              )
+                            : null,
+                      ),
+                      child: Text(
+                        _dob != null
+                            ? '${_dob!.day.toString().padLeft(2, '0')}-${_dob!.month.toString().padLeft(2, '0')}-${_dob!.year}'
+                            : 'Tap to select',
+                        style: _dob == null ? TextStyle(color: Colors.grey[500]) : null,
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
@@ -1270,8 +1360,8 @@ class _AddTenantScreenState extends State<AddTenantScreen> {
                           if (_email.text.isNotEmpty) 'email': _email.text.trim(),
                           if (_aadhaar.text.isNotEmpty)
                             'aadhaarNumber': _aadhaar.text.trim(),
-                          if (_dob.text.isNotEmpty)
-                            'dateOfBirth': dmyToIso(_dob.text.trim()),
+                          if (_dob != null)
+                            'dateOfBirth': '${_dob!.year}-${_dob!.month.toString().padLeft(2, '0')}-${_dob!.day.toString().padLeft(2, '0')}',
                           if (_address.text.isNotEmpty)
                             'permanentAddress': _address.text.trim(),
                           if (widget.propertyId != null)
@@ -1315,8 +1405,11 @@ class _EditTenantScreenState extends State<EditTenantScreen> {
   late final _mobile =
       TextEditingController(text: '${widget.tenant['mobileNumber'] ?? ''}');
   late final _email = TextEditingController(text: '${widget.tenant['email'] ?? ''}');
-  late final _dob = TextEditingController(
-      text: isoToDmy(widget.tenant['dateOfBirth']?.toString() ?? ''));
+  late DateTime? _dob = () {
+    final raw = widget.tenant['dateOfBirth']?.toString();
+    if (raw == null || raw.isEmpty) return null;
+    try { return DateTime.parse(raw); } catch (_) { return null; }
+  }();
   late final _address =
       TextEditingController(text: '${widget.tenant['permanentAddress'] ?? ''}');
   late String? _gender = widget.tenant['gender'] as String?;
@@ -1326,9 +1419,20 @@ class _EditTenantScreenState extends State<EditTenantScreen> {
     _fullName.dispose();
     _mobile.dispose();
     _email.dispose();
-    _dob.dispose();
     _address.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickDob() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _dob ?? DateTime(now.year - 20),
+      firstDate: DateTime(now.year - 100),
+      lastDate: now,
+      helpText: 'Select date of birth',
+    );
+    if (picked != null) setState(() => _dob = picked);
   }
 
   @override
@@ -1392,14 +1496,28 @@ class _EditTenantScreenState extends State<EditTenantScreen> {
                     textInputAction: TextInputAction.next,
                   ),
                   const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _dob,
-                    decoration: const InputDecoration(
-                        labelText: 'Date of Birth (DD-MM-YYYY)',
-                        prefixIcon: Icon(Icons.cake_outlined)),
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.next,
-                    inputFormatters: [DateDmyFormatter()],
+                  InkWell(
+                    onTap: _pickDob,
+                    borderRadius: BorderRadius.circular(8),
+                    child: InputDecorator(
+                      decoration: InputDecoration(
+                        labelText: 'Date of Birth',
+                        prefixIcon: const Icon(Icons.cake_outlined),
+                        border: const OutlineInputBorder(),
+                        suffixIcon: _dob != null
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                onPressed: () => setState(() => _dob = null),
+                              )
+                            : null,
+                      ),
+                      child: Text(
+                        _dob != null
+                            ? '${_dob!.day.toString().padLeft(2, '0')}-${_dob!.month.toString().padLeft(2, '0')}-${_dob!.year}'
+                            : 'Tap to select',
+                        style: _dob == null ? TextStyle(color: Colors.grey[500]) : null,
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
@@ -1423,8 +1541,8 @@ class _EditTenantScreenState extends State<EditTenantScreen> {
                           'mobileNumber': _mobile.text.trim(),
                           if (_gender != null) 'gender': _gender,
                           if (_email.text.isNotEmpty) 'email': _email.text.trim(),
-                          if (_dob.text.isNotEmpty)
-                            'dateOfBirth': dmyToIso(_dob.text.trim()),
+                          if (_dob != null)
+                            'dateOfBirth': '${_dob!.year}-${_dob!.month.toString().padLeft(2, '0')}-${_dob!.day.toString().padLeft(2, '0')}',
                           if (_address.text.isNotEmpty)
                             'permanentAddress': _address.text.trim(),
                         });

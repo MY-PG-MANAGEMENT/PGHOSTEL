@@ -40,8 +40,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: PgColors.primaryDark,
-      body: Column(
+      body: Stack(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [PgColors.primaryDark, PgColors.primary],
+              ),
+            ),
+          ),
+          Column(
         children: [
           AuthBrandHeader(
             subtitle: 'Set up your owner account',
@@ -179,6 +189,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
             ),
+          ),
+        ],
           ),
         ],
       ),

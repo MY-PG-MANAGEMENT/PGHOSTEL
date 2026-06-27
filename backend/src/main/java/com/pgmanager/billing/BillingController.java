@@ -3,6 +3,7 @@ package com.pgmanager.billing;
 import com.pgmanager.common.api.ApiResponse;
 import com.pgmanager.common.exception.BadRequestException;
 import com.pgmanager.common.exception.NotFoundException;
+import com.pgmanager.notification.NotificationService;
 import com.pgmanager.security.CurrentUser;
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
@@ -32,6 +33,7 @@ import java.util.Map;
 public class BillingController {
     private final CurrentUser currentUser;
     private final JdbcTemplate jdbc;
+    private final NotificationService notificationService;
 
     @GetMapping("/dashboard")
     ApiResponse<Map<String, Object>> dashboard(@RequestParam(required = false) Long propertyId) {
@@ -182,6 +184,8 @@ public class BillingController {
         String status = paid.compareTo(decimal(invoice.get("total_amount"))) >= 0 ? "PAID" : "PARTIAL";
         jdbc.update("UPDATE invoice SET paid_amount=?,status=?,updated_at=?,version=version+1 WHERE invoice_id=?",
                 paid, status, LocalDateTime.now(), request.invoiceId());
+        Long partyId = ((Number) invoice.get("party_id")).longValue();
+        notificationService.notifyPaymentReceipt(org, partyId, paymentId, request.amount());
         return ApiResponse.ok("Payment recorded", Map.of("paymentId", paymentId, "invoiceId", request.invoiceId(),
                 "amount", request.amount(), "paymentMode", mode, "status", status, "receiptNumber", "RCP-" + paymentId));
     }
@@ -195,7 +199,8 @@ public class BillingController {
 
     @PostMapping("/generate-invoices")
     @Transactional
-    ApiResponse<Map<String, Object>> generateInvoices(@RequestParam(required = false) String month) {
+    ApiResponse<Map<String, Object>> generateInvoices(@RequestParam(required = false) String month,
+                                                       @RequestParam(required = false) Long propertyId) {
         Long org = currentUser.organizationId();
         LocalDate invoiceMonth;
         try {
@@ -203,11 +208,15 @@ public class BillingController {
         } catch (Exception e) {
             throw new BadRequestException("Invalid month format; use YYYY-MM");
         }
+        String propFilter = partyPropFilter("ba", propertyId);
+        java.util.List<Object> argList = new java.util.ArrayList<>();
+        argList.add(org);
+        if (propertyId != null) { argList.add(org); argList.add(propertyId); }
         List<Map<String, Object>> accounts = jdbc.queryForList(
                 "SELECT ba.billing_account_id,ba.party_id,fp.monthly_rent,fp.from_date " +
                 "FROM billing_account ba JOIN facility_party fp ON fp.party_id=ba.party_id " +
                 "  AND fp.organization_id=ba.organization_id AND fp.role_type_id='OCCUPANT' AND fp.thru_date IS NULL " +
-                "WHERE ba.organization_id=? AND ba.status='ACTIVE'", org);
+                "WHERE ba.organization_id=?" + propFilter + " AND ba.status='ACTIVE'", argList.toArray());
         int generated = 0;
         for (Map<String, Object> account : accounts) {
             Long baId = ((Number) account.get("billing_account_id")).longValue();

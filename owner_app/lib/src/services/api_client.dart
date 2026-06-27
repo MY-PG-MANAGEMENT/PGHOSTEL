@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -12,7 +13,7 @@ class ApiClient {
   final FlutterSecureStorage storage;
   static const String _configuredBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://192.168.1.19:8080/api',
+    defaultValue: 'http://192.168.1.27:8080/api',
   );
   final String baseUrl = _configuredBaseUrl;
 
@@ -32,6 +33,28 @@ class ApiClient {
   Future<Map<String, dynamic>> patch(String path, Map<String, dynamic> body) => _send('PATCH', path, body: body);
   Future<Map<String, dynamic>> delete(String path) => _send('DELETE', path);
 
+  Future<Map<String, dynamic>> postFile(String path, Uint8List bytes, String filename) async {
+    final url = '$baseUrl$path';
+    try {
+      final token = await storage.read(key: 'accessToken');
+      final request = http.MultipartRequest('POST', Uri.parse(url));
+      if (token != null) request.headers['Authorization'] = 'Bearer $token';
+      request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      if (response.statusCode == 401) {
+        final refreshed = await _refresh();
+        if (refreshed) return postFile(path, bytes, filename);
+      }
+      return _decode(response);
+    } catch (e) {
+      if (e is SocketException || e is HandshakeException || e is OSError) {
+        throw const NetworkException();
+      }
+      rethrow;
+    }
+  }
+
   Future<Map<String, dynamic>> _send(
       String method,
       String path, {
@@ -44,7 +67,7 @@ class ApiClient {
     try {
       print('');
       print('══════════════════════════════');
-      print('REQUEST')
+      print('REQUEST');
       print('$method $url');
 
 

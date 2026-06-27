@@ -13,7 +13,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Commands (run from `backend/`)
 
 ```bash
-./gradlew bootRun          # start dev server on :8080
+./gradlew bootRun          # start dev server on :8080 (Git Bash / macOS / Linux)
+.\gradlew.bat bootRun      # start dev server on :8080 (Windows cmd/PowerShell)
 ./gradlew test             # run all tests (Testcontainers spins up MySQL)
 ./gradlew test --tests "com.pgmanager.SomeTest"   # run a single test class
 ./gradlew build            # full build + tests
@@ -27,7 +28,7 @@ Swagger UI is at `http://localhost:8080/swagger-ui.html`.
 
 ### Database Migrations
 
-Flyway migrations in `src/main/resources/db/migration/`. Always add new migrations as `V<n>__description.sql` — never edit existing ones. `ddl-auto` is `validate`, so Hibernate rejects schema drift.
+Flyway migrations in `src/main/resources/db/migration/`. Always add new migrations as `V<n>__description.sql` — never edit existing ones. `ddl-auto` is `validate`, so Hibernate rejects schema drift. Current latest is V8 (`V8__expected_checkout_date.sql`).
 
 ### Package Structure
 
@@ -54,6 +55,7 @@ Each feature is a self-contained package under `com.pgmanager`. Cross-cutting co
 - Role URL guards live in `SecurityConfig`; fine-grained guards use `@PreAuthorize`.
 - `RoleType` constants: `SUPER_ADMIN`, `OWNER`, `PROPERTY_MANAGER`, `MANAGER`, `ACCOUNTANT`, `SUPPORT`, `VIEWER`, `TENANT`.
 - All owner business APIs must derive `organizationId` from `CurrentUser` — never accept an org ID from the request body.
+- JWT claims include: `userLoginId` (Long), `partyId` (Long), `organizationId` (Long), `roleTypeId` (String). Refresh tokens are stored as SHA-256 hashes (`HashUtil.sha256`); raw tokens are never persisted.
 
 **`billing`**
 
@@ -92,8 +94,7 @@ Each feature is a self-contained package under `com.pgmanager`. Cross-cutting co
 
 - All controllers return `ApiResponse<T>` (`{ success, message, data }`).
 - Entities extend `BaseEntity` (provides `createdAt`, `updatedAt` via JPA auditing).
-- `GlobalExceptionHandler` maps `NotFoundException` → 404, `BadRequestException` → 400.
-- Refresh tokens are stored as SHA-256 hashes (`HashUtil.sha256`); raw tokens are never persisted.
+- `GlobalExceptionHandler` maps: `NotFoundException` → 404, `BadRequestException` → 400, `MethodArgumentNotValidException` → 400 with aggregated field errors (`"field: msg, field2: msg2"`), `AccessDeniedException` → 403.
 - `AuditService.log(organizationId, userLoginId, eventType, entityType, entityId, description)` should be called for significant state changes.
 
 ### Owner registration flow
@@ -126,25 +127,38 @@ flutter build apk              # Android release APK
 flutter analyze                # lint
 ```
 
-Default API base URL in `ApiClient` is `http://192.168.1.33:8080/api` (hardcoded local IP). Override with `--dart-define=API_BASE_URL=<url>`.
+Default API base URL in `ApiClient` is a hardcoded local IP. Override with `--dart-define=API_BASE_URL=<url>` at build time.
 
 ### Architecture
 
 **State management** — single `AppState extends ChangeNotifier` (Provider, provided at root). It owns `ApiClient` and `AuthRepository`, holds `isLoggedIn` and `roleTypeId`. The `GoRouter` is constructed inside the `Consumer<AppState>` builder so route guards react to state changes.
 
-**Navigation** — `go_router` with a redirect guard: `/` dispatches to `/dashboard` (or `/admin` for SUPER_ADMIN) when logged in, or to `/login` when not. SUPER_ADMIN users are locked to `/admin`. Key routes: `/onboarding`, `/properties`, `/tenants`, `/occupancy`, `/rents`, `/billing`, `/settings`.
+**Navigation** — `go_router` with a layered redirect guard evaluated in order:
+1. Not yet initialized → stay on `/` (splash)
+2. On `/` → go to `/dashboard` (OWNER) or `/admin` (SUPER_ADMIN) if logged in, else `/login`
+3. Not logged in + on a protected route → `/login`
+4. Logged in + on an auth route (login/register) → `/dashboard` or `/admin`
+5. SUPER_ADMIN on any non-`/admin` route → `/admin`
+
+Key routes: `/onboarding`, `/properties`, `/tenants`, `/occupancy`, `/rents`, `/billing`, `/notifications`, `/settings`, `/admin`.
 
 **API layer**
 
-- `ApiClient` — HTTP wrapper that injects `Authorization: Bearer` from `FlutterSecureStorage`. On 401, it automatically calls `/auth/refresh` and retries the request once before giving up. Response unwrapping: returns `body['data']` on success, throws `Exception(body['message'])` on `success: false` or 4xx/5xx.
+- `ApiClient` — HTTP wrapper that injects `Authorization: Bearer` from `FlutterSecureStorage`. On 401, it automatically calls `/auth/refresh` and retries the original request once before clearing storage and giving up. Response unwrapping: returns `body['data']` on success, throws `Exception(body['message'])` on `success: false` or 4xx/5xx.
 - `AuthRepository` — wraps `/auth/login` and `/auth/register-owner`, persists `accessToken`, `refreshToken`, `organizationId`, and `roleTypeId` to secure storage.
 
 **Layout** — `AppShell` provides responsive chrome: sidebar nav at ≥900 px width, bottom `NavigationBar` + `Drawer` below that.
 
 **Property workspace** — `PropertyWorkspaceScreen` is a per-property tabbed view (Tenants / Billing / Rooms) reached by tapping a property card. It shares `AssignBedSheet` from `room_screen.dart`.
 
+**Screen consolidation** — `account_screens.dart` groups several screens in one file: Dashboard, Analytics, Notifications, NotificationSettings, Settings, Profile, ChangePassword, and ForgotPassword. Look here before creating new account-adjacent screens.
+
 **Biometric** — `AppState.setBiometricEnabled` / `biometricLogin` use `local_auth`. When biometric is enabled, `restoreSession` leaves `isLoggedIn = false` even if a token is present, forcing fingerprint/PIN unlock.
 
 ## Multi-tenancy
 
 Shared-database multi-tenancy. Each organization is a `Facility(ORGANIZATION)`. Every business table carries `organization_id`. The backend enforces org scope from the JWT principal via `CurrentUser`.
+
+## Docs
+
+`docs/` contains: `API_SPECIFICATION.md` (80+ endpoint reference), `MOBILE_APP_BACKEND_MAPPING.md` (screen-to-API mapping), `ANALYSIS_SUMMARY.md` (schema + screen inventory), `IMPLEMENTATION_ROADMAP.md`, and `DOCUMENTATION_INDEX.md` (navigation guide). Check these before adding endpoints or screens — the mapping doc is especially useful when wiring up new Flutter screens to backend APIs.

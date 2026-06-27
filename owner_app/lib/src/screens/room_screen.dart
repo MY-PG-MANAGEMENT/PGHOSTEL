@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
-import '../utils/date_utils.dart';
 import '../widgets/async_action_button.dart';
 import '../widgets/error_retry_view.dart';
 import 'checkout_sheet.dart' show CheckoutSheet;
@@ -235,7 +234,7 @@ class _FloorsSection extends StatelessWidget {
         }
         return Column(
           children: floors
-              .map((f) => _FloorNode(floor: f, query: query))
+              .map((f) => _FloorNode(floor: f, query: query, propertyId: propertyId))
               .toList(),
         );
       },
@@ -246,10 +245,11 @@ class _FloorsSection extends StatelessWidget {
 // â”€â”€â”€ Floor Node â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _FloorNode extends StatefulWidget {
-  const _FloorNode({required this.floor, required this.query});
+  const _FloorNode({required this.floor, required this.query, this.propertyId});
 
   final Map<String, dynamic> floor;
   final String query;
+  final dynamic propertyId;
 
   @override
   State<_FloorNode> createState() => _FloorNodeState();
@@ -312,6 +312,7 @@ class _FloorNodeState extends State<_FloorNode> {
             roomFuture: _roomFuture!,
             floorId: widget.floor['facilityId'],
             query: widget.query,
+            propertyId: widget.propertyId,
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(52, 0, 16, 10),
@@ -340,11 +341,13 @@ class _RoomsSection extends StatelessWidget {
     required this.roomFuture,
     required this.floorId,
     required this.query,
+    this.propertyId,
   });
 
   final Future<Map<String, dynamic>> roomFuture;
   final dynamic floorId;
   final String query;
+  final dynamic propertyId;
 
   @override
   Widget build(BuildContext context) {
@@ -374,7 +377,7 @@ class _RoomsSection extends StatelessWidget {
         }
         return Column(
           children: rooms
-              .map((r) => _RoomTile(room: r))
+              .map((r) => _RoomTile(room: r, propertyId: propertyId))
               .toList(),
         );
       },
@@ -385,9 +388,10 @@ class _RoomsSection extends StatelessWidget {
 // â”€â”€â”€ Room Tile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _RoomTile extends StatelessWidget {
-  const _RoomTile({required this.room});
+  const _RoomTile({required this.room, this.propertyId});
 
   final Map<String, dynamic> room;
+  final dynamic propertyId;
 
   @override
   Widget build(BuildContext context) {
@@ -399,7 +403,7 @@ class _RoomTile extends StatelessWidget {
 
     return InkWell(
       onTap: () => Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => RoomDetailScreen(room: room))),
+          builder: (_) => RoomDetailScreen(room: room, propertyId: propertyId))),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(64, 8, 16, 8),
         child: Row(
@@ -438,9 +442,10 @@ class _RoomTile extends StatelessWidget {
 // â”€â”€â”€ Room Detail Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class RoomDetailScreen extends StatefulWidget {
-  const RoomDetailScreen({required this.room, super.key});
+  const RoomDetailScreen({required this.room, this.propertyId, super.key});
 
   final Map<String, dynamic> room;
+  final dynamic propertyId;
 
   @override
   State<RoomDetailScreen> createState() => _RoomDetailScreenState();
@@ -542,7 +547,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
               }
               return Column(
                 children: beds
-                    .map((bed) => _BedTile(bed: bed, onAssigned: _loadBeds))
+                    .map((bed) => _BedTile(bed: bed, onAssigned: _loadBeds, propertyId: widget.propertyId))
                     .toList(),
               );
             },
@@ -606,17 +611,18 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => _AssignTenantSheet(room: widget.room),
+      builder: (_) => _AssignTenantSheet(room: widget.room, propertyId: widget.propertyId),
     );
     if (done == true) setState(_loadBeds);
   }
 }
 
 class _BedTile extends StatelessWidget {
-  const _BedTile({required this.bed, required this.onAssigned});
+  const _BedTile({required this.bed, required this.onAssigned, this.propertyId});
 
   final Map<String, dynamic> bed;
   final VoidCallback onAssigned;
+  final dynamic propertyId;
 
   Future<void> _confirmCheckout(BuildContext context) async {
     final partyId = bed['occupantPartyId'];
@@ -702,6 +708,7 @@ class _BedTile extends StatelessWidget {
                     builder: (_) => AssignBedSheet(
                       bedId: bed['facilityId'] as int,
                       bedName: name,
+                      propertyId: propertyId != null ? (propertyId as num).toInt() : null,
                     ),
                   );
                   if (done == true) onAssigned();
@@ -965,9 +972,10 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
 // â”€â”€â”€ Assign Tenant Sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _AssignTenantSheet extends StatefulWidget {
-  const _AssignTenantSheet({required this.room});
+  const _AssignTenantSheet({required this.room, this.propertyId});
 
   final Map<String, dynamic> room;
+  final dynamic propertyId;
 
   @override
   State<_AssignTenantSheet> createState() => _AssignTenantSheetState();
@@ -980,25 +988,38 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
   Map<String, dynamic>? _selectedBed;
   final _rent = TextEditingController();
   final _deposit = TextEditingController();
-  final _fromDate = TextEditingController();
+  DateTime _fromDate = DateTime.now();
 
   @override
   void initState() {
     super.initState();
-    _tenantFuture = context.read<AppState>().apiClient.get('/tenants');
+    final tenantsPath = widget.propertyId != null
+        ? '/properties/${widget.propertyId}/tenants'
+        : '/tenants';
+    _tenantFuture = context.read<AppState>().apiClient.get(tenantsPath);
     final id = widget.room['facilityId'];
     _bedFuture = context.read<AppState>().apiClient.get('/rooms/$id/beds');
     _rent.text = widget.room['monthlyRent']?.toString() ?? '';
     _deposit.text = widget.room['securityDeposit']?.toString() ?? '';
-    _fromDate.text = todayDmy();
   }
 
   @override
   void dispose() {
     _rent.dispose();
     _deposit.dispose();
-    _fromDate.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickFromDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _fromDate,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 1),
+      helpText: 'Select move-in date',
+    );
+    if (picked != null) setState(() => _fromDate = picked);
   }
 
   @override
@@ -1107,13 +1128,19 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
             ),
             const SizedBox(height: 12),
 
-            TextFormField(
-              controller: _fromDate,
-              decoration: const InputDecoration(
-                  labelText: 'Move-in Date (DD-MM-YYYY)',
-                  prefixIcon: Icon(Icons.calendar_today_outlined)),
-              keyboardType: TextInputType.number,
-              inputFormatters: [DateDmyFormatter()],
+            InkWell(
+              onTap: _pickFromDate,
+              borderRadius: BorderRadius.circular(8),
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'Move-in Date',
+                  prefixIcon: Icon(Icons.calendar_today_outlined),
+                  border: OutlineInputBorder(),
+                ),
+                child: Text(
+                  '${_fromDate.day.toString().padLeft(2, '0')}-${_fromDate.month.toString().padLeft(2, '0')}-${_fromDate.year}',
+                ),
+              ),
             ),
             const SizedBox(height: 12),
             Row(
@@ -1122,7 +1149,7 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
                   child: TextFormField(
                     controller: _rent,
                     decoration: const InputDecoration(
-                        labelText: 'Monthly Rent (â‚¹)',
+                        labelText: 'Monthly Rent (₹)',
                         prefixIcon: Icon(Icons.currency_rupee)),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
@@ -1132,7 +1159,7 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
                 Expanded(
                   child: TextFormField(
                     controller: _deposit,
-                    decoration: const InputDecoration(labelText: 'Deposit (â‚¹)'),
+                    decoration: const InputDecoration(labelText: 'Deposit (₹)'),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
                   ),
@@ -1149,12 +1176,13 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
                   );
                   return;
                 }
+                final d = _fromDate;
+                final fromIso = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
                 try {
                   await context.read<AppState>().apiClient.post('/occupancy/assign-bed', {
                     'partyId': _selectedTenant!['tenantId'],
                     'bedFacilityId': _selectedBed!['facilityId'],
-                    if (_fromDate.text.isNotEmpty)
-                      'fromDate': dmyToIso(_fromDate.text.trim()),
+                    'fromDate': fromIso,
                   });
                   if (mounted) Navigator.pop(context, true);
                 } catch (e) {
@@ -1196,27 +1224,65 @@ class AssignBedSheet extends StatefulWidget {
 class _AssignBedSheetState extends State<AssignBedSheet> {
   late Future<Map<String, dynamic>> _tenantFuture;
   Map<String, dynamic>? _selectedTenant;
-  final _fromDate = TextEditingController();
-  final _checkoutDate = TextEditingController();
+  DateTime _fromDate = DateTime.now();
+  DateTime? _checkoutDate;
   final _rent = TextEditingController();
   final _deposit = TextEditingController();
   final _search = TextEditingController();
   String _searchQuery = '';
   double? _standardRent;
 
+  String get _tenantsPath => widget.propertyId != null
+      ? '/properties/${widget.propertyId}/tenants'
+      : '/tenants';
+
   @override
   void initState() {
     super.initState();
-    _tenantFuture = context.read<AppState>().apiClient.get('/tenants');
-    _fromDate.text = todayDmy();
+    _tenantFuture = context.read<AppState>().apiClient.get(_tenantsPath);
     _loadStandardPrice();
     _search.addListener(() =>
         setState(() => _searchQuery = _search.text.toLowerCase().trim()));
   }
 
+  Future<void> _pickFromDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _fromDate,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 1),
+      helpText: 'Select move-in date',
+    );
+    if (picked != null) {
+      final maxCheckout = DateTime(picked.year, picked.month + 1, picked.day);
+      setState(() {
+        _fromDate = picked;
+        if (_checkoutDate != null && _checkoutDate!.isAfter(maxCheckout)) {
+          _checkoutDate = null;
+        }
+      });
+    }
+  }
+
+  Future<void> _pickCheckoutDate() async {
+    final d = _fromDate;
+    final maxCheckout = DateTime(d.year, d.month + 1, d.day);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _checkoutDate != null && !_checkoutDate!.isAfter(maxCheckout)
+          ? _checkoutDate!
+          : d,
+      firstDate: d,
+      lastDate: maxCheckout,
+      helpText: 'Max: 1 month from move-in',
+    );
+    if (picked != null) setState(() => _checkoutDate = picked);
+  }
+
   void _reloadTenants() {
     setState(() {
-      _tenantFuture = context.read<AppState>().apiClient.get('/tenants');
+      _tenantFuture = context.read<AppState>().apiClient.get(_tenantsPath);
     });
   }
 
@@ -1257,8 +1323,6 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
 
   @override
   void dispose() {
-    _fromDate.dispose();
-    _checkoutDate.dispose();
     _rent.dispose();
     _deposit.dispose();
     _search.dispose();
@@ -1540,23 +1604,45 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
               },
             ),
             const SizedBox(height: 12),
-            TextFormField(
-              controller: _fromDate,
-              decoration: const InputDecoration(
-                  labelText: 'Move-in Date (DD-MM-YYYY)',
-                  prefixIcon: Icon(Icons.calendar_today_outlined)),
-              keyboardType: TextInputType.number,
-              inputFormatters: [DateDmyFormatter()],
+            InkWell(
+              onTap: _pickFromDate,
+              borderRadius: BorderRadius.circular(8),
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'Move-in Date',
+                  prefixIcon: Icon(Icons.calendar_today_outlined),
+                  border: OutlineInputBorder(),
+                ),
+                child: Text(
+                  '${_fromDate.day.toString().padLeft(2, '0')}-${_fromDate.month.toString().padLeft(2, '0')}-${_fromDate.year}',
+                ),
+              ),
             ),
             const SizedBox(height: 12),
-            TextFormField(
-              controller: _checkoutDate,
-              decoration: const InputDecoration(
-                  labelText: 'Expected Checkout Date (DD-MM-YYYY) â€” Optional',
-                  prefixIcon: Icon(Icons.event_available_outlined),
-                  helperText: 'Leave blank for open-ended stay'),
-              keyboardType: TextInputType.number,
-              inputFormatters: [DateDmyFormatter()],
+            InkWell(
+              onTap: _pickCheckoutDate,
+              borderRadius: BorderRadius.circular(8),
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  labelText: 'Expected Checkout Date — Optional',
+                  prefixIcon: const Icon(Icons.event_available_outlined),
+                  border: const OutlineInputBorder(),
+                  suffixIcon: _checkoutDate != null
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 18),
+                          onPressed: () => setState(() => _checkoutDate = null),
+                        )
+                      : null,
+                ),
+                child: Text(
+                  _checkoutDate != null
+                      ? '${_checkoutDate!.day.toString().padLeft(2, '0')}-${_checkoutDate!.month.toString().padLeft(2, '0')}-${_checkoutDate!.year}'
+                      : 'Tap to set (leave empty for open-ended stay)',
+                  style: _checkoutDate == null
+                      ? TextStyle(color: Colors.grey[500])
+                      : null,
+                ),
+              ),
             ),
             const SizedBox(height: 12),
             Row(
@@ -1604,13 +1690,15 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                   return;
                 }
                 try {
+                  final d = _fromDate;
+                  final fromIso = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+                  final co = _checkoutDate;
                   await context.read<AppState>().apiClient.post('/occupancy/assign-bed', {
                     'partyId': _selectedTenant!['tenantId'],
                     'bedFacilityId': widget.bedId,
-                    if (_fromDate.text.isNotEmpty)
-                      'fromDate': dmyToIso(_fromDate.text.trim()),
-                    if (_checkoutDate.text.isNotEmpty)
-                      'expectedCheckoutDate': dmyToIso(_checkoutDate.text.trim()),
+                    'fromDate': fromIso,
+                    if (co != null)
+                      'expectedCheckoutDate': '${co.year}-${co.month.toString().padLeft(2, '0')}-${co.day.toString().padLeft(2, '0')}',
                     if (_rent.text.trim().isNotEmpty)
                       'monthlyRent': double.tryParse(_rent.text.trim()),
                     if (_deposit.text.trim().isNotEmpty)
