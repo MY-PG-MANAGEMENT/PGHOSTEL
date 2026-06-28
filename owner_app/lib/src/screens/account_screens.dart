@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../widgets/animations.dart';
 import '../widgets/async_action_button.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
@@ -36,7 +37,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             constraints: const BoxConstraints(maxWidth: 440),
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: Form(
+              child: FadeSlideIn(
+                child: Form(
                 key: _formKey,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -108,6 +110,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                   ],
                 ),
               ),
+              ),
             ),
           ),
         ),
@@ -170,7 +173,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             mobile.text = '${data['mobileNumber'] ?? ''}';
             seeded = true;
           }
-          return ListView(
+          return FadeSlideIn(
+            child: ListView(
             padding: const EdgeInsets.all(20),
             children: [
               const Center(child: CircleAvatar(radius: 42, child: Icon(Icons.person, size: 42))),
@@ -214,6 +218,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: const Text('Save Changes'),
               ),
             ],
+          ),
           );
         },
       ),
@@ -265,7 +270,8 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       ),
       body: Form(
         key: _formKey,
-        child: ListView(
+        child: FadeSlideIn(
+          child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
             const Center(child: Icon(Icons.shield_outlined, size: 72)),
@@ -336,6 +342,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
             ),
           ],
         ),
+        ),
       ),
     );
   }
@@ -401,7 +408,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Container(height: 1, color: const Color(0xFFE5E7EB)),
         ),
       ),
-      body: ListView(
+      body: FadeSlideIn(
+        child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Card(
@@ -431,8 +439,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: const Text('Unlock using device security'),
                 value: snapshot.data == 'true',
                 onChanged: (value) async {
-                  await context.read<AppState>().setBiometricEnabled(value);
-                  if (mounted) setState(() {});
+                  final messenger = ScaffoldMessenger.of(context);
+                  final appState = context.read<AppState>();
+                  try {
+                    await appState.setBiometricEnabled(value);
+                    if (!mounted) return;
+                    setState(() {});
+                    messenger.showSnackBar(SnackBar(
+                      content: Text(value
+                          ? 'Biometric unlock enabled'
+                          : 'Biometric unlock disabled'),
+                    ));
+                  } catch (e) {
+                    messenger.showSnackBar(SnackBar(
+                      content: Text(e.toString().replaceFirst('Exception: ', '')),
+                    ));
+                  }
                 },
               ),
             ),
@@ -501,6 +523,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 8),
         ],
+      ),
       ),
     );
   }
@@ -586,7 +609,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           final isUnread = item['read_at'] == null;
           final isImportant = item['important'] == true || item['important'] == 1;
           final (icon, color) = _notifStyle(category);
-          return Card(
+          return FadeSlideIn(
+            delay: Duration(milliseconds: 40 * (index.clamp(0, 8))),
+            child: Card(
             child: InkWell(
               borderRadius: BorderRadius.circular(14),
               onTap: () async {
@@ -635,6 +660,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 ]),
               ),
             ),
+          ),
           );
         });
       })),
@@ -671,14 +697,14 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
     body: FutureBuilder<Map<String, dynamic>>(future: future, builder: (context, snapshot) {
       final items = snapshot.data?['items'] as List?;
       if (items == null) return const Center(child: CircularProgressIndicator());
-      return ListView(padding: const EdgeInsets.all(12), children: items.map((raw) {
+      return FadeSlideIn(child: ListView(padding: const EdgeInsets.all(12), children: items.map((raw) {
         final item = raw as Map<String, dynamic>;
         final enabled = item['enabled'] == true || item['enabled'] == 1;
         return Card(child: SwitchListTile(value: enabled, title: Text('${item['name']}', style: const TextStyle(fontWeight: FontWeight.w700)), subtitle: Text('${item['description'] ?? ''}'), onChanged: (value) async {
           await context.read<AppState>().apiClient.patch('/notifications/preferences', {'${item['category_id']}': value});
           setState(() => future = context.read<AppState>().apiClient.get('/notifications/preferences'));
         }));
-      }).toList());
+      }).toList()));
     }),
   );
 }

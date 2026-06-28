@@ -66,7 +66,8 @@ public final class FacilityDtos {
             LocalDate availableFrom,
             Integer photosCount,
             String occupantName,
-            Long occupantPartyId
+            Long occupantPartyId,
+            boolean temporaryStay
     ) {}
 
     public record FacilityTreeResponse(

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../widgets/animations.dart';
 import '../widgets/async_action_button.dart';
 import '../widgets/error_retry_view.dart';
 
@@ -160,13 +161,13 @@ class _BillingScreenState extends State<BillingScreen>
   @override
   Widget build(BuildContext context) {
     if (widget.embedded) {
-      return _buildBody();
+      return FadeSlideIn(child: _buildBody());
     }
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
         backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF1A1A2E),
+        foregroundColor: PgColors.textPrimary,
         elevation: 0,
         title: const Text('Billing', style: TextStyle(fontWeight: FontWeight.w700)),
         actions: [
@@ -178,10 +179,10 @@ class _BillingScreenState extends State<BillingScreen>
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: const Color(0xFFE5E7EB)),
+          child: Container(height: 1, color: PgColors.hairline),
         ),
       ),
-      body: _buildBody(),
+      body: FadeSlideIn(child: _buildBody()),
     );
   }
 
@@ -644,7 +645,10 @@ class _PaymentsTabState extends State<_PaymentsTab> {
                   padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
                   itemCount: payments.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) => _PaymentCard(payment: payments[i]),
+                  itemBuilder: (_, i) => FadeSlideIn(
+                    delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+                    child: _PaymentCard(payment: payments[i]),
+                  ),
                 ),
               );
             },
@@ -771,10 +775,13 @@ class _InvoicesTabState extends State<_InvoicesTab> {
                       padding: const EdgeInsets.fromLTRB(12, 0, 12, 96),
                       itemCount: invoices.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
-                      itemBuilder: (context, i) => _InvoiceCard(
-                        invoice: invoices[i],
-                        onCollect: widget.onCollect,
-                        onRefresh: widget.onRefresh,
+                      itemBuilder: (context, i) => FadeSlideIn(
+                        delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+                        child: _InvoiceCard(
+                          invoice: invoices[i],
+                          onCollect: widget.onCollect,
+                          onRefresh: widget.onRefresh,
+                        ),
                       ),
                     ),
                   );

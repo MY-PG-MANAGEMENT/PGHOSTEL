@@ -1,9 +1,10 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../widgets/animations.dart';
 import '../widgets/async_action_button.dart';
 import '../widgets/error_retry_view.dart';
 import 'checkout_sheet.dart' show CheckoutSheet;
@@ -11,7 +12,7 @@ import 'tenant_screen.dart' show AddTenantScreen;
 
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-String _rupees(dynamic v) => v != null ? 'â‚¹$v' : 'â€”';
+String _rupees(dynamic v) => v != null ? '₹$v' : '—';
 
 // â”€â”€â”€ Room Screen (facility tree: property â†’ floor â†’ room â†’ bed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -31,7 +32,8 @@ class _RoomScreenState extends State<RoomScreen> {
   void initState() {
     super.initState();
     _load();
-    _search.addListener(() => setState(() => _query = _search.text.toLowerCase()));
+    _search
+        .addListener(() => setState(() => _query = _search.text.toLowerCase()));
   }
 
   @override
@@ -73,7 +75,7 @@ class _RoomScreenState extends State<RoomScreen> {
             TextField(
               controller: _search,
               decoration: const InputDecoration(
-                hintText: 'Search properties, roomsâ€¦',
+                hintText: 'Search properties, rooms…',
                 prefixIcon: Icon(Icons.search),
                 contentPadding:
                     EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -109,8 +111,10 @@ class _RoomScreenState extends State<RoomScreen> {
                     child: ListView.separated(
                       itemCount: props.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      itemBuilder: (context, i) =>
-                          _PropertyNode(property: props[i], query: _query),
+                      itemBuilder: (context, i) => FadeSlideIn(
+                        delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+                        child: _PropertyNode(property: props[i], query: _query),
+                      ),
                     ),
                   );
                 },
@@ -173,16 +177,18 @@ class _PropertyNodeState extends State<_PropertyNode> {
           ListTile(
             leading: CircleAvatar(
               backgroundColor: PgColors.lavender,
-              child: const Icon(Icons.apartment_outlined, color: PgColors.primary),
+              child:
+                  const Icon(Icons.apartment_outlined, color: PgColors.primary),
             ),
-            title: Text(name,
-                style: const TextStyle(fontWeight: FontWeight.w700)),
+            title:
+                Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
             subtitle: Text([
               if (code.isNotEmpty) code,
               if (capacity != null) '$capacity beds',
             ].join(' Â· ')),
-            trailing: Icon(
-                _expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
+            trailing: Icon(_expanded
+                ? Icons.keyboard_arrow_up
+                : Icons.keyboard_arrow_down),
             onTap: _expand,
           ),
           if (_expanded)
@@ -234,7 +240,8 @@ class _FloorsSection extends StatelessWidget {
         }
         return Column(
           children: floors
-              .map((f) => _FloorNode(floor: f, query: query, propertyId: propertyId))
+              .map((f) =>
+                  _FloorNode(floor: f, query: query, propertyId: propertyId))
               .toList(),
         );
       },
@@ -295,9 +302,11 @@ class _FloorNodeState extends State<_FloorNode> {
           leading: CircleAvatar(
             radius: 16,
             backgroundColor: PgColors.lavender,
-            child: const Icon(Icons.layers_outlined, color: PgColors.primary, size: 16),
+            child: const Icon(Icons.layers_outlined,
+                color: PgColors.primary, size: 16),
           ),
-          title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+          title:
+              Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
           subtitle: (widget.floor['facilityCode'] ?? '').toString().isNotEmpty
               ? Text('${widget.floor['facilityCode']}',
                   style: const TextStyle(fontSize: 11, color: PgColors.primary))
@@ -323,7 +332,8 @@ class _FloorNodeState extends State<_FloorNode> {
                 foregroundColor: PgColors.primary,
                 side: const BorderSide(color: PgColors.primary),
                 padding: const EdgeInsets.symmetric(vertical: 6),
-                textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                textStyle:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
               ),
               onPressed: () => _addRoom(context),
             ),
@@ -403,18 +413,21 @@ class _RoomTile extends StatelessWidget {
 
     return InkWell(
       onTap: () => Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => RoomDetailScreen(room: room, propertyId: propertyId))),
+          builder: (_) =>
+              RoomDetailScreen(room: room, propertyId: propertyId))),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(64, 8, 16, 8),
         child: Row(
           children: [
-            const Icon(Icons.meeting_room_outlined, color: PgColors.primary, size: 20),
+            const Icon(Icons.meeting_room_outlined,
+                color: PgColors.primary, size: 20),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  Text(name,
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
                   Text(
                     [
                       if (number != null) 'No. $number',
@@ -485,39 +498,44 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           // Room info header
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w800, fontSize: 18)),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 8,
-                    children: [
-                      if (r['roomNumber'] != null)
-                        _RoomBadge(label: 'No. ${r['roomNumber']}',
-                            icon: Icons.tag),
-                      if (r['sharingType'] != null)
-                        _RoomBadge(label: '${r['sharingType']}',
-                            icon: Icons.people_outline),
-                      if (r['capacity'] != null)
-                        _RoomBadge(label: '${r['capacity']} beds',
-                            icon: Icons.bed_outlined),
-                      if (r['monthlyRent'] != null)
-                        _RoomBadge(label: _rupees(r['monthlyRent']),
-                            icon: Icons.currency_rupee),
-                      if (r['securityDeposit'] != null)
-                        _RoomBadge(
-                            label: 'Dep. ${_rupees(r['securityDeposit'])}',
-                            icon: Icons.savings_outlined),
-                    ],
-                  ),
-                ],
+          FadeSlideIn(
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w800, fontSize: 18)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      children: [
+                        if (r['roomNumber'] != null)
+                          _RoomBadge(
+                              label: 'No. ${r['roomNumber']}', icon: Icons.tag),
+                        if (r['sharingType'] != null)
+                          _RoomBadge(
+                              label: '${r['sharingType']}',
+                              icon: Icons.people_outline),
+                        if (r['capacity'] != null)
+                          _RoomBadge(
+                              label: '${r['capacity']} beds',
+                              icon: Icons.bed_outlined),
+                        if (r['monthlyRent'] != null)
+                          _RoomBadge(
+                              label: _rupees(r['monthlyRent']),
+                              icon: Icons.currency_rupee),
+                        if (r['securityDeposit'] != null)
+                          _RoomBadge(
+                              label: 'Dep. ${_rupees(r['securityDeposit'])}',
+                              icon: Icons.savings_outlined),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -546,9 +564,16 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                 );
               }
               return Column(
-                children: beds
-                    .map((bed) => _BedTile(bed: bed, onAssigned: _loadBeds, propertyId: widget.propertyId))
-                    .toList(),
+                children: [
+                  for (var i = 0; i < beds.length; i++)
+                    FadeSlideIn(
+                      delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+                      child: _BedTile(
+                          bed: beds[i],
+                          onAssigned: _loadBeds,
+                          propertyId: widget.propertyId),
+                    ),
+                ],
               );
             },
           ),
@@ -575,7 +600,8 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
           autofocus: true,
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
             onPressed: () async {
               if (ctrl.text.trim().isEmpty) return;
@@ -611,14 +637,16 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => _AssignTenantSheet(room: widget.room, propertyId: widget.propertyId),
+      builder: (_) =>
+          _AssignTenantSheet(room: widget.room, propertyId: widget.propertyId),
     );
     if (done == true) setState(_loadBeds);
   }
 }
 
 class _BedTile extends StatelessWidget {
-  const _BedTile({required this.bed, required this.onAssigned, this.propertyId});
+  const _BedTile(
+      {required this.bed, required this.onAssigned, this.propertyId});
 
   final Map<String, dynamic> bed;
   final VoidCallback onAssigned;
@@ -647,56 +675,33 @@ class _BedTile extends StatelessWidget {
     final name = '${bed['facilityName'] ?? 'Bed'}';
     final tenant = bed['occupantName'] as String?;
     final isOccupied = tenant != null;
-    final statusColor = isOccupied ? PgColors.danger : PgColors.success;
+    final isTemp = bed['temporaryStay'] == true;
+    // Vacant = green, temporary stay = orange, permanent occupant = red.
+    final statusColor = !isOccupied
+        ? PgColors.success
+        : (isTemp ? PgColors.warning : PgColors.danger);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: statusColor.withValues(alpha: 0.12),
-          child: Icon(Icons.bed_outlined, color: statusColor),
+          child: Icon(isTemp ? Icons.timelapse_outlined : Icons.bed_outlined, color: statusColor),
         ),
         title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
         subtitle: Text(
-          isOccupied ? tenant : 'Available',
+          isOccupied ? (isTemp ? '$tenant · Temporary' : tenant) : 'Available',
           style: TextStyle(
               color: isOccupied ? Colors.grey[700] : PgColors.success,
               fontWeight: FontWeight.w500),
         ),
-        trailing: isOccupied
-            ? Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: PgColors.danger.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Text('Occupied',
-                        style: TextStyle(
-                            color: PgColors.danger, fontSize: 11, fontWeight: FontWeight.w600)),
-                  ),
-                  const SizedBox(width: 6),
-                  OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: PgColors.danger,
-                      side: const BorderSide(color: PgColors.danger),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    onPressed: () => _confirmCheckout(context),
-                    child: const Text('Checkout'),
-                  ),
-                ],
-              )
-            : FilledButton(
+        trailing: !isOccupied
+            ? FilledButton(
                 style: FilledButton.styleFrom(
                   backgroundColor: PgColors.primary,
                   foregroundColor: Colors.white,
-                  textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  textStyle: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600),
                 ),
                 onPressed: () async {
                   final done = await showModalBottomSheet<bool>(
@@ -704,17 +709,63 @@ class _BedTile extends StatelessWidget {
                     isScrollControlled: true,
                     backgroundColor: Colors.white,
                     shape: const RoundedRectangleBorder(
-                        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                        borderRadius:
+                            BorderRadius.vertical(top: Radius.circular(20))),
                     builder: (_) => AssignBedSheet(
                       bedId: bed['facilityId'] as int,
                       bedName: name,
-                      propertyId: propertyId != null ? (propertyId as num).toInt() : null,
+                      propertyId: propertyId != null
+                          ? (propertyId as num).toInt()
+                          : null,
                     ),
                   );
                   if (done == true) onAssigned();
                 },
                 child: const Text('Assign'),
-              ),
+              )
+            : isTemp
+                ? Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: PgColors.warning.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text('Temporary',
+                        style: TextStyle(
+                            color: PgColors.warning,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600)),
+                  )
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: PgColors.danger.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text('Occupied',
+                            style: TextStyle(
+                                color: PgColors.danger,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                      const SizedBox(width: 6),
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: PgColors.danger,
+                          side: const BorderSide(color: PgColors.danger),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () => _confirmCheckout(context),
+                        child: const Text('Checkout'),
+                      ),
+                    ],
+                  ),
       ),
     );
   }
@@ -777,7 +828,8 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
             children: [
               Row(children: [
                 const Text('Add Room',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+                    style:
+                        TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
                 const Spacer(),
                 IconButton(
                     icon: const Icon(Icons.close),
@@ -874,9 +926,12 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
                     labelText: 'Sharing Type',
                     prefixIcon: Icon(Icons.people_outline)),
                 items: const [
-                  DropdownMenuItem(value: '1', child: Text('1-Sharing (Single)')),
-                  DropdownMenuItem(value: '2', child: Text('2-Sharing (Double)')),
-                  DropdownMenuItem(value: '3', child: Text('3-Sharing (Triple)')),
+                  DropdownMenuItem(
+                      value: '1', child: Text('1-Sharing (Single)')),
+                  DropdownMenuItem(
+                      value: '2', child: Text('2-Sharing (Double)')),
+                  DropdownMenuItem(
+                      value: '3', child: Text('3-Sharing (Triple)')),
                   DropdownMenuItem(value: '4', child: Text('4-Sharing (Quad)')),
                   DropdownMenuItem(value: '5', child: Text('5-Sharing')),
                   DropdownMenuItem(value: '6', child: Text('6-Sharing')),
@@ -890,7 +945,7 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
                     child: TextFormField(
                       controller: _rent,
                       decoration: const InputDecoration(
-                          labelText: 'Monthly Rent (â‚¹)',
+                          labelText: 'Monthly Rent (₹)',
                           prefixIcon: Icon(Icons.currency_rupee)),
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
@@ -903,7 +958,8 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
                   Expanded(
                     child: TextFormField(
                       controller: _deposit,
-                      decoration: const InputDecoration(labelText: 'Deposit (â‚¹)'),
+                      decoration:
+                          const InputDecoration(labelText: 'Deposit (₹)'),
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [
@@ -937,7 +993,10 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
                     return;
                   }
                   try {
-                    await context.read<AppState>().apiClient.post('/facilities', {
+                    await context
+                        .read<AppState>()
+                        .apiClient
+                        .post('/facilities', {
                       'parentFacilityId': _selectedFloorId,
                       'facilityTypeId': 'ROOM',
                       'facilityName': _name.text.trim(),
@@ -1042,11 +1101,13 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
             ]),
             const SizedBox(height: 8),
             Text('Room: ${widget.room['facilityName']}',
-                style: const TextStyle(color: PgColors.primary, fontWeight: FontWeight.w600)),
+                style: const TextStyle(
+                    color: PgColors.primary, fontWeight: FontWeight.w600)),
             const SizedBox(height: 16),
 
             // Select Bed
-            const Text('Select Bed', style: TextStyle(fontWeight: FontWeight.w600)),
+            const Text('Select Bed',
+                style: TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             FutureBuilder<Map<String, dynamic>>(
               future: _bedFuture,
@@ -1087,7 +1148,8 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
             const SizedBox(height: 16),
 
             // Select Tenant
-            const Text('Select Tenant', style: TextStyle(fontWeight: FontWeight.w600)),
+            const Text('Select Tenant',
+                style: TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             FutureBuilder<Map<String, dynamic>>(
               future: _tenantFuture,
@@ -1119,7 +1181,8 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
                             subtitle: Text('${t['mobileNumber'] ?? ''}'),
                             value: t,
                             groupValue: _selectedTenant,
-                            onChanged: (v) => setState(() => _selectedTenant = v),
+                            onChanged: (v) =>
+                                setState(() => _selectedTenant = v),
                             activeColor: PgColors.primary,
                           ))
                       .toList(),
@@ -1151,8 +1214,11 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
                     decoration: const InputDecoration(
                         labelText: 'Monthly Rent (₹)',
                         prefixIcon: Icon(Icons.currency_rupee)),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+                    ],
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -1160,8 +1226,11 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
                   child: TextFormField(
                     controller: _deposit,
                     decoration: const InputDecoration(labelText: 'Deposit (₹)'),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+                    ],
                   ),
                 ),
               ],
@@ -1172,14 +1241,19 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
               onPressed: () async {
                 if (_selectedTenant == null || _selectedBed == null) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Select both a bed and a tenant')),
+                    const SnackBar(
+                        content: Text('Select both a bed and a tenant')),
                   );
                   return;
                 }
                 final d = _fromDate;
-                final fromIso = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+                final fromIso =
+                    '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
                 try {
-                  await context.read<AppState>().apiClient.post('/occupancy/assign-bed', {
+                  await context
+                      .read<AppState>()
+                      .apiClient
+                      .post('/occupancy/assign-bed', {
                     'partyId': _selectedTenant!['tenantId'],
                     'bedFacilityId': _selectedBed!['facilityId'],
                     'fromDate': fromIso,
@@ -1188,8 +1262,8 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
                 } catch (e) {
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content:
-                            Text(e.toString().replaceFirst('Exception: ', ''))));
+                        content: Text(
+                            e.toString().replaceFirst('Exception: ', ''))));
                   }
                 }
               },
@@ -1224,6 +1298,10 @@ class AssignBedSheet extends StatefulWidget {
 class _AssignBedSheetState extends State<AssignBedSheet> {
   late Future<Map<String, dynamic>> _tenantFuture;
   Map<String, dynamic>? _selectedTenant;
+  // 'PERMANENT' = normal bed assignment with billing. 'TEMPORARY' = a no-billing
+  // holding stay; billing starts only when it is later made permanent (anchored
+  // to this temporary start date).
+  String _mode = 'PERMANENT';
   DateTime _fromDate = DateTime.now();
   DateTime? _checkoutDate;
   final _rent = TextEditingController();
@@ -1241,8 +1319,8 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
     super.initState();
     _tenantFuture = context.read<AppState>().apiClient.get(_tenantsPath);
     _loadStandardPrice();
-    _search.addListener(() =>
-        setState(() => _searchQuery = _search.text.toLowerCase().trim()));
+    _search.addListener(
+        () => setState(() => _searchQuery = _search.text.toLowerCase().trim()));
   }
 
   Future<void> _pickFromDate() async {
@@ -1363,8 +1441,8 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                 GestureDetector(
                   onTap: _goToAddTenant,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: PgColors.lavender,
                       borderRadius: BorderRadius.circular(8),
@@ -1419,8 +1497,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                 final tenants = _searchQuery.isEmpty
                     ? all
                     : all.where((t) {
-                        final name =
-                            '${t['fullName']}'.toLowerCase();
+                        final name = '${t['fullName']}'.toLowerCase();
                         final phone =
                             '${t['mobileNumber'] ?? ''}'.toLowerCase();
                         return name.contains(_searchQuery) ||
@@ -1434,7 +1511,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                     TextField(
                       controller: _search,
                       decoration: InputDecoration(
-                        hintText: 'Search by name or phoneâ€¦',
+                        hintText: 'Search by name or phone…',
                         hintStyle: TextStyle(
                             color: Colors.grey.shade400, fontSize: 13),
                         prefixIcon: Icon(Icons.search,
@@ -1449,13 +1526,11 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                             horizontal: 14, vertical: 10),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
-                          borderSide:
-                              BorderSide(color: Colors.grey.shade200),
+                          borderSide: BorderSide(color: Colors.grey.shade200),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
-                          borderSide:
-                              BorderSide(color: Colors.grey.shade200),
+                          borderSide: BorderSide(color: Colors.grey.shade200),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
@@ -1480,8 +1555,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                           ),
                           child: const Text(
                             'No inactive tenants available.\nUse "New Tenant" to create one.',
-                            style: TextStyle(
-                                color: Colors.grey, fontSize: 13),
+                            style: TextStyle(color: Colors.grey, fontSize: 13),
                             textAlign: TextAlign.center,
                           ),
                         ),
@@ -1491,15 +1565,14 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         child: Text(
                           'No tenants match "$_searchQuery".',
-                          style: const TextStyle(
-                              color: Colors.grey, fontSize: 13),
+                          style:
+                              const TextStyle(color: Colors.grey, fontSize: 13),
                           textAlign: TextAlign.center,
                         ),
                       )
                     else
                       ConstrainedBox(
-                        constraints:
-                            const BoxConstraints(maxHeight: 220),
+                        constraints: const BoxConstraints(maxHeight: 220),
                         child: ListView.separated(
                           shrinkWrap: true,
                           itemCount: tenants.length,
@@ -1508,24 +1581,19 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                           itemBuilder: (context, i) {
                             final t = tenants[i];
                             final selected = _selectedTenant != null &&
-                                _selectedTenant!['tenantId'] ==
-                                    t['tenantId'];
-                            final initials =
-                                _initials('${t['fullName']}');
+                                _selectedTenant!['tenantId'] == t['tenantId'];
+                            final initials = _initials('${t['fullName']}');
                             return GestureDetector(
-                              onTap: () =>
-                                  setState(() => _selectedTenant = t),
+                              onTap: () => setState(() => _selectedTenant = t),
                               child: AnimatedContainer(
-                                duration:
-                                    const Duration(milliseconds: 160),
+                                duration: const Duration(milliseconds: 160),
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 12, vertical: 10),
                                 decoration: BoxDecoration(
                                   color: selected
                                       ? PgColors.lavender
                                       : Colors.white,
-                                  borderRadius:
-                                      BorderRadius.circular(10),
+                                  borderRadius: BorderRadius.circular(10),
                                   border: Border.all(
                                     color: selected
                                         ? PgColors.primary
@@ -1570,8 +1638,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                                             fontWeight: FontWeight.w600,
                                             color: selected
                                                 ? PgColors.primary
-                                                : const Color(
-                                                    0xFF1A1A2E),
+                                                : const Color(0xFF1A1A2E),
                                           ),
                                         ),
                                         if ((t['mobileNumber'] ?? '')
@@ -1604,85 +1671,120 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
               },
             ),
             const SizedBox(height: 12),
+            Center(
+              child: SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'PERMANENT',
+                      label: Text('Permanent'), icon: Icon(Icons.event_seat_outlined, size: 16)),
+                  ButtonSegment(value: 'TEMPORARY',
+                      label: Text('Temporary'), icon: Icon(Icons.timelapse_outlined, size: 16)),
+                ],
+                selected: {_mode},
+                onSelectionChanged: (s) => setState(() => _mode = s.first),
+              ),
+            ),
+            const SizedBox(height: 12),
             InkWell(
               onTap: _pickFromDate,
               borderRadius: BorderRadius.circular(8),
               child: InputDecorator(
-                decoration: const InputDecoration(
-                  labelText: 'Move-in Date',
-                  prefixIcon: Icon(Icons.calendar_today_outlined),
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: _mode == 'TEMPORARY' ? 'Start Date' : 'Move-in Date',
+                  prefixIcon: const Icon(Icons.calendar_today_outlined),
+                  border: const OutlineInputBorder(),
                 ),
                 child: Text(
                   '${_fromDate.day.toString().padLeft(2, '0')}-${_fromDate.month.toString().padLeft(2, '0')}-${_fromDate.year}',
                 ),
               ),
             ),
-            const SizedBox(height: 12),
-            InkWell(
-              onTap: _pickCheckoutDate,
-              borderRadius: BorderRadius.circular(8),
-              child: InputDecorator(
-                decoration: InputDecoration(
-                  labelText: 'Expected Checkout Date — Optional',
-                  prefixIcon: const Icon(Icons.event_available_outlined),
-                  border: const OutlineInputBorder(),
-                  suffixIcon: _checkoutDate != null
-                      ? IconButton(
-                          icon: const Icon(Icons.clear, size: 18),
-                          onPressed: () => setState(() => _checkoutDate = null),
-                        )
-                      : null,
+            if (_mode == 'TEMPORARY') ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: PgColors.primary.withValues(alpha: 0.07),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: Text(
-                  _checkoutDate != null
-                      ? '${_checkoutDate!.day.toString().padLeft(2, '0')}-${_checkoutDate!.month.toString().padLeft(2, '0')}-${_checkoutDate!.year}'
-                      : 'Tap to set (leave empty for open-ended stay)',
-                  style: _checkoutDate == null
-                      ? TextStyle(color: Colors.grey[500])
-                      : null,
+                child: const Row(children: [
+                  Icon(Icons.info_outline, color: PgColors.primary, size: 18),
+                  SizedBox(width: 8),
+                  Expanded(child: Text(
+                    'No rent is charged for a temporary stay. When you make it permanent, '
+                    'billing starts from this start date.',
+                    style: TextStyle(fontSize: 12.5, color: PgColors.primary),
+                  )),
+                ]),
+              ),
+            ],
+            if (_mode == 'PERMANENT') ...[
+              const SizedBox(height: 12),
+              InkWell(
+                onTap: _pickCheckoutDate,
+                borderRadius: BorderRadius.circular(8),
+                child: InputDecorator(
+                  decoration: InputDecoration(
+                    labelText: 'Expected Checkout Date — Optional',
+                    prefixIcon: const Icon(Icons.event_available_outlined),
+                    border: const OutlineInputBorder(),
+                    suffixIcon: _checkoutDate != null
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () => setState(() => _checkoutDate = null),
+                          )
+                        : null,
+                  ),
+                  child: Text(
+                    _checkoutDate != null
+                        ? '${_checkoutDate!.day.toString().padLeft(2, '0')}-${_checkoutDate!.month.toString().padLeft(2, '0')}-${_checkoutDate!.year}'
+                        : 'Tap to set (leave empty for open-ended stay)',
+                    style: _checkoutDate == null
+                        ? TextStyle(color: Colors.grey[500])
+                        : null,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _rent,
-                    decoration: InputDecoration(
-                      labelText: 'Monthly Rent (â‚¹)',
-                      prefixIcon: const Icon(Icons.currency_rupee),
-                      helperText: _standardRent != null
-                          ? 'Standard: â‚¹${_standardRent!.toStringAsFixed(0)}/mo'
-                          : null,
-                      helperStyle: const TextStyle(color: Color(0xFF2563EB), fontSize: 11),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _rent,
+                      decoration: InputDecoration(
+                        labelText: 'Monthly Rent (₹)',
+                        prefixIcon: const Icon(Icons.currency_rupee),
+                        helperText: _standardRent != null
+                            ? 'Standard: ₹${_standardRent!.toStringAsFixed(0)}/mo'
+                            : null,
+                        helperStyle: const TextStyle(
+                            color: Color(0xFF2563EB), fontSize: 11),
+                      ),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+                      ],
                     ),
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
-                    ],
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextFormField(
-                    controller: _deposit,
-                    decoration:
-                        const InputDecoration(labelText: 'Deposit (â‚¹)'),
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
-                    ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _deposit,
+                      decoration:
+                          const InputDecoration(labelText: 'Deposit (₹)'),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+                      ],
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
             const SizedBox(height: 20),
             AsyncActionButton(
-              label: 'Assign',
+              label: _mode == 'TEMPORARY' ? 'Start Temporary Stay' : 'Assign',
               onPressed: () async {
                 if (_selectedTenant == null) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -1691,24 +1793,38 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                 }
                 try {
                   final d = _fromDate;
-                  final fromIso = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-                  final co = _checkoutDate;
-                  await context.read<AppState>().apiClient.post('/occupancy/assign-bed', {
-                    'partyId': _selectedTenant!['tenantId'],
-                    'bedFacilityId': widget.bedId,
-                    'fromDate': fromIso,
-                    if (co != null)
-                      'expectedCheckoutDate': '${co.year}-${co.month.toString().padLeft(2, '0')}-${co.day.toString().padLeft(2, '0')}',
-                    if (_rent.text.trim().isNotEmpty)
-                      'monthlyRent': double.tryParse(_rent.text.trim()),
-                    if (_deposit.text.trim().isNotEmpty)
-                      'securityDeposit': double.tryParse(_deposit.text.trim()),
-                  });
+                  final fromIso =
+                      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+                  if (_mode == 'TEMPORARY') {
+                    await context.read<AppState>().apiClient.post('/occupancy/temp-stay', {
+                      'partyId': _selectedTenant!['tenantId'],
+                      'bedFacilityId': widget.bedId,
+                      'fromDate': fromIso,
+                    });
+                  } else {
+                    final co = _checkoutDate;
+                    await context
+                        .read<AppState>()
+                        .apiClient
+                        .post('/occupancy/assign-bed', {
+                      'partyId': _selectedTenant!['tenantId'],
+                      'bedFacilityId': widget.bedId,
+                      'fromDate': fromIso,
+                      if (co != null)
+                        'expectedCheckoutDate':
+                            '${co.year}-${co.month.toString().padLeft(2, '0')}-${co.day.toString().padLeft(2, '0')}',
+                      if (_rent.text.trim().isNotEmpty)
+                        'monthlyRent': double.tryParse(_rent.text.trim()),
+                      if (_deposit.text.trim().isNotEmpty)
+                        'securityDeposit': double.tryParse(_deposit.text.trim()),
+                    });
+                  }
                   if (mounted) Navigator.pop(context, true);
                 } catch (e) {
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(e.toString().replaceFirst('Exception: ', ''))));
+                        content: Text(
+                            e.toString().replaceFirst('Exception: ', ''))));
                   }
                 }
               },
@@ -1749,8 +1865,8 @@ class _RoomErrorState extends StatelessWidget {
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) =>
-      ErrorRetryView(error: error ?? Exception('Unknown error'), onRetry: onRetry);
+  Widget build(BuildContext context) => ErrorRetryView(
+      error: error ?? Exception('Unknown error'), onRetry: onRetry);
 }
 
 class _RoomEmptyState extends StatelessWidget {
@@ -1770,7 +1886,8 @@ class _RoomEmptyState extends StatelessWidget {
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
             SizedBox(height: 6),
             Text('Add properties and floors first to manage rooms.',
-                textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey)),
           ],
         ),
       ),

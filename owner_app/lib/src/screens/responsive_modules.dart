@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../widgets/animations.dart';
 import 'property_workspace_screen.dart';
 
 class PgDashboardScreen extends StatefulWidget {
@@ -66,31 +67,37 @@ class _PgDashboardScreenState extends State<PgDashboardScreen> {
               ),
             ),
             // ─── Title ────────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Property Dashboard',
-                      style: TextStyle(
-                          fontSize: 28, fontWeight: FontWeight.w800, color: Color(0xFF1A1A2E))),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Welcome back, ${context.watch<AppState>().ownerName ?? 'Owner'}!',
-                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                  ),
-                ],
+            FadeSlideIn(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Property Dashboard',
+                        style: TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w800,
+                            color: PgColors.textPrimary)),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Welcome back, ${context.watch<AppState>().ownerName ?? 'Owner'}!',
+                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 20),
             // ─── Section header ───────────────────────────────────────
-            Padding(
+            FadeSlideIn(
+              delay: const Duration(milliseconds: 60),
+              child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 16, 12),
               child: Row(
                 children: [
                   const Text('Your Properties',
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700,
-                          color: Color(0xFF1A1A2E))),
+                          color: PgColors.textPrimary)),
                   const Spacer(),
                   OutlinedButton.icon(
                     onPressed: _openAddProperty,
@@ -105,6 +112,7 @@ class _PgDashboardScreenState extends State<PgDashboardScreen> {
                   ),
                 ],
               ),
+            ),
             ),
             // ─── Property list ────────────────────────────────────────
             Expanded(
@@ -188,14 +196,18 @@ class _PgDashboardScreenState extends State<PgDashboardScreen> {
                       itemCount: items.length,
                       itemBuilder: (context, index) {
                         final prop = items[index];
-                        return _PropertyCard(
-                          property: prop,
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) =>
-                                    PropertyWorkspaceScreen(property: prop)),
-                          ).then((_) => setState(_load)),
+                        return FadeSlideIn(
+                          delay: Duration(
+                              milliseconds: 40 * (index.clamp(0, 8))),
+                          child: _PropertyCard(
+                            property: prop,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) =>
+                                      PropertyWorkspaceScreen(property: prop)),
+                            ).then((_) => setState(_load)),
+                          ),
                         );
                       },
                     ),
@@ -453,6 +465,7 @@ class AnalyticsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Analytics')),
-        body: const Center(child: Text('Analytics coming soon')),
+        body: const FadeSlideIn(
+            child: Center(child: Text('Analytics coming soon'))),
       );
 }

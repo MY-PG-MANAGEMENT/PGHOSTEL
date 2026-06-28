@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../app_state.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/animations.dart';
 import '../../widgets/async_action_button.dart';
 import 'auth_brand_header.dart';
 
@@ -19,6 +20,18 @@ class _LoginScreenState extends State<LoginScreen> {
   final _password = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _obscurePassword = true;
+  bool _biometricAvailable = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkBiometricAvailability();
+  }
+
+  Future<void> _checkBiometricAvailability() async {
+    final available = await context.read<AppState>().canUseBiometricUnlock();
+    if (mounted) setState(() => _biometricAvailable = available);
+  }
 
   @override
   void dispose() {
@@ -47,7 +60,7 @@ class _LoginScreenState extends State<LoginScreen> {
           Expanded(
             child: Container(
               decoration: const BoxDecoration(
-                color: Color(0xFFF9F9FD),
+                color: PgColors.scaffold,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
               ),
               clipBehavior: Clip.antiAlias,
@@ -55,7 +68,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
                 child: Form(
                   key: _formKey,
-                  child: Column(
+                  child: FadeSlideIn(
+                    child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
@@ -70,7 +84,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       Text(
                         'Sign in to manage your properties',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: const Color(0xFF6B7280),
+                              color: PgColors.textSecondary,
                             ),
                       ),
                       const SizedBox(height: 28),
@@ -134,37 +148,24 @@ class _LoginScreenState extends State<LoginScreen> {
                           },
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          final ok = await context.read<AppState>().biometricLogin();
-                          if (ok && context.mounted) context.go('/dashboard');
-                        },
-                        icon: const Icon(Icons.fingerprint),
-                        label: const Text('Unlock with device security'),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(double.infinity, 48),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
+                      if (_biometricAvailable) ...[
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final ok = await context.read<AppState>().biometricLogin();
+                            if (ok && context.mounted) context.go('/dashboard');
+                          },
+                          icon: const Pulse(child: Icon(Icons.fingerprint)),
+                          label: const Text('Unlock with device security'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(double.infinity, 48),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            'New to PG Manager?',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  color: const Color(0xFF6B7280),
-                                ),
-                          ),
-                          TextButton(
-                            onPressed: () => context.go('/register'),
-                            child: const Text('Create account'),
-                          ),
-                        ],
-                      ),
+                      ],
                     ],
+                  ),
                   ),
                 ),
               ),

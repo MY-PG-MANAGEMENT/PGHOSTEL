@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../widgets/animations.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/async_action_button.dart';
 
@@ -116,13 +117,16 @@ class _PropertyScreenState extends State<PropertyScreen> {
                   child: ListView.separated(
                     itemCount: props.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) => _PropertyCard(
-                      data: props[index],
-                      onTap: () => Navigator.of(context)
-                          .push(MaterialPageRoute(
-                            builder: (_) => PropertyDetailScreen(property: props[index]),
-                          ))
-                          .then((_) => setState(_load)),
+                    itemBuilder: (context, index) => FadeSlideIn(
+                      delay: Duration(milliseconds: 40 * (index.clamp(0, 8))),
+                      child: _PropertyCard(
+                        data: props[index],
+                        onTap: () => Navigator.of(context)
+                            .push(MaterialPageRoute(
+                              builder: (_) => PropertyDetailScreen(property: props[index]),
+                            ))
+                            .then((_) => setState(_load)),
+                      ),
                     ),
                   ),
                 );
@@ -451,7 +455,11 @@ class _FloorsTabState extends State<_FloorsTab> {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            ...floors.map((floor) => _FloorTile(floor: floor)),
+            for (var i = 0; i < floors.length; i++)
+              FadeSlideIn(
+                delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+                child: _FloorTile(floor: floors[i]),
+              ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
               icon: const Icon(Icons.add),

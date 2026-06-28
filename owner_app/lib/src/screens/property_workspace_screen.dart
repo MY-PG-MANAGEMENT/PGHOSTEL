@@ -9,6 +9,7 @@ import 'billing_screen.dart';
 import 'checkout_sheet.dart' show CheckoutSheet;
 import 'room_screen.dart' show AssignBedSheet;
 import '../widgets/error_retry_view.dart';
+import '../widgets/animations.dart';
 
 class PropertyWorkspaceScreen extends StatefulWidget {
   final Map<String, dynamic> property;
@@ -279,7 +280,10 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
       child: ListView(
         children: [
           // ── Property hero card ─────────────────────────────────────
-          _PropertyHeroCard(property: widget.property, statsFuture: _statsFuture),
+          FadeSlideIn(
+            child: _PropertyHeroCard(
+                property: widget.property, statsFuture: _statsFuture),
+          ),
           // ── Overview metric cards ──────────────────────────────────
           FutureBuilder<Map<String, dynamic>>(
             future: _statsFuture,
@@ -291,7 +295,9 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
               final vacPct = totalBeds > 0
                   ? '${((vacantBeds / totalBeds) * 100).round()}%'
                   : '0%';
-              return Padding(
+              return FadeSlideIn(
+                delay: const Duration(milliseconds: 40),
+                child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -335,11 +341,14 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
                     ),
                   ],
                 ),
+                ),
               );
             },
           ),
           // ── Floors & Rooms shortcut ───────────────────────────────
-          Padding(
+          FadeSlideIn(
+            delay: const Duration(milliseconds: 80),
+            child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
             child: _ShortcutCard(
               icon: Icons.domain_outlined,
@@ -352,9 +361,12 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
                 ),
               ),
             ),
+            ),
           ),
           // ── Shortcuts ──────────────────────────────────────────────
-          Padding(
+          FadeSlideIn(
+            delay: const Duration(milliseconds: 120),
+            child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
             child: _ShortcutCard(
               icon: Icons.currency_rupee_outlined,
@@ -366,6 +378,7 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
                   builder: (_) => _SharingPricesScreen(propertyId: widget.propertyId),
                 ),
               ),
+            ),
             ),
           ),
         ],

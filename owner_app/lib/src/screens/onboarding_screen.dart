@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../app_state.dart';
+import '../widgets/animations.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/async_action_button.dart';
 
@@ -24,46 +25,53 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final steps = <Widget>[
+      SwitchListTile(title: const Text('Multiple PGs'), value: multiple, onChanged: (value) => setState(() => multiple = value)),
+      slider('Properties', properties, 1, 10, (value) => setState(() => properties = value)),
+      slider('Floors', floors, 1, 10, (value) => setState(() => floors = value)),
+      slider('Rooms per floor', rooms, 1, 30, (value) => setState(() => rooms = value)),
+      slider('Beds per room', beds, 1, 8, (value) => setState(() => beds = value)),
+      DropdownButtonFormField<String>(
+        value: sharingType,
+        decoration: const InputDecoration(labelText: 'Sharing Type'),
+        items: const [
+          DropdownMenuItem(value: 'SINGLE', child: Text('Single')),
+          DropdownMenuItem(value: 'TWO_SHARING', child: Text('Two Sharing')),
+          DropdownMenuItem(value: 'THREE_SHARING', child: Text('Three Sharing')),
+          DropdownMenuItem(value: 'FOUR_SHARING', child: Text('Four Sharing')),
+        ],
+        onChanged: (value) => setState(() => sharingType = value ?? sharingType),
+      ),
+      const SizedBox(height: 12),
+      feature('EXPENSE', 'Expense Module'),
+      feature('NOTIFICATION', 'Notification Module'),
+      feature('WHATSAPP', 'WhatsApp Module'),
+      const SizedBox(height: 16),
+      AsyncActionButton(
+        label: 'Create Setup',
+        onPressed: () async {
+          await context.read<AppState>().apiClient.post('/owner/onboarding-wizard', {
+            'multipleProperties': multiple,
+            'numberOfProperties': properties.round(),
+            'numberOfFloors': floors.round(),
+            'numberOfRooms': rooms.round(),
+            'bedsPerRoom': beds.round(),
+            'sharingType': sharingType,
+            'enabledFeatureCodes': enabledFeatures.toList(),
+          });
+          if (context.mounted) context.go('/dashboard');
+        },
+      ),
+    ];
     return AppShell(
       title: 'Onboarding Wizard',
       child: ListView(
         children: [
-          SwitchListTile(title: const Text('Multiple PGs'), value: multiple, onChanged: (value) => setState(() => multiple = value)),
-          slider('Properties', properties, 1, 10, (value) => setState(() => properties = value)),
-          slider('Floors', floors, 1, 10, (value) => setState(() => floors = value)),
-          slider('Rooms per floor', rooms, 1, 30, (value) => setState(() => rooms = value)),
-          slider('Beds per room', beds, 1, 8, (value) => setState(() => beds = value)),
-          DropdownButtonFormField<String>(
-            value: sharingType,
-            decoration: const InputDecoration(labelText: 'Sharing Type'),
-            items: const [
-              DropdownMenuItem(value: 'SINGLE', child: Text('Single')),
-              DropdownMenuItem(value: 'TWO_SHARING', child: Text('Two Sharing')),
-              DropdownMenuItem(value: 'THREE_SHARING', child: Text('Three Sharing')),
-              DropdownMenuItem(value: 'FOUR_SHARING', child: Text('Four Sharing')),
-            ],
-            onChanged: (value) => setState(() => sharingType = value ?? sharingType),
-          ),
-          const SizedBox(height: 12),
-          feature('EXPENSE', 'Expense Module'),
-          feature('NOTIFICATION', 'Notification Module'),
-          feature('WHATSAPP', 'WhatsApp Module'),
-          const SizedBox(height: 16),
-          AsyncActionButton(
-            label: 'Create Setup',
-            onPressed: () async {
-              await context.read<AppState>().apiClient.post('/owner/onboarding-wizard', {
-                'multipleProperties': multiple,
-                'numberOfProperties': properties.round(),
-                'numberOfFloors': floors.round(),
-                'numberOfRooms': rooms.round(),
-                'bedsPerRoom': beds.round(),
-                'sharingType': sharingType,
-                'enabledFeatureCodes': enabledFeatures.toList(),
-              });
-              if (context.mounted) context.go('/dashboard');
-            },
-          ),
+          for (var i = 0; i < steps.length; i++)
+            FadeSlideIn(
+              delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+              child: steps[i],
+            ),
         ],
       ),
     );

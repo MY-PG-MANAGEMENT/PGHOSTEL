@@ -11,7 +11,6 @@ import com.pgmanager.facility.FacilityType;
 import com.pgmanager.occupancy.FacilityPartyRepository;
 import com.pgmanager.occupancy.OccupancyService;
 import com.pgmanager.occupancy.dto.OccupancyDtos.BedAssignRequest;
-import com.pgmanager.party.PersonRepository;
 import com.pgmanager.security.CurrentUser;
 import com.pgmanager.tenant.TenantService;
 import com.pgmanager.tenant.dto.TenantDtos.TenantCreateRequest;
@@ -46,7 +45,6 @@ public class BulkUploadController {
     private final FacilityRepository facilityRepository;
     private final FacilityGroupMemberRepository groupMemberRepository;
     private final FacilityPartyRepository facilityPartyRepository;
-    private final PersonRepository personRepository;
     private final OccupancyService occupancyService;
     private final TenantService tenantService;
     private final AuditService auditService;
@@ -177,8 +175,6 @@ public class BulkUploadController {
                         continue;
                     }
 
-                    boolean isNew = personRepository.findByMobileNumber(mobile).isEmpty();
-
                     TenantCreateRequest req = new TenantCreateRequest(
                             fullName, mobile,
                             nullIfEmpty(col(record, "email")),
@@ -219,8 +215,7 @@ public class BulkUploadController {
                         }
                     }
 
-                    if (isNew) created++;
-                    else updated++;
+                    created++;
                 } catch (Exception e) {
                     errors.add(new RowError(row, "—", e.getMessage()));
                     failed++;
