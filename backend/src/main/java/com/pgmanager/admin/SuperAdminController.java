@@ -1,6 +1,9 @@
 package com.pgmanager.admin;
 
+import com.pgmanager.auth.AuthService;
+import com.pgmanager.auth.dto.AuthDtos.RegisterOwnerRequest;
 import com.pgmanager.common.api.ApiResponse;
+import com.pgmanager.common.exception.BadRequestException;
 import com.pgmanager.common.exception.NotFoundException;
 import com.pgmanager.notification.NotificationService;
 import com.pgmanager.security.CurrentUser;
@@ -22,6 +25,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/super-admin")
@@ -30,6 +34,9 @@ public class SuperAdminController {
     private final JdbcTemplate jdbc;
     private final CurrentUser currentUser;
     private final NotificationService notificationService;
+    private final AuthService authService;
+
+    private static final Set<String> ALLOWED_ORG_STATUSES = Set.of("ACTIVE", "INACTIVE", "SUSPENDED");
 
     @GetMapping("/dashboard")
     ApiResponse<Map<String, Object>> dashboard() {
@@ -50,10 +57,25 @@ public class SuperAdminController {
                 : jdbc.queryForList("SELECT facility_id organization_id,facility_name,status,created_at FROM facility WHERE facility_type_id='ORGANIZATION' AND status=? ORDER BY created_at DESC", status));
     }
 
+    @PostMapping("/organizations")
+    ApiResponse<Map<String, Object>> createOrganization(@Valid @RequestBody RegisterOwnerRequest request) {
+        AuthService.OwnerAccount account = authService.createOwnerAccount(request);
+        return ApiResponse.ok("Organization created", Map.of(
+                "organizationId", account.organizationId(),
+                "organizationName", account.organizationName(),
+                "ownerUserLoginId", account.userLoginId(),
+                "ownerUsername", account.username()
+        ));
+    }
+
     @PatchMapping("/organizations/{organizationId}/status")
     ApiResponse<Void> organizationStatus(@PathVariable Long organizationId, @RequestBody Map<String, String> body) {
+        String status = body.get("status");
+        if (status == null || !ALLOWED_ORG_STATUSES.contains(status)) {
+            throw new BadRequestException("status must be one of " + ALLOWED_ORG_STATUSES);
+        }
         int count = jdbc.update("UPDATE facility SET status=?,updated_at=? WHERE facility_id=? AND facility_type_id='ORGANIZATION'",
-                body.get("status"), LocalDateTime.now(), organizationId);
+                status, LocalDateTime.now(), organizationId);
         if (count == 0) throw new NotFoundException("Organization not found");
         return ApiResponse.ok(null);
     }
@@ -108,10 +130,10 @@ public class SuperAdminController {
         Map<String, Object> org = jdbc.queryForMap(
                 "SELECT facility_id organization_id, facility_name, status, created_at FROM facility " +
                 "WHERE facility_id=? AND facility_type_id='ORGANIZATION'", organizationId);
-        org.put("propertyCount",   scalar("SELECT COUNT(*) FROM facility WHERE organization_id=" + organizationId + " AND facility_type_id='PROPERTY'"));
-        org.put("tenantCount",     scalar("SELECT COUNT(DISTINCT party_id) FROM facility_party WHERE organization_id=" + organizationId + " AND facility_id=" + organizationId + " AND role_type_id='TENANT' AND thru_date IS NULL"));
-        org.put("occupiedBeds",    scalar("SELECT COUNT(*) FROM facility_party WHERE organization_id=" + organizationId + " AND role_type_id='OCCUPANT' AND thru_date IS NULL"));
-        org.put("totalBeds",       scalar("SELECT COUNT(*) FROM facility WHERE organization_id=" + organizationId + " AND facility_type_id='BED'"));
+        org.put("propertyCount",   scalar("SELECT COUNT(*) FROM facility WHERE organization_id=? AND facility_type_id='PROPERTY'", organizationId));
+        org.put("tenantCount",     scalar("SELECT COUNT(DISTINCT party_id) FROM facility_party WHERE organization_id=? AND facility_id=? AND role_type_id='TENANT' AND thru_date IS NULL", organizationId, organizationId));
+        org.put("occupiedBeds",    scalar("SELECT COUNT(*) FROM facility_party WHERE organization_id=? AND role_type_id='OCCUPANT' AND thru_date IS NULL", organizationId));
+        org.put("totalBeds",       scalar("SELECT COUNT(*) FROM facility WHERE organization_id=? AND facility_type_id='BED'", organizationId));
         return ApiResponse.ok(org);
     }
 
@@ -167,7 +189,7 @@ public class SuperAdminController {
         return ApiResponse.ok(Map.of("sentToOrgs", sent));
     }
 
-    private Long scalar(String sql) { Long value = jdbc.queryForObject(sql, Long.class); return value == null ? 0 : value; }
+    private Long scalar(String sql, Object... args) { Long value = jdbc.queryForObject(sql, Long.class, args); return value == null ? 0 : value; }
     private BigDecimal amount(String sql) { BigDecimal value = jdbc.queryForObject(sql, BigDecimal.class); return value == null ? BigDecimal.ZERO : value; }
 
     public record PlanRequest(@NotBlank String planCode, @NotBlank String name, @DecimalMin("0") BigDecimal priceMonthly, Integer propertyLimit) {}

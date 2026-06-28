@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../utils/validators.dart';
+import '../widgets/animations.dart';
 import '../widgets/error_retry_view.dart';
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
@@ -329,7 +331,7 @@ class _AdminDashboardState extends State<_AdminDashboard> {
           final activity = (d['recentActivity'] as List? ?? []).cast<Map<String, dynamic>>();
           return SingleChildScrollView(
             padding: const EdgeInsets.all(24),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            child: FadeSlideIn(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               LayoutBuilder(builder: (_, constraints) {
                 final cols = constraints.maxWidth > 800 ? 4 : 2;
                 return GridView.count(
@@ -395,7 +397,7 @@ class _AdminDashboardState extends State<_AdminDashboard> {
                     },
                   ),
                 ),
-            ]),
+            ])),
           );
         },
       )),
@@ -574,7 +576,19 @@ class _AdminOrgsState extends State<_AdminOrganizations> {
       _PageHeader(
         title: 'Organizations',
         subtitle: '${_orgs.length} total',
-        action: IconButton(icon: const Icon(Icons.refresh, size: 20), tooltip: 'Refresh', onPressed: _load),
+        action: Row(mainAxisSize: MainAxisSize.min, children: [
+          FilledButton.icon(
+            onPressed: _showCreateOrgDialog,
+            icon: const Icon(Icons.add_business_outlined, size: 16),
+            label: const Text('New Organization', style: TextStyle(fontSize: 13)),
+            style: FilledButton.styleFrom(
+              backgroundColor: PgColors.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            ),
+          ),
+          const SizedBox(width: 4),
+          IconButton(icon: const Icon(Icons.refresh, size: 20), tooltip: 'Refresh', onPressed: _load),
+        ]),
       ),
       const Divider(height: 1),
       if (_loading) const Expanded(child: Center(child: CircularProgressIndicator()))
@@ -618,7 +632,10 @@ class _AdminOrgsState extends State<_AdminOrganizations> {
             : ListView.builder(
                 padding: const EdgeInsets.all(20),
                 itemCount: _filtered.length,
-                itemBuilder: (_, i) => _OrgCard(org: _filtered[i], onTap: () => _showDetail(_filtered[i])),
+                itemBuilder: (_, i) => FadeSlideIn(
+                  delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+                  child: _OrgCard(org: _filtered[i], onTap: () => _showDetail(_filtered[i])),
+                ),
               )),
       ],
     ]);
@@ -633,6 +650,175 @@ class _AdminOrgsState extends State<_AdminOrganizations> {
       builder: (_) => _OrgDetailSheet(org: org, onStatusChanged: _load),
     );
   }
+
+  void _showCreateOrgDialog() {
+    showDialog(context: context, builder: (_) => _CreateOrgDialog(
+      apiClient: context.read<AppState>().apiClient,
+      onCreated: _load,
+    ));
+  }
+}
+
+// ─── Create Organization Dialog ───────────────────────────────────────────────
+
+class _CreateOrgDialog extends StatefulWidget {
+  const _CreateOrgDialog({required this.apiClient, required this.onCreated});
+  final dynamic apiClient;
+  final VoidCallback onCreated;
+
+  @override
+  State<_CreateOrgDialog> createState() => _CreateOrgDialogState();
+}
+
+class _CreateOrgDialogState extends State<_CreateOrgDialog> {
+  final _form = GlobalKey<FormState>();
+  final _orgName = TextEditingController();
+  final _fullName = TextEditingController();
+  final _mobile = TextEditingController();
+  final _username = TextEditingController();
+  final _password = TextEditingController();
+  bool _obscure = true;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _orgName.dispose();
+    _fullName.dispose();
+    _mobile.dispose();
+    _username.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_form.currentState!.validate()) return;
+    setState(() => _saving = true);
+    try {
+      final res = await widget.apiClient.post('/super-admin/organizations', {
+        'organizationName': _orgName.text.trim(),
+        'fullName': _fullName.text.trim(),
+        'mobileNumber': _mobile.text.trim(),
+        'username': _username.text.trim(),
+        'password': _password.text,
+      });
+      if (!mounted) return;
+      Navigator.pop(context);
+      widget.onCreated();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Organization "${res['organizationName']}" created with owner @${res['ownerUsername']}'),
+          backgroundColor: PgColors.success,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', '')), backgroundColor: PgColors.danger),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(children: [
+        Container(
+          width: 36, height: 36,
+          decoration: BoxDecoration(color: PgColors.lavender, borderRadius: BorderRadius.circular(10)),
+          child: const Icon(Icons.add_business_outlined, color: PgColors.primary, size: 20),
+        ),
+        const SizedBox(width: 12),
+        const Text('New Organization', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+      ]),
+      content: SizedBox(
+        width: 420,
+        child: Form(
+          key: _form,
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text(
+                'Creates the organization and its owner login. The owner can then sign in with these credentials.',
+                style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _orgName,
+                decoration: _deco('Organization Name', Icons.business_outlined),
+                textInputAction: TextInputAction.next,
+                validator: (v) => Validators.minLength(v, 2, label: 'Organization name'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _fullName,
+                decoration: _deco('Owner Full Name', Icons.person_outline),
+                textInputAction: TextInputAction.next,
+                validator: (v) => Validators.minLength(v, 2, label: 'Full name'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _mobile,
+                decoration: _deco('Owner Mobile Number', Icons.phone_outlined),
+                keyboardType: TextInputType.phone,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(10),
+                ],
+                textInputAction: TextInputAction.next,
+                validator: Validators.mobile,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _username,
+                decoration: _deco('Username', Icons.alternate_email),
+                textInputAction: TextInputAction.next,
+                validator: Validators.username,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _password,
+                obscureText: _obscure,
+                decoration: _deco('Password', Icons.lock_outline).copyWith(
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 20),
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                  ),
+                ),
+                validator: Validators.password,
+              ),
+            ]),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: _saving ? null : _save,
+          icon: _saving
+              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.check, size: 16),
+          label: Text(_saving ? 'Creating…' : 'Create Organization'),
+          style: FilledButton.styleFrom(backgroundColor: PgColors.primary),
+        ),
+      ],
+    );
+  }
+
+  InputDecoration _deco(String label, IconData icon) => InputDecoration(
+    labelText: label,
+    prefixIcon: Icon(icon, size: 20),
+    isDense: true,
+    filled: true,
+    fillColor: const Color(0xFFF9F9FD),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: PgColors.border)),
+    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: PgColors.border)),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: PgColors.primary)),
+    errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: PgColors.danger)),
+  );
 }
 
 class _OrgCard extends StatelessWidget {
@@ -887,14 +1073,14 @@ class _AdminDataUploadState extends State<_AdminDataUpload> {
       Expanded(child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: _result != null
-            ? _UploadResultView(result: _result!, onReset: _reset)
-            : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ? FadeSlideIn(child: _UploadResultView(result: _result!, onReset: _reset))
+            : FadeSlideIn(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 _StepIndicator(current: _step),
                 const SizedBox(height: 24),
                 if (_step == 0) _buildStep1(),
                 if (_step == 1) _buildStep2(),
                 if (_step == 2) _buildStep3(),
-              ]),
+              ])),
       )),
     ]);
   }
@@ -1319,7 +1505,9 @@ class _AdminUsersState extends State<_AdminUsers> {
                       final roleColor = role == 'SUPER_ADMIN' ? PgColors.danger
                           : role == 'OWNER' ? PgColors.primary
                           : PgColors.warning;
-                      return Card(
+                      return FadeSlideIn(
+                        delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+                        child: Card(
                         margin: const EdgeInsets.only(bottom: 10),
                         child: ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
@@ -1346,7 +1534,7 @@ class _AdminUsersState extends State<_AdminUsers> {
                             child: Text(role, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: roleColor)),
                           ),
                         ),
-                      );
+                      ));
                     },
                   )),
           ]);
@@ -1399,7 +1587,10 @@ class _AdminPlansState extends State<_AdminPlans> {
             gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                 maxCrossAxisExtent: 260, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 1.1),
             itemCount: plans.length,
-            itemBuilder: (_, i) => _PlanCard(plan: plans[i]),
+            itemBuilder: (_, i) => FadeSlideIn(
+              delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+              child: _PlanCard(plan: plans[i]),
+            ),
           );
         },
       )),
@@ -1511,7 +1702,7 @@ class _AdminReportsState extends State<_AdminReports> {
           if (rows.isEmpty) return _EmptyState(icon: Icons.bar_chart, message: 'No revenue data yet');
           return SingleChildScrollView(
             padding: const EdgeInsets.all(20),
-            child: Card(
+            child: FadeSlideIn(child: Card(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: DataTable(
@@ -1529,7 +1720,7 @@ class _AdminReportsState extends State<_AdminReports> {
                   ])).toList(),
                 ),
               ),
-            ),
+            )),
           );
         },
       )),
@@ -1598,7 +1789,9 @@ class _AdminAuditLogsState extends State<_AdminAuditLogs> {
                       final isDelete = action.contains('DELETE') || action.contains('DEACTIVAT');
                       final iconColor = isDelete ? PgColors.danger : isLogin ? PgColors.success : PgColors.primary;
                       final icon = isDelete ? Icons.delete_outline : isLogin ? Icons.login : Icons.edit_outlined;
-                      return Padding(
+                      return FadeSlideIn(
+                        delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+                        child: Padding(
                         padding: const EdgeInsets.only(bottom: 8),
                         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           Column(children: [
@@ -1633,7 +1826,7 @@ class _AdminAuditLogsState extends State<_AdminAuditLogs> {
                             ]),
                           )),
                         ]),
-                      );
+                      ));
                     },
                   )),
           ]);
@@ -1718,7 +1911,9 @@ class _AdminSettingsState extends State<_AdminSettings> {
             final s = _settings[i];
             final key = s['setting_key'] as String;
             final encrypted = s['encrypted'] == true;
-            return Card(
+            return FadeSlideIn(
+              delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+              child: Card(
               margin: const EdgeInsets.only(bottom: 10),
               child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(key, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: PgColors.ink)),
@@ -1738,7 +1933,7 @@ class _AdminSettingsState extends State<_AdminSettings> {
                         decoration: const InputDecoration(isDense: true),
                       ),
               ])),
-            );
+            ));
           },
         )),
     ]);

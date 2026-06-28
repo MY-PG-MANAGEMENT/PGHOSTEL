@@ -40,24 +40,22 @@ public class TenantService {
 
     @Transactional
     public TenantResponse create(Long organizationId, Long userLoginId, TenantCreateRequest request) {
-        Person person;
-        Party party;
-        java.util.Optional<Person> existing = personRepository.findByMobileNumber(request.mobileNumber());
-        if (existing.isPresent()) {
-            person = existing.get();
-            party = partyRepository.findById(person.getPartyId())
-                    .orElseThrow(() -> new com.pgmanager.common.exception.NotFoundException("Party not found for existing person"));
-            applyFields(person, request);
-            personRepository.save(person);
-        } else {
-            party = new Party();
-            party.setPartyTypeId(PartyType.PERSON);
-            party = partyRepository.save(party);
-            person = new Person();
-            person.setPartyId(party.getPartyId());
-            applyFields(person, request);
-            personRepository.save(person);
+        // Reject if an active TENANT with this mobile already exists at the same property.
+        // No check when propertyId is absent — same mobile is allowed across different properties.
+        if (request.propertyId() != null
+                && personRepository.countActiveTenantsByMobileAtProperty(
+                        request.mobileNumber(), organizationId, request.propertyId()) > 0) {
+            throw new com.pgmanager.common.exception.BadRequestException(
+                    "A tenant with this mobile number is already registered at this property");
         }
+
+        Party party = new Party();
+        party.setPartyTypeId(PartyType.PERSON);
+        party = partyRepository.save(party);
+        Person person = new Person();
+        person.setPartyId(party.getPartyId());
+        applyFields(person, request);
+        personRepository.save(person);
 
         ensureOrgTenantMembership(organizationId, party.getPartyId());
 
@@ -237,11 +235,13 @@ public class TenantService {
         LocalDate expectedCheckoutDate = null;
         Long currentBedFacilityId = null;
         Long currentPropertyId = null;
+        String currentSharingType = null;
         if (bedAssignment.isPresent()) {
             hasAdmission = true;
             Long bedId = bedAssignment.get().getFacilityId();
             currentBedFacilityId = bedId;
             currentPropertyId = resolvePropertyId(bedId);
+            currentSharingType = resolveSharingType(bedId);
             moveInDate = bedAssignment.get().getFromDate();
             monthlyRent = bedAssignment.get().getMonthlyRent();
             securityDeposit = bedAssignment.get().getSecurityDeposit();
@@ -252,7 +252,34 @@ public class TenantService {
                     .flatMap(fgm -> facilityRepository.findById(fgm.getParentFacilityId()))
                     .map(Facility::getFacilityName).orElse(null);
         }
-        return toResponse(person, bedName, roomName, currentPropertyId, currentBedFacilityId, hasAdmission, moveInDate, monthlyRent, securityDeposit, expectedCheckoutDate);
+
+        // Temporary-stay state (a bed held with no billing).
+        boolean inTemporaryStay = false;
+        Long tempBedFacilityId = null;
+        String tempBedName = null;
+        Optional<FacilityParty> tempStay = facilityPartyRepository
+                .findByOrganizationIdAndPartyIdAndRoleTypeIdAndThruDateIsNull(
+                        organizationId, partyId, OccupancyRole.TEMP_OCCUPANT);
+        if (tempStay.isPresent()) {
+            inTemporaryStay = true;
+            tempBedFacilityId = tempStay.get().getFacilityId();
+            tempBedName = facilityRepository.findById(tempBedFacilityId).map(Facility::getFacilityName).orElse(null);
+            if (!hasAdmission) {
+                // Holding tenant with no permanent bed: surface the temp property for the UI.
+                currentPropertyId = resolvePropertyId(tempBedFacilityId);
+            }
+        }
+
+        return toResponse(person, bedName, roomName, currentPropertyId, currentBedFacilityId, hasAdmission,
+                moveInDate, monthlyRent, securityDeposit, expectedCheckoutDate,
+                currentSharingType, inTemporaryStay, tempBedFacilityId, tempBedName);
+    }
+
+    private String resolveSharingType(Long bedId) {
+        return facilityGroupMemberRepository.findByChildFacilityIdAndThruDateIsNull(bedId)
+                .stream().findFirst()
+                .flatMap(fgm -> facilityRepository.findById(fgm.getParentFacilityId()))
+                .map(Facility::getSharingType).orElse(null);
     }
 
     @Transactional
@@ -335,6 +362,16 @@ public class TenantService {
             Long currentPropertyId, Long currentBedFacilityId,
             boolean hasActiveAdmission, LocalDate moveInDate, BigDecimal monthlyRent, BigDecimal securityDeposit,
             LocalDate expectedCheckoutDate) {
+        return toResponse(person, currentBedName, currentRoomName, currentPropertyId, currentBedFacilityId,
+                hasActiveAdmission, moveInDate, monthlyRent, securityDeposit, expectedCheckoutDate,
+                null, false, null, null);
+    }
+
+    public TenantResponse toResponse(Person person, String currentBedName, String currentRoomName,
+            Long currentPropertyId, Long currentBedFacilityId,
+            boolean hasActiveAdmission, LocalDate moveInDate, BigDecimal monthlyRent, BigDecimal securityDeposit,
+            LocalDate expectedCheckoutDate, String currentSharingType, boolean inTemporaryStay,
+            Long tempBedFacilityId, String tempBedName) {
         return new TenantResponse(
                 person.getPartyId(),
                 person.getFullName(),
@@ -358,7 +395,11 @@ public class TenantService {
                 moveInDate,
                 monthlyRent,
                 securityDeposit,
-                expectedCheckoutDate
+                expectedCheckoutDate,
+                currentSharingType,
+                inTemporaryStay,
+                tempBedFacilityId,
+                tempBedName
         );
     }
 

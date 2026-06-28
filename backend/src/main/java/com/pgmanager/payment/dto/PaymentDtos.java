@@ -1,5 +1,6 @@
 package com.pgmanager.payment.dto;
 
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
@@ -13,7 +14,7 @@ public final class PaymentDtos {
     public record PaymentCreateRequest(
             Long rentId,
             @NotNull Long partyId,
-            @NotNull BigDecimal amount,
+            @NotNull @DecimalMin(value = "0.01", message = "amount must be greater than zero") BigDecimal amount,
             @NotBlank String paymentMode,
             LocalDate paymentDate,
             String referenceNumber,

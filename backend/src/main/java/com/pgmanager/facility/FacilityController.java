@@ -96,7 +96,9 @@ public class FacilityController {
                 joins +
                 "WHERE fgm.parent_facility_id=? AND bed.facility_type_id='BED' AND bed.organization_id=? " +
                 "AND NOT EXISTS (SELECT 1 FROM facility_party fp WHERE fp.facility_id=bed.facility_id " +
-                "  AND fp.role_type_id='OCCUPANT' AND fp.thru_date IS NULL) " +
+                "  AND fp.role_type_id IN ('OCCUPANT','TEMP_OCCUPANT') AND fp.thru_date IS NULL) " +
+                "AND NOT EXISTS (SELECT 1 FROM scheduled_bed_transfer sbt WHERE sbt.to_bed_facility_id=bed.facility_id " +
+                "  AND sbt.status='PENDING') " +
                 "UNION ALL " +
                 "SELECT " + base + ",fp.expected_checkout_date,'UPCOMING' bed_status " +
                 joins +

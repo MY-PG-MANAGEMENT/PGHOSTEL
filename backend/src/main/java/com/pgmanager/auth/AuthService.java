@@ -84,6 +84,17 @@ public class AuthService {
 
     @Transactional
     public AuthResponse registerOwner(RegisterOwnerRequest request) {
+        OwnerAccount account = createOwnerAccount(request);
+        return issueTokens((AppUserPrincipal) userDetailsService.loadUserByUsername(account.username()));
+    }
+
+    /**
+     * Creates the Party → Person → Facility(ORGANIZATION) → UserLogin(OWNER) graph for a new
+     * organization without logging the caller in. Used by the super-admin panel to provision an
+     * organization and its owner login. {@link #registerOwner} wraps this and issues tokens.
+     */
+    @Transactional
+    public OwnerAccount createOwnerAccount(RegisterOwnerRequest request) {
         if (userLoginRepository.existsByUsername(request.username())) {
             throw new BadRequestException("Username already exists");
         }
@@ -114,8 +125,10 @@ public class AuthService {
         user = userLoginRepository.save(user);
 
         auditService.log(organization.getFacilityId(), user.getUserLoginId(), "OWNER_REGISTERED", "USER_LOGIN", user.getUserLoginId(), "Owner registered");
-        return issueTokens((AppUserPrincipal) userDetailsService.loadUserByUsername(user.getUsername()));
+        return new OwnerAccount(organization.getFacilityId(), organization.getFacilityName(), user.getUserLoginId(), user.getUsername());
     }
+
+    public record OwnerAccount(Long organizationId, String organizationName, Long userLoginId, String username) {}
 
     @Transactional
     public AuthResponse login(LoginRequest request) {

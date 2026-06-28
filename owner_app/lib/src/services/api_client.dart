@@ -13,7 +13,7 @@ class ApiClient {
   final FlutterSecureStorage storage;
   static const String _configuredBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://192.168.1.27:8080/api',
+    defaultValue: 'http://192.168.1.13:8080/api',
   );
   final String baseUrl = _configuredBaseUrl;
 

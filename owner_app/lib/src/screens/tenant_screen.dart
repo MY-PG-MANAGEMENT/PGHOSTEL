@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../widgets/animations.dart';
 import '../widgets/async_action_button.dart';
 import '../widgets/error_retry_view.dart';
 import 'billing_screen.dart' show InvoiceDetailSheet;
@@ -142,13 +143,16 @@ class _TenantScreenState extends State<TenantScreen> {
                 child: ListView.separated(
                   itemCount: tenants.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, i) => _TenantCard(
-                    data: tenants[i],
-                    onTap: () => Navigator.of(context)
-                        .push(MaterialPageRoute(
-                          builder: (_) => TenantDetailScreen(tenant: tenants[i]),
-                        ))
-                        .then((_) => setState(_load)),
+                  itemBuilder: (context, i) => FadeSlideIn(
+                    delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+                    child: _TenantCard(
+                      data: tenants[i],
+                      onTap: () => Navigator.of(context)
+                          .push(MaterialPageRoute(
+                            builder: (_) => TenantDetailScreen(tenant: tenants[i]),
+                          ))
+                          .then((_) => setState(_load)),
+                    ),
                   ),
                 ),
               );
@@ -185,7 +189,7 @@ class _TenantScreenState extends State<TenantScreen> {
       backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
         backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF1A1A2E),
+        foregroundColor: PgColors.textPrimary,
         elevation: 0,
         title: const Text('Tenants',
             style: TextStyle(fontWeight: FontWeight.w700)),
@@ -196,9 +200,9 @@ class _TenantScreenState extends State<TenantScreen> {
             onPressed: _openAdd,
           ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: const Color(0xFFE5E7EB)),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, thickness: 1, color: PgColors.hairline),
         ),
       ),
       body: Padding(
@@ -324,12 +328,26 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabs;
   late Map<String, dynamic> _tenant;
+  List<Map<String, dynamic>> _scheduled = [];
 
   @override
   void initState() {
     super.initState();
     _tenant = widget.tenant;
     _tabs = TabController(length: 5, vsync: this);
+    _refreshTenant();
+    _loadScheduled();
+  }
+
+  Future<void> _loadScheduled() async {
+    final id = _tenant['tenantId'];
+    try {
+      final data = await context.read<AppState>().apiClient
+          .get('/occupancy/scheduled-transfers/$id');
+      final list = (data is List ? data : (data['items'] ?? data['data'] ?? []))
+          .cast<Map<String, dynamic>>();
+      if (mounted) setState(() => _scheduled = list);
+    } catch (_) {}
   }
 
   @override
@@ -373,6 +391,16 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
       body: Column(
         children: [
           _TenantHeader(tenant: _tenant, active: active),
+          if (_tenant['inTemporaryStay'] == true)
+            _TempStayBanner(
+              bedName: '${_tenant['tempBedName'] ?? 'a bed'}',
+              onMovePermanent: _makePermanent,
+            ),
+          for (final s in _scheduled)
+            _ScheduledTransferBanner(
+              scheduled: s,
+              onCancel: () => _cancelScheduled((s['scheduledBedTransferId'] as num).toInt()),
+            ),
           const Divider(height: 1),
           Expanded(
             child: TabBarView(
@@ -401,6 +429,32 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
       final fresh = await context.read<AppState>().apiClient.get('/tenants/$id');
       if (mounted) setState(() => _tenant = fresh);
     } catch (_) {}
+    await _loadScheduled();
+  }
+
+  Future<void> _cancelScheduled(int id) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<AppState>().apiClient.delete('/occupancy/scheduled-transfers/$id');
+      await _refreshTenant();
+      messenger.showSnackBar(const SnackBar(content: Text('Scheduled transfer cancelled')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+    }
+  }
+
+  Future<void> _makePermanent() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => _MakePermanentDialog(
+        tenantName: '${_tenant['fullName'] ?? 'Tenant'}',
+        tempBedName: '${_tenant['tempBedName'] ?? 'this bed'}',
+        partyId: (_tenant['tenantId'] as num).toInt(),
+        tempBedFacilityId: (_tenant['tempBedFacilityId'] as num).toInt(),
+        propertyId: (_tenant['currentPropertyId'] as num?)?.toInt(),
+      ),
+    );
+    if (ok == true) await _refreshTenant();
   }
 
   void _onMenuAction(String action) async {
@@ -446,6 +500,8 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
           partyId: (_tenant['tenantId'] as num).toInt(),
           tenantName: '${_tenant['fullName'] ?? 'Tenant'}',
           currentPropertyId: propertyId != null ? (propertyId as num).toInt() : null,
+          moveInDateIso: _tenant['moveInDate'] as String?,
+          currentSharingType: _tenant['currentSharingType'] as String?,
           onTransferred: _refreshTenant,
         ),
       );
@@ -502,6 +558,241 @@ class _TenantHeader extends StatelessWidget {
           _ActiveBadge(active),
         ],
       ),
+    );
+  }
+}
+
+// ─── Temporary-stay banner ────────────────────────────────────────────────
+
+class _TempStayBanner extends StatelessWidget {
+  const _TempStayBanner({
+    required this.bedName,
+    required this.onMovePermanent,
+  });
+
+  final String bedName;
+  final VoidCallback onMovePermanent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: PgColors.warning.withValues(alpha: 0.10),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.timelapse_outlined, size: 16, color: PgColors.warning),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text('Temporary stay in $bedName — no billing',
+                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              icon: const Icon(Icons.event_seat_outlined, size: 16),
+              label: const Text('Assign Permanent Bed', style: TextStyle(fontSize: 12.5)),
+              style: FilledButton.styleFrom(
+                  backgroundColor: PgColors.primary, visualDensity: VisualDensity.compact),
+              onPressed: onMovePermanent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Scheduled-transfer banner ────────────────────────────────────────────
+
+class _ScheduledTransferBanner extends StatelessWidget {
+  const _ScheduledTransferBanner({required this.scheduled, required this.onCancel});
+
+  final Map<String, dynamic> scheduled;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final eff = scheduled['effectiveDate'];
+    final rent = scheduled['newMonthlyRent'];
+    return Container(
+      width: double.infinity,
+      color: PgColors.primary.withValues(alpha: 0.07),
+      padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+      child: Row(children: [
+        const Icon(Icons.event_repeat_outlined, size: 16, color: PgColors.primary),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            'Bed transfer scheduled for ${eff ?? 'the next billing date'}'
+            '${rent != null ? ' • new rent ₹$rent' : ''}',
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: PgColors.primary),
+          ),
+        ),
+        TextButton(
+          onPressed: onCancel,
+          child: const Text('Cancel', style: TextStyle(fontSize: 12.5)),
+        ),
+      ]),
+    );
+  }
+}
+
+// ─── Make-permanent dialog ────────────────────────────────────────────────
+
+class _MakePermanentDialog extends StatefulWidget {
+  const _MakePermanentDialog({
+    required this.tenantName,
+    required this.tempBedName,
+    required this.partyId,
+    required this.tempBedFacilityId,
+    this.propertyId,
+  });
+
+  final String tenantName;
+  final String tempBedName;
+  final int partyId;
+  final int tempBedFacilityId;
+  final int? propertyId;
+
+  @override
+  State<_MakePermanentDialog> createState() => _MakePermanentDialogState();
+}
+
+class _MakePermanentDialogState extends State<_MakePermanentDialog> {
+  final _rentCtrl = TextEditingController();
+  bool _saving = false;
+  late int _bedId = widget.tempBedFacilityId;
+  // Bed options: the current temp bed first, then any vacant beds in the property.
+  late List<Map<String, dynamic>> _beds = [
+    {'bed_id': widget.tempBedFacilityId, 'label': '${widget.tempBedName} (current)'},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBeds();
+  }
+
+  @override
+  void dispose() {
+    _rentCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadBeds() async {
+    final pid = widget.propertyId;
+    if (pid == null) return;
+    try {
+      final result = await context.read<AppState>().apiClient.get('/properties/$pid/vacant-beds');
+      final all = (result is List ? result : (result['items'] ?? result['data'] ?? []))
+          .cast<Map<String, dynamic>>();
+      final vacant = all
+          .where((b) => '${b['bed_status']}'.toUpperCase() == 'VACANT')
+          .map((b) => {
+                'bed_id': (b['bed_id'] as num).toInt(),
+                'label': '${b['bed_name'] ?? 'Bed'}'
+                    '${b['room_name'] != null ? ' · ${b['room_name']}' : ''}',
+              })
+          .toList();
+      if (mounted) {
+        setState(() => _beds = [
+              {'bed_id': widget.tempBedFacilityId, 'label': '${widget.tempBedName} (current)'},
+              ...vacant,
+            ]);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    final messenger = ScaffoldMessenger.of(context);
+    final rent = double.tryParse(_rentCtrl.text.trim());
+    try {
+      await context.read<AppState>().apiClient.post('/occupancy/temp-stay/make-permanent', {
+        'partyId': widget.partyId,
+        'bedFacilityId': _bedId,
+        if (rent != null && rent > 0) 'monthlyRent': rent,
+      });
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        messenger.showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Text('Assign Permanent Bed', style: TextStyle(fontWeight: FontWeight.w800)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Assign ${widget.tenantName} to a permanent bed.',
+              style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<int>(
+            value: _bedId,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Permanent Bed',
+              prefixIcon: Icon(Icons.bed_outlined),
+              border: OutlineInputBorder(),
+            ),
+            items: _beds
+                .map((b) => DropdownMenuItem<int>(
+                      value: b['bed_id'] as int,
+                      child: Text('${b['label']}', overflow: TextOverflow.ellipsis),
+                    ))
+                .toList(),
+            onChanged: _saving ? null : (v) => setState(() => _bedId = v ?? _bedId),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _rentCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Monthly Rent (₹) — optional',
+              helperText: 'Leave blank to use the standard sharing price',
+              prefixIcon: Icon(Icons.currency_rupee),
+              border: OutlineInputBorder(),
+            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: PgColors.primary.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Text(
+              'Billing starts from the temporary join date (the tenant\'s original cycle is kept).',
+              style: TextStyle(fontSize: 12, color: PgColors.primary),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Text('Assign'),
+        ),
+      ],
     );
   }
 }

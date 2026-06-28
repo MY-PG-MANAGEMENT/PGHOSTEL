@@ -9,6 +9,14 @@ abstract final class PgColors {
   static const warning = Color(0xFFF97316);
   static const danger = Color(0xFFDC2626);
   static const ink = Color(0xFF111827);
+
+  // Named aliases for values currently hardcoded across screens. Prefer these
+  // over inline Color(0x...) literals so the palette stays in one place.
+  static const scaffold = Color(0xFFF9F9FD);
+  static const textPrimary = Color(0xFF1A1A2E);
+  static const textSecondary = Color(0xFF6B7280);
+  static const textTertiary = Color(0xFF9CA3AF);
+  static const hairline = Color(0xFFE5E7EB);
 }
 
 ThemeData buildAppTheme() {

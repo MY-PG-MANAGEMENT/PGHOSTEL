@@ -26,9 +26,17 @@ Swagger UI is at `http://localhost:8080/swagger-ui.html`.
 
 `src/main/resources/application.yml` — expects local MySQL on port 3306, database `pg_manager`, user `root`/`root`. JWT secret and token lifetimes (`access-token-minutes: 30`, `refresh-token-days: 14`) live under `app.security`.
 
+`@EnableScheduling` is active on `PgManagerApplication` — `RentReminderScheduler` fires daily at 09:00 (cron `0 0 9 * * *`) to dispatch rent-due, checkout, payment-receipt, and check-in notifications.
+
 ### Database Migrations
 
-Flyway migrations in `src/main/resources/db/migration/`. Always add new migrations as `V<n>__description.sql` — never edit existing ones. `ddl-auto` is `validate`, so Hibernate rejects schema drift. Current latest is V8 (`V8__expected_checkout_date.sql`).
+Flyway migrations in `src/main/resources/db/migration/`. Always add new migrations as `V<n>__description.sql` — never edit existing ones. `ddl-auto` is `validate`, so Hibernate rejects schema drift. Current latest is V13 (`V13__bed_transfer_and_temp_stay.sql`).
+
+Notable migration changes:
+- V10 — adds `UNIQUE KEY uk_person_mobile` on `person.mobile_number` (global, not org-scoped) and creates `bulk_upload_job` tracking table
+- V11 — seeds `notification_category` rows: `RENT_REMINDER`, `CHECKOUT_REMINDER`, `PAYMENT_RECEIPT`, `CHECK_IN`, `GENERAL`
+- V12 — switches mobile uniqueness from global to property-scoped
+- V13 — creates `scheduled_bed_transfer` (deferred sharing-change transfers)
 
 ### Package Structure
 
@@ -45,8 +53,14 @@ Each feature is a self-contained package under `com.pgmanager`. Cross-cutting co
 
 - Links a `party` to a `facility` with a role and a date range (`from_date` / `thru_date`). Active bed assignments have a null `thru_date`.
 - When a tenant is created, **two** `FacilityParty` rows are written: one with `facilityId = organizationId` (role `TENANT`, org-level membership) and one with `facilityId = propertyId` (role `TENANT`, property-scoped). The `TenantService.list()` query filters on `facilityId = organizationId` to avoid duplicating tenants. The bed-level role is `OCCUPANT`.
-- `OccupancyRole` holds the string constants (`TENANT`, `OCCUPANT`).
+- `OccupancyRole` holds the string constants (`TENANT`, `OCCUPANT`, `TEMP_OCCUPANT`).
 - `OccupancyService.assign` also calls `ensurePropertyTenantMembership` so tenants assigned via the global bed-assign flow still appear in property-scoped lists.
+
+**Bed transfer rules (`OccupancyService.transfer`, `POST /api/occupancy/transfer-bed`)** — returns a `TransferResult` (`mode` = `APPLIED` or `SCHEDULED`):
+- **Same sharing type** → applied immediately; the new occupancy row carries the *original* `from_date` so the billing cycle/day and rent are unchanged.
+- **Different sharing type** → never applied mid-cycle. A `scheduled_bed_transfer` (PENDING) is written with `effective_date` = the tenant's next billing anniversary; the swap + new rent are applied on that date by `BedTransferScheduler` (`@Scheduled` daily, applies `applyDueTransfers()`). The current month's invoice is untouched. A bed with a PENDING transfer is excluded from `/vacant-beds`. Cancel via `DELETE /api/occupancy/scheduled-transfers/{id}`; list via `GET /api/occupancy/scheduled-transfers/{partyId}`.
+
+**Temporary stay (`TEMP_OCCUPANT`)** — `POST /api/occupancy/temp-stay` places a tenant in a bed with **no billing** (invoice generation only ever reads `OCCUPANT` rows). `POST /temp-stay/end` (move back) closes it; `POST /temp-stay/make-permanent` ends the temp stay and runs the normal assign + first-invoice (billing starts). Temp-occupied beds are excluded from `/vacant-beds`. Tenant detail (`GET /api/tenants/{id}`) exposes `currentSharingType`, `inTemporaryStay`, `tempBedFacilityId`, `tempBedName` for the Flutter `TransferBedSheet` and tenant-detail banners.
 
 **`security`**
 
@@ -76,7 +90,9 @@ Each feature is a self-contained package under `com.pgmanager`. Cross-cutting co
 
 **`notification`**
 
-- `NotificationController` is JdbcTemplate-based. Stores per-user notifications in a `notification` table; exposes list, mark-read, and delete endpoints.
+- `NotificationController` is JdbcTemplate-based. Stores per-user notifications with a `notification_recipient` join table; list endpoint supports `state` filter (`ACTIVE`, `ARCHIVED`, `UNREAD`, `IMPORTANT`) with pagination (`page`, `size`). Also exposes mark-read, archive, toggle-important, and delete endpoints.
+- `NotificationService` provides `createForOrg(organizationId, category, title, message, entityType, entityId, priority, recipientPartyIds)` — used both by business logic and the scheduler. Categories come from V11 seeds.
+- `RentReminderScheduler` runs at 09:00 daily; queries tenants with overdue rent, upcoming checkouts, and recent payments then calls `NotificationService` for each event type.
 
 **`feature`**
 
@@ -84,11 +100,17 @@ Each feature is a self-contained package under `com.pgmanager`. Cross-cutting co
 
 **`admin`**
 
-- `SuperAdminController` is gated to `SUPER_ADMIN` role and handles cross-org operations.
+- `SuperAdminController` (mapped to `/api/super-admin`) is gated to `SUPER_ADMIN` role. Endpoints: `GET /dashboard` (cross-org metrics + last 10 audit entries), `GET /organizations` (filterable by `?status=`), `POST /organizations` (provision a new organization + its OWNER login — delegates to `AuthService.createOwnerAccount` without logging the super admin out), `PATCH /organizations/{id}/status` (toggle org active/inactive), `POST /broadcast` (push a titled announcement to all org owners via `NotificationService`). Uses JdbcTemplate throughout (except org creation, which reuses the JPA-based `AuthService`).
+- Owner self-registration was removed from the Flutter login screen; new organizations are created exclusively by super admins via `POST /organizations` (the admin panel's Organizations tab has a "New Organization" dialog). `AuthService.registerOwner` (and `POST /api/auth/register-owner`) still exist and wrap `createOwnerAccount`, but the owner app no longer exposes a `/register` route.
+- `BulkUploadController` (mapped to `/api/super-admin/upload`). `GET /template/facilities` and `GET /template/tenants` return downloadable CSV templates. `POST /facilities` and `POST /tenants` accept `MultipartFile` CSV uploads parsed via Apache Commons CSV. Tenant upload uses find-or-create by `mobile_number` (enforced unique in V10) to avoid creating duplicate persons across orgs. Results tracked in `bulk_upload_job` table.
 
 **`dashboard`**, **`settings`**, **`subscription`**
 
 - Self-contained packages for their respective concerns; follow the same JPA + `ApiResponse<T>` convention unless they involve aggregation (in which case JdbcTemplate may be used, as in `FacilityController`'s `/vacant-beds` and `/room-summary` endpoints).
+
+**`facility` — InventoryController**
+
+- `InventoryController` (separate from `FacilityController`) exposes read-only inventory views: `GET /api/inventory/properties/{propertyId}` (rooms with bed counts and occupancy stats) and `GET /api/inventory/rooms/{roomId}` (individual bed status including current occupant details). Uses JdbcTemplate for the aggregated joins.
 
 **Common patterns**
 
@@ -155,6 +177,8 @@ Key routes: `/onboarding`, `/properties`, `/tenants`, `/occupancy`, `/rents`, `/
 
 **Biometric** — `AppState.setBiometricEnabled` / `biometricLogin` use `local_auth`. When biometric is enabled, `restoreSession` leaves `isLoggedIn = false` even if a token is present, forcing fingerprint/PIN unlock.
 
+**Super admin screen** — `admin_screen.dart` is the full `SUPER_ADMIN` panel (route `/admin`). It contains eight in-file sections: Dashboard (org metrics + broadcast form), Organizations (list/filter/status toggle), Data Upload (CSV file picker → `POST /api/super-admin/upload/{facilities|tenants}`), Users, Plans, Reports, Audit Logs, and System Settings. Uses the `file_selector` package (^1.0.4) for cross-platform CSV file picking — this is the only screen that picks files.
+
 ## Multi-tenancy
 
 Shared-database multi-tenancy. Each organization is a `Facility(ORGANIZATION)`. Every business table carries `organization_id`. The backend enforces org scope from the JWT principal via `CurrentUser`.
@@ -162,3 +186,5 @@ Shared-database multi-tenancy. Each organization is a `Facility(ORGANIZATION)`. 
 ## Docs
 
 `docs/` contains: `API_SPECIFICATION.md` (80+ endpoint reference), `MOBILE_APP_BACKEND_MAPPING.md` (screen-to-API mapping), `ANALYSIS_SUMMARY.md` (schema + screen inventory), `IMPLEMENTATION_ROADMAP.md`, and `DOCUMENTATION_INDEX.md` (navigation guide). Check these before adding endpoints or screens — the mapping doc is especially useful when wiring up new Flutter screens to backend APIs.
+
+`docs/er/` holds Mermaid ER diagrams (`.mmd`) covering authentication, billing, analytics, facility hierarchy, payments, photos, and tenant management. Useful when reasoning about join paths or adding new tables.

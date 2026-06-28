@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../widgets/animations.dart';
 
 // ─── Checkout Sheet ───────────────────────────────────────────────────────────
 
@@ -248,7 +249,9 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
                 maxHeight: MediaQuery.of(context).size.height * 0.72),
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
-              child: Column(
+              child: FadeSlideIn(
+                offset: 8,
+                child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (invoices == null && _loadError == null)
@@ -331,6 +334,7 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
                     ),
                   ],
                 ],
+              ),
               ),
             ),
           ),
@@ -553,6 +557,8 @@ class TransferBedSheet extends StatefulWidget {
     required this.tenantName,
     required this.currentPropertyId,
     required this.onTransferred,
+    this.moveInDateIso,
+    this.currentSharingType,
     super.key,
   });
 
@@ -560,6 +566,14 @@ class TransferBedSheet extends StatefulWidget {
   final String tenantName;
   final int? currentPropertyId;
   final VoidCallback onTransferred;
+
+  /// Tenant's move-in date (ISO yyyy-MM-dd) — used to compute the next billing
+  /// date for a sharing-type change.
+  final String? moveInDateIso;
+
+  /// Tenant's current room sharing type (e.g. "4"). Used to decide whether a
+  /// chosen bed is the same sharing (immediate) or different (scheduled).
+  final String? currentSharingType;
 
   @override
   State<TransferBedSheet> createState() => _TransferBedSheetState();
@@ -573,6 +587,11 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
   final Map<int, TextEditingController> _amountCtrl = {};
   final Map<int, String> _payMode = {};
 
+  // ── mode ──
+  // 'PERMANENT' = a real bed transfer (same-sharing = immediate, different-sharing
+  // = scheduled to next billing date). 'TEMPORARY' = a no-billing temporary stay.
+  String _mode = 'PERMANENT';
+
   // ── bed selection ──
   List<Map<String, dynamic>>? _vacantBeds;
   String? _bedsError;
@@ -581,6 +600,40 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
   bool _transferring = false;
   final _rentCtrl = TextEditingController();
   double? _standardRent;
+
+  /// True when the selected bed's sharing type differs from the tenant's current
+  /// one — such a move is deferred to the next billing date.
+  bool get _isSharingChange {
+    final sel = _selectedBed?['sharing_type'];
+    final cur = widget.currentSharingType;
+    return sel != null && cur != null && '$sel' != cur;
+  }
+
+  /// The next billing-cycle date (anniversary of move-in, strictly after today).
+  /// Mirrors the backend so the UI can preview when a sharing change takes effect.
+  DateTime? get _nextCycleDate {
+    final iso = widget.moveInDateIso;
+    if (iso == null) return null;
+    DateTime moveIn;
+    try {
+      moveIn = DateTime.parse(iso);
+    } catch (_) {
+      return null;
+    }
+    final now = DateTime.now();
+    int day = moveIn.day;
+    int dim(int y, int m) => DateTime(y, m + 1, 0).day;
+    DateTime candidate = DateTime(now.year, now.month, day.clamp(1, dim(now.year, now.month)));
+    if (!candidate.isAfter(now)) {
+      final ny = now.month == 12 ? now.year + 1 : now.year;
+      final nm = now.month == 12 ? 1 : now.month + 1;
+      candidate = DateTime(ny, nm, day.clamp(1, dim(ny, nm)));
+    }
+    return candidate;
+  }
+
+  String _fmtDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}-${d.month.toString().padLeft(2, '0')}-${d.year}';
 
   @override
   void initState() {
@@ -746,30 +799,176 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
     if (picked != null) setState(() => _transferDate = picked);
   }
 
+  String _iso(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
   Future<void> _transfer() async {
     if (_selectedBed == null) return;
     setState(() => _transferring = true);
-    final d = _transferDate;
-    final iso = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-    final rent = double.tryParse(_rentCtrl.text.trim());
+    final bedId = (_selectedBed!['bed_id'] as num).toInt();
+    final messenger = ScaffoldMessenger.of(context);
     try {
-      await context.read<AppState>().apiClient.post('/occupancy/transfer-bed', {
-        'partyId': widget.partyId,
-        'newBedFacilityId': (_selectedBed!['bed_id'] as num).toInt(),
-        'transferDate': iso,
-        if (rent != null && rent > 0) 'monthlyRent': rent,
-      });
+      String message;
+      if (_mode == 'TEMPORARY') {
+        await context.read<AppState>().apiClient.post('/occupancy/temp-stay', {
+          'partyId': widget.partyId,
+          'bedFacilityId': bedId,
+          'fromDate': _iso(_transferDate),
+        });
+        message = 'Temporary stay started — no billing';
+      } else {
+        final rent = double.tryParse(_rentCtrl.text.trim());
+        final body = <String, dynamic>{
+          'partyId': widget.partyId,
+          'newBedFacilityId': bedId,
+          if (rent != null && rent > 0) 'monthlyRent': rent,
+        };
+        // Same-sharing → immediate on the chosen date. Different-sharing → omit the
+        // date and let the backend schedule it at the next billing cycle.
+        if (!_isSharingChange) body['transferDate'] = _iso(_transferDate);
+        final res = await context.read<AppState>().apiClient.post('/occupancy/transfer-bed', body);
+        if ('${res['mode']}' == 'SCHEDULED') {
+          final eff = res['scheduled']?['effectiveDate'];
+          message = 'Transfer scheduled for ${eff ?? 'the next billing date'}';
+        } else {
+          message = 'Bed transferred';
+        }
+      }
       if (mounted) {
         Navigator.pop(context, true);
         widget.onTransferred();
+        messenger.showSnackBar(SnackBar(content: Text(message), backgroundColor: PgColors.success));
       }
     } catch (e) {
       if (mounted) {
         setState(() => _transferring = false);
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.showSnackBar(
             SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
       }
     }
+  }
+
+  Widget _bedSelector() {
+    if (widget.currentPropertyId == null) {
+      return const Text('Property info unavailable — refresh the tenant detail and try again.',
+          style: TextStyle(color: Colors.grey));
+    }
+    if (_vacantBeds == null && _bedsError == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_bedsError != null) {
+      return Text('Failed to load beds: $_bedsError', style: const TextStyle(color: Colors.red));
+    }
+    if (_vacantBeds!.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: const Text('No vacant beds in this property.',
+            style: TextStyle(color: Colors.grey), textAlign: TextAlign.center),
+      );
+    }
+    return _BedPicker(beds: _vacantBeds!, selected: _selectedBed, onSelect: _onBedSelected);
+  }
+
+  Widget _sharingChangeCard() {
+    final eff = _nextCycleDate;
+    final newSharing = _selectedBed?['sharing_type'];
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: PgColors.warning.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: PgColors.warning.withValues(alpha: 0.4)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.event_repeat_outlined, color: PgColors.warning, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text(
+            'Sharing change (${widget.currentSharingType}-sharing → $newSharing-sharing)',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          )),
+        ]),
+        const SizedBox(height: 6),
+        Text(
+          eff != null
+              ? 'Takes effect on ${_fmtDate(eff)} (the next billing date). '
+                  'The new rent applies from then — the current month stays unchanged.'
+              : 'Takes effect on the next billing date. The current month stays unchanged.',
+          style: const TextStyle(fontSize: 12.5, color: Color(0xFF7A5B00)),
+        ),
+      ]),
+    );
+  }
+
+  Widget _datePickerTile(String label) {
+    return InkWell(
+      onTap: _transferring ? null : _pickTransferDate,
+      borderRadius: BorderRadius.circular(8),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: const Icon(Icons.event_outlined),
+          border: const OutlineInputBorder(),
+        ),
+        child: Text(_fmtDate(_transferDate)),
+      ),
+    );
+  }
+
+  List<Widget> _bedAndConfirm() {
+    final isTemp = _mode == 'TEMPORARY';
+    final sharingChange = !isTemp && _isSharingChange;
+    final confirmLabel = isTemp
+        ? 'Start Temporary Stay'
+        : (sharingChange ? 'Schedule Transfer' : 'Confirm Transfer');
+    return [
+      Text(isTemp ? 'Select Bed' : 'Select New Bed',
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+      const SizedBox(height: 10),
+      _bedSelector(),
+      const SizedBox(height: 16),
+      if (_selectedBed != null) ...[
+        if (!isTemp) ...[
+          TextField(
+            controller: _rentCtrl,
+            decoration: InputDecoration(
+              labelText: 'Monthly Rent (₹)',
+              prefixIcon: const Icon(Icons.currency_rupee),
+              helperText: _standardRent != null
+                  ? 'Standard: ₹${_standardRent!.toStringAsFixed(0)}/mo'
+                  : null,
+              helperStyle: const TextStyle(color: Color(0xFF2563EB), fontSize: 11),
+              border: const OutlineInputBorder(),
+            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (sharingChange)
+          _sharingChangeCard()
+        else
+          _datePickerTile(isTemp ? 'Start Date' : 'Transfer Date'),
+        const SizedBox(height: 16),
+      ],
+      FilledButton.icon(
+        icon: _transferring
+            ? const SizedBox(width: 16, height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            : Icon(isTemp ? Icons.timelapse_outlined : Icons.swap_horiz_rounded),
+        label: Text(_transferring ? 'Working…' : confirmLabel),
+        style: FilledButton.styleFrom(
+          backgroundColor: PgColors.primary,
+          minimumSize: const Size.fromHeight(48),
+        ),
+        onPressed: (_transferring || _selectedBed == null) ? null : _transfer,
+      ),
+    ];
   }
 
   @override
@@ -809,129 +1008,92 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
             constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.78),
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
-              child: Column(
+              child: FadeSlideIn(
+                offset: 8,
+                child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // ── Invoice settlement section ──────────────────────────
-                  if (invoices == null && _loadError == null)
-                    const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator())),
-                  if (_loadError != null)
-                    Text('Failed to load dues: $_loadError', style: const TextStyle(color: Colors.red)),
-                  if (invoices != null && invoices.isNotEmpty) ...[
-                    const Text('Settle dues before transfer',
-                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                    const SizedBox(height: 12),
-                    for (final inv in invoices)
-                      _InvoicePendingCard(
-                        invoice: inv,
-                        payOpen: _payOpen.contains((inv['invoice_id'] as num).toInt()),
-                        amountCtrl: _getOrCreateCtrl(inv),
-                        payMode: _payMode[(inv['invoice_id'] as num).toInt()] ?? 'CASH',
-                        onTogglePay: () => _togglePay((inv['invoice_id'] as num).toInt()),
-                        onPayModeChange: (m) => setState(() => _payMode[(inv['invoice_id'] as num).toInt()] = m),
-                        onPay: () => _pay(inv),
-                        onWriteOff: () => _writeOff(inv),
-                      ),
-                  ],
+                  // ── Mode toggle ────────────────────────────────────────
+                  Center(
+                    child: SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(value: 'PERMANENT',
+                            label: Text('Permanent'), icon: Icon(Icons.swap_horiz_rounded, size: 16)),
+                        ButtonSegment(value: 'TEMPORARY',
+                            label: Text('Temporary'), icon: Icon(Icons.timelapse_outlined, size: 16)),
+                      ],
+                      selected: {_mode},
+                      onSelectionChanged: _transferring
+                          ? null
+                          : (s) => setState(() {
+                                _mode = s.first;
+                                _selectedBed = null;
+                                _standardRent = null;
+                                _rentCtrl.clear();
+                              }),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
 
-                  // ── Bed selection + confirm (shown only when dues cleared) ──
-                  if (allSettled) ...[
+                  if (_mode == 'TEMPORARY') ...[
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: PgColors.success.withValues(alpha: 0.1),
+                        color: PgColors.primary.withValues(alpha: 0.07),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: const Row(children: [
-                        Icon(Icons.check_circle_outline, color: PgColors.success, size: 18),
+                        Icon(Icons.info_outline, color: PgColors.primary, size: 18),
                         SizedBox(width: 8),
-                        Text('No pending dues', style: TextStyle(color: PgColors.success, fontWeight: FontWeight.w600)),
+                        Expanded(child: Text(
+                          'Temporary stay — no rent is charged. Make it permanent or move them back later.',
+                          style: TextStyle(fontSize: 12.5, color: PgColors.primary),
+                        )),
                       ]),
                     ),
-                    const SizedBox(height: 20),
-
-                    // Bed picker
-                    const Text('Select New Bed',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                    const SizedBox(height: 10),
-                    if (widget.currentPropertyId == null)
-                      const Text('Property info unavailable — refresh the tenant detail and try again.',
-                          style: TextStyle(color: Colors.grey))
-                    else if (_vacantBeds == null && _bedsError == null)
-                      const Center(child: CircularProgressIndicator())
-                    else if (_bedsError != null)
-                      Text('Failed to load beds: $_bedsError', style: const TextStyle(color: Colors.red))
-                    else if (_vacantBeds!.isEmpty)
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.grey.shade200),
-                        ),
-                        child: const Text('No vacant beds in this property.',
-                            style: TextStyle(color: Colors.grey), textAlign: TextAlign.center),
-                      )
-                    else
-                      _BedPicker(
-                        beds: _vacantBeds!,
-                        selected: _selectedBed,
-                        onSelect: _onBedSelected,
-                      ),
                     const SizedBox(height: 16),
-
-                    // Rent field — shown once a bed is selected
-                    if (_selectedBed != null) ...[
-                      TextField(
-                        controller: _rentCtrl,
-                        decoration: InputDecoration(
-                          labelText: 'Monthly Rent (₹)',
-                          prefixIcon: const Icon(Icons.currency_rupee),
-                          helperText: _standardRent != null
-                              ? 'Standard: ₹${_standardRent!.toStringAsFixed(0)}/mo'
-                              : null,
-                          helperStyle: const TextStyle(color: Color(0xFF2563EB), fontSize: 11),
-                          border: const OutlineInputBorder(),
+                    ..._bedAndConfirm(),
+                  ] else ...[
+                    // ── Invoice settlement section ──────────────────────────
+                    if (invoices == null && _loadError == null)
+                      const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator())),
+                    if (_loadError != null)
+                      Text('Failed to load dues: $_loadError', style: const TextStyle(color: Colors.red)),
+                    if (invoices != null && invoices.isNotEmpty) ...[
+                      const Text('Settle dues before transfer',
+                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                      const SizedBox(height: 12),
+                      for (final inv in invoices)
+                        _InvoicePendingCard(
+                          invoice: inv,
+                          payOpen: _payOpen.contains((inv['invoice_id'] as num).toInt()),
+                          amountCtrl: _getOrCreateCtrl(inv),
+                          payMode: _payMode[(inv['invoice_id'] as num).toInt()] ?? 'CASH',
+                          onTogglePay: () => _togglePay((inv['invoice_id'] as num).toInt()),
+                          onPayModeChange: (m) => setState(() => _payMode[(inv['invoice_id'] as num).toInt()] = m),
+                          onPay: () => _pay(inv),
+                          onWriteOff: () => _writeOff(inv),
                         ),
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-                      ),
-                      const SizedBox(height: 16),
                     ],
-
-                    // Transfer date
-                    InkWell(
-                      onTap: _transferring ? null : _pickTransferDate,
-                      borderRadius: BorderRadius.circular(8),
-                      child: InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: 'Transfer Date',
-                          prefixIcon: Icon(Icons.event_outlined),
-                          border: OutlineInputBorder(),
+                    if (allSettled) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: PgColors.success.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        child: Text(
-                          '${_transferDate.day.toString().padLeft(2, '0')}-'
-                          '${_transferDate.month.toString().padLeft(2, '0')}-'
-                          '${_transferDate.year}',
-                        ),
+                        child: const Row(children: [
+                          Icon(Icons.check_circle_outline, color: PgColors.success, size: 18),
+                          SizedBox(width: 8),
+                          Text('No pending dues', style: TextStyle(color: PgColors.success, fontWeight: FontWeight.w600)),
+                        ]),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    FilledButton.icon(
-                      icon: _transferring
-                          ? const SizedBox(width: 16, height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Icon(Icons.swap_horiz_rounded),
-                      label: Text(_transferring ? 'Transferring…' : 'Confirm Transfer'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: PgColors.primary,
-                        minimumSize: const Size.fromHeight(48),
-                      ),
-                      onPressed: (_transferring || _selectedBed == null) ? null : _transfer,
-                    ),
+                      const SizedBox(height: 20),
+                      ..._bedAndConfirm(),
+                    ],
                   ],
                 ],
+              ),
               ),
             ),
           ),
@@ -972,10 +1134,15 @@ class _BedPicker extends StatelessWidget {
                   style: const TextStyle(
                       fontSize: 12, fontWeight: FontWeight.w700, color: PgColors.primary)),
             ),
-            ...entry.value.map((bed) {
+            ...entry.value.indexed.map((rec) {
+              final i = rec.$1;
+              final bed = rec.$2;
               final bedId = bed['bed_id'];
               final isSelected = selected != null && selected!['bed_id'] == bedId;
-              return GestureDetector(
+              return FadeSlideIn(
+                delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+                offset: 8,
+                child: GestureDetector(
                 onTap: () => onSelect(bed),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 140),
@@ -1011,6 +1178,7 @@ class _BedPicker extends StatelessWidget {
                       const Icon(Icons.check_circle_rounded, color: PgColors.primary, size: 18),
                     ],
                   ]),
+                ),
                 ),
               );
             }),

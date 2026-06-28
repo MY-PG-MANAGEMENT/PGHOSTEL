@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../app_state.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/animations.dart';
 import '../../widgets/async_action_button.dart';
 import 'auth_brand_header.dart';
 
@@ -60,13 +61,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
           Expanded(
             child: Container(
               decoration: const BoxDecoration(
-                color: Color(0xFFF9F9FD),
+                color: PgColors.scaffold,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
               ),
               clipBehavior: Clip.antiAlias,
               child: Form(
                 key: _formKey,
-                child: ListView(
+                child: FadeSlideIn(
+                  child: ListView(
                   padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
                   children: [
                     Text(
@@ -81,7 +83,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     Text(
                       'Your properties, tenants, and payments — all in one place.',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: const Color(0xFF6B7280),
+                            color: PgColors.textSecondary,
                           ),
                     ),
                     const SizedBox(height: 24),
@@ -176,7 +178,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         Text(
                           'Already have an account?',
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: const Color(0xFF6B7280),
+                                color: PgColors.textSecondary,
                               ),
                         ),
                         TextButton(
@@ -186,6 +188,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ],
                     ),
                   ],
+                ),
                 ),
               ),
             ),

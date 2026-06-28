@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 
 import 'src/app_state.dart';
 import 'src/screens/auth/login_screen.dart';
-import 'src/screens/auth/register_screen.dart';
 import 'src/screens/account_screens.dart';
 import 'src/screens/billing_screen.dart';
 import 'src/screens/onboarding_screen.dart';
@@ -31,7 +30,7 @@ class PgManagerOwnerApp extends StatelessWidget {
             refreshListenable: state,
             initialLocation: '/',
             redirect: (context, routeState) {
-              final authRoutes = routeState.matchedLocation == '/login' || routeState.matchedLocation == '/register' || routeState.matchedLocation == '/forgot-password';
+              final authRoutes = routeState.matchedLocation == '/login' || routeState.matchedLocation == '/forgot-password';
               if (!state.initialized) return routeState.matchedLocation == '/' ? null : '/';
               if (routeState.matchedLocation == '/') return state.isLoggedIn ? (state.roleTypeId == 'SUPER_ADMIN' ? '/admin' : '/dashboard') : '/login';
               if (!state.isLoggedIn && !authRoutes) return '/login';
@@ -42,7 +41,6 @@ class PgManagerOwnerApp extends StatelessWidget {
             routes: [
               GoRoute(path: '/', builder: (_, __) => const SplashScreen()),
               GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
-              GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
               GoRoute(path: '/forgot-password', builder: (_, __) => const ForgotPasswordScreen()),
               GoRoute(path: '/dashboard', builder: (_, __) => const PgDashboardScreen()),
               GoRoute(path: '/dashboard/analytics', builder: (_, __) => const AnalyticsScreen()),

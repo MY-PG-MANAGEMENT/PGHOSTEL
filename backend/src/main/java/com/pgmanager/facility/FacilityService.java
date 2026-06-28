@@ -122,11 +122,21 @@ public class FacilityService {
                     var occupancy = facilityPartyRepository
                             .findByOrganizationIdAndFacilityIdAndRoleTypeIdAndThruDateIsNull(
                                     organizationId, bed.getFacilityId(), OccupancyRole.OCCUPANT);
+                    // No permanent occupant? Surface a temporary stay so the bed still
+                    // shows as occupied (distinctly coloured in the UI).
+                    boolean temporaryStay = false;
+                    if (occupancy.isEmpty()) {
+                        occupancy = facilityPartyRepository
+                                .findByOrganizationIdAndFacilityIdAndRoleTypeIdAndThruDateIsNull(
+                                        organizationId, bed.getFacilityId(), OccupancyRole.TEMP_OCCUPANT);
+                        temporaryStay = occupancy.isPresent();
+                    }
                     String occupantName = occupancy
                             .flatMap(fp -> personRepository.findById(fp.getPartyId()))
                             .map(Person::getFullName)
                             .orElse(null);
                     Long occupantPartyId = occupancy.map(fp -> fp.getPartyId()).orElse(null);
+                    final boolean temp = temporaryStay;
                     return new FacilityResponse(
                             bed.getFacilityId(),
                             bed.getFacilityCode(),
@@ -144,7 +154,8 @@ public class FacilityService {
                             bed.getAvailableFrom(),
                             bed.getPhotosCount(),
                             occupantName,
-                            occupantPartyId
+                            occupantPartyId,
+                            temp
                     );
                 })
                 .toList();
@@ -236,7 +247,8 @@ public class FacilityService {
                 facility.getAvailableFrom(),
                 facility.getPhotosCount(),
                 null,
-                null
+                null,
+                false
         );
     }
 

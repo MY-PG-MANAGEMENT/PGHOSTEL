@@ -75,6 +75,10 @@ public final class TenantDtos {
             LocalDate moveInDate,
             BigDecimal monthlyRent,
             BigDecimal securityDeposit,
-            LocalDate expectedCheckoutDate
+            LocalDate expectedCheckoutDate,
+            String currentSharingType,
+            boolean inTemporaryStay,
+            Long tempBedFacilityId,
+            String tempBedName
     ) {}
 }
