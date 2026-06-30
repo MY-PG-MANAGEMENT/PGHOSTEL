@@ -1283,6 +1283,7 @@ class AssignBedSheet extends StatefulWidget {
     required this.bedName,
     this.propertyId,
     this.sharingType,
+    this.isAc = false,
     super.key,
   });
 
@@ -1290,6 +1291,7 @@ class AssignBedSheet extends StatefulWidget {
   final String bedName;
   final int? propertyId;
   final String? sharingType;
+  final bool isAc;
 
   @override
   State<AssignBedSheet> createState() => _AssignBedSheetState();
@@ -1306,6 +1308,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
   DateTime? _checkoutDate;
   final _rent = TextEditingController();
   final _deposit = TextEditingController();
+  final _acCharges = TextEditingController();
   final _search = TextEditingController();
   String _searchQuery = '';
   double? _standardRent;
@@ -1380,13 +1383,17 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
       if (!mounted) return;
       final rent = (result['monthlyRent'] as num?)?.toDouble();
       final deposit = (result['securityDeposit'] as num?)?.toDouble();
+      final ac = (result['acCharges'] as num?)?.toDouble();
       setState(() {
         _standardRent = rent;
         if (rent != null && _rent.text.isEmpty) {
           _rent.text = rent.toStringAsFixed(0);
         }
-        if (deposit != null && deposit > 0 && _deposit.text.isEmpty) {
+        if (deposit != null && _deposit.text.isEmpty) {
           _deposit.text = deposit.toStringAsFixed(0);
+        }
+        if (ac != null && ac > 0 && _acCharges.text.isEmpty) {
+          _acCharges.text = ac.toStringAsFixed(0);
         }
       });
     } catch (_) {}
@@ -1403,6 +1410,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
   void dispose() {
     _rent.dispose();
     _deposit.dispose();
+    _acCharges.dispose();
     _search.dispose();
     super.dispose();
   }
@@ -1781,6 +1789,20 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                   ),
                 ],
               ),
+              if (widget.isAc) ...[
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _acCharges,
+                  decoration: const InputDecoration(
+                    labelText: 'AC Charges (₹/month)',
+                    prefixIcon: Icon(Icons.ac_unit, size: 18),
+                    helperText: 'Added to monthly rent total',
+                    helperStyle: TextStyle(fontSize: 11),
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                ),
+              ],
             ],
             const SizedBox(height: 20),
             AsyncActionButton(
@@ -1803,6 +1825,11 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                     });
                   } else {
                     final co = _checkoutDate;
+                    final baseRent = double.tryParse(_rent.text.trim()) ?? 0;
+                    final acAmt = widget.isAc
+                        ? (double.tryParse(_acCharges.text.trim()) ?? 0)
+                        : 0.0;
+                    final totalRent = baseRent + acAmt;
                     await context
                         .read<AppState>()
                         .apiClient
@@ -1813,8 +1840,7 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
                       if (co != null)
                         'expectedCheckoutDate':
                             '${co.year}-${co.month.toString().padLeft(2, '0')}-${co.day.toString().padLeft(2, '0')}',
-                      if (_rent.text.trim().isNotEmpty)
-                        'monthlyRent': double.tryParse(_rent.text.trim()),
+                      if (totalRent > 0) 'monthlyRent': totalRent,
                       if (_deposit.text.trim().isNotEmpty)
                         'securityDeposit': double.tryParse(_deposit.text.trim()),
                     });

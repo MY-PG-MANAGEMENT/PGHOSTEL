@@ -42,6 +42,7 @@ public class FacilityService {
         facility.setMonthlyRent(request.monthlyRent());
         facility.setSecurityDeposit(request.securityDeposit());
         facility.setSizeSqFt(request.sizeSqFt());
+        facility.setAc(Boolean.TRUE.equals(request.isAc()));
         facility = facilityRepository.save(facility);
         facility.setFacilityCode(generateCode(facility));
         facility = facilityRepository.save(facility);
@@ -64,6 +65,9 @@ public class FacilityService {
         facility.setSecurityDeposit(request.securityDeposit());
         facility.setSizeSqFt(request.sizeSqFt());
         facility.setAvailableFrom(request.availableFrom());
+        if (request.isAc() != null) {
+            facility.setAc(request.isAc());
+        }
         if (request.status() != null && !request.status().isBlank()) {
             facility.setStatus(request.status());
         }
@@ -155,7 +159,8 @@ public class FacilityService {
                             bed.getPhotosCount(),
                             occupantName,
                             occupantPartyId,
-                            temp
+                            temp,
+                            false
                     );
                 })
                 .toList();
@@ -248,7 +253,8 @@ public class FacilityService {
                 facility.getPhotosCount(),
                 null,
                 null,
-                false
+                false,
+                facility.isAc()
         );
     }
 

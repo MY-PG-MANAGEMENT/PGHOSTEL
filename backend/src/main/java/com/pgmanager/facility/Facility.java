@@ -66,4 +66,7 @@ public class Facility extends BaseEntity {
 
     @Column(name = "photos_count")
     private Integer photosCount = 0;
+
+    @Column(name = "is_ac", nullable = false)
+    private boolean isAc = false;
 }
