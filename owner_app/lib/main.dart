@@ -60,7 +60,7 @@ class PgManagerOwnerApp extends StatelessWidget {
             ],
           );
           return MaterialApp.router(
-            title: 'PG Manager',
+            title: 'UrbanNest',
             theme: buildAppTheme(),
             routerConfig: router,
           );

@@ -12,6 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Commands (run from `backend/`)
 
+> `backend/bin/` is Gradle build output (compiled classes). It is gitignored via `backend/bin/main/.gitignore` and should never be committed.
+
 ```bash
 ./gradlew bootRun          # start dev server on :8080 (Git Bash / macOS / Linux)
 .\gradlew.bat bootRun      # start dev server on :8080 (Windows cmd/PowerShell)
@@ -173,7 +175,7 @@ Key routes: `/onboarding`, `/properties`, `/tenants`, `/occupancy`, `/rents`, `/
 
 **Property workspace** — `PropertyWorkspaceScreen` is a per-property tabbed view (Tenants / Billing / Rooms) reached by tapping a property card. It shares `AssignBedSheet` from `room_screen.dart`.
 
-**Screen consolidation** — `account_screens.dart` groups several screens in one file: Dashboard, Analytics, Notifications, NotificationSettings, Settings, Profile, ChangePassword, and ForgotPassword. Look here before creating new account-adjacent screens.
+**Screen consolidation** — `account_screens.dart` groups several screens in one file: Dashboard, Analytics, Notifications, NotificationSettings, Settings, Profile, ChangePassword, and ForgotPassword. Look here before creating new account-adjacent screens. `checkout_sheet.dart` handles the tenant checkout flow; `responsive_modules.dart` contains layout helpers for adaptive UI.
 
 **Biometric** — `AppState.setBiometricEnabled` / `biometricLogin` use `local_auth`. When biometric is enabled, `restoreSession` leaves `isLoggedIn = false` even if a token is present, forcing fingerprint/PIN unlock.
 
@@ -185,6 +187,14 @@ Shared-database multi-tenancy. Each organization is a `Facility(ORGANIZATION)`. 
 
 ## Docs
 
-`docs/` contains: `API_SPECIFICATION.md` (80+ endpoint reference), `MOBILE_APP_BACKEND_MAPPING.md` (screen-to-API mapping), `ANALYSIS_SUMMARY.md` (schema + screen inventory), `IMPLEMENTATION_ROADMAP.md`, and `DOCUMENTATION_INDEX.md` (navigation guide). Check these before adding endpoints or screens — the mapping doc is especially useful when wiring up new Flutter screens to backend APIs.
+`docs/` contains:
+- `API_SPECIFICATION.md` — 80+ endpoint reference
+- `MOBILE_APP_BACKEND_MAPPING.md` — screen-to-API mapping; check before wiring up new Flutter screens
+- `IMPLEMENTATION_ROADMAP.md` — planned work and priorities
+- `api-design.md` — REST conventions and design decisions
+- `architecture.md` — system architecture overview
+- `database-schema.md` — table-level schema reference
+- `implementation-notes.md` — per-feature implementation notes
+- `TEST_PLAN.md` — test strategy; integration tests auto-skip locally (no Docker)
 
 `docs/er/` holds Mermaid ER diagrams (`.mmd`) covering authentication, billing, analytics, facility hierarchy, payments, photos, and tenant management. Useful when reasoning about join paths or adding new tables.
