@@ -22,7 +22,8 @@ public final class FacilityDtos {
             @Min(1) Integer capacity,
             @DecimalMin("0") BigDecimal monthlyRent,
             @DecimalMin("0") BigDecimal securityDeposit,
-            @DecimalMin("0") BigDecimal sizeSqFt
+            @DecimalMin("0") BigDecimal sizeSqFt,
+            Boolean isAc
     ) {}
 
     public record FacilityUpdateRequest(
@@ -37,7 +38,8 @@ public final class FacilityDtos {
             @DecimalMin("0") BigDecimal securityDeposit,
             @DecimalMin("0") BigDecimal sizeSqFt,
             LocalDate availableFrom,
-            String status
+            String status,
+            Boolean isAc
     ) {}
 
     public record PropertyStatsResponse(
@@ -67,7 +69,8 @@ public final class FacilityDtos {
             Integer photosCount,
             String occupantName,
             Long occupantPartyId,
-            boolean temporaryStay
+            boolean temporaryStay,
+            boolean isAc
     ) {}
 
     public record FacilityTreeResponse(

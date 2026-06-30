@@ -6,7 +6,6 @@ import '../app_state.dart';
 import '../theme/app_theme.dart';
 import 'tenant_screen.dart';
 import 'billing_screen.dart';
-import 'checkout_sheet.dart' show CheckoutSheet;
 import 'room_screen.dart' show AssignBedSheet;
 import '../widgets/error_retry_view.dart';
 import '../widgets/animations.dart';
@@ -370,8 +369,8 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
             child: _ShortcutCard(
               icon: Icons.currency_rupee_outlined,
-              title: 'Room Pricing',
-              subtitle: 'Set monthly rent per sharing type',
+              title: 'Price Master',
+              subtitle: 'Set rent, deposit & AC charges per sharing type',
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -1537,7 +1536,10 @@ class FloorsRoomsScreen extends StatefulWidget {
 
 class _FloorsRoomsScreenState extends State<FloorsRoomsScreen> {
   late Future<Map<String, dynamic>> _floorsFuture;
-  int? _expandedFloorId;
+  final PageController _pageController = PageController();
+  final ScrollController _tabScrollController = ScrollController();
+  final List<GlobalKey> _tabKeys = [];
+  int _currentPage = 0;
 
   @override
   void initState() {
@@ -1545,9 +1547,18 @@ class _FloorsRoomsScreenState extends State<FloorsRoomsScreen> {
     _loadFloors();
   }
 
+  @override
+  void dispose() {
+    _pageController.dispose();
+    _tabScrollController.dispose();
+    super.dispose();
+  }
+
   void _loadFloors() {
-    _floorsFuture =
-        context.read<AppState>().apiClient.get('/properties/${widget.propertyId}/floors');
+    setState(() {
+      _floorsFuture =
+          context.read<AppState>().apiClient.get('/properties/${widget.propertyId}/floors');
+    });
   }
 
   void _addFloor() async {
@@ -1560,6 +1571,29 @@ class _FloorsRoomsScreenState extends State<FloorsRoomsScreen> {
       builder: (_) => _AddFloorSheet(propertyId: widget.propertyId),
     );
     if (added == true && mounted) setState(_loadFloors);
+  }
+
+  void _onPageChanged(int index) {
+    setState(() => _currentPage = index);
+    if (index < _tabKeys.length) {
+      final ctx = _tabKeys[index].currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.5,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      }
+    }
+  }
+
+  void _selectTab(int index) {
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeInOut,
+    );
   }
 
   @override
@@ -1584,76 +1618,179 @@ class _FloorsRoomsScreenState extends State<FloorsRoomsScreen> {
                     fontWeight: FontWeight.w400)),
           ],
         ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: InkWell(
+              onTap: _addFloor,
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: PgColors.primary,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.add, color: Colors.white, size: 22),
+              ),
+            ),
+          ),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(height: 1, color: const Color(0xFFE5E7EB)),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addFloor,
-        icon: const Icon(Icons.add),
-        label: const Text('Add Floor'),
-        backgroundColor: PgColors.primary,
-        foregroundColor: Colors.white,
-      ),
-      body: RefreshIndicator(
-        onRefresh: () async => setState(_loadFloors),
-        child: FutureBuilder<Map<String, dynamic>>(
-          future: _floorsFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              return _WsError(
-                  error: snapshot.error, onRetry: () => setState(_loadFloors));
-            }
-            final floors = (snapshot.data?['items'] as List?)
-                    ?.cast<Map<String, dynamic>>() ??
-                [];
-            if (floors.isEmpty) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.domain_outlined,
-                          size: 48, color: Colors.grey[400]),
-                      const SizedBox(height: 12),
-                      const Text('No floors yet',
-                          style: TextStyle(
-                              fontWeight: FontWeight.w700, fontSize: 15)),
-                      const SizedBox(height: 6),
-                      Text('Tap "Add Floor" to build the layout.',
-                          textAlign: TextAlign.center,
-                          style:
-                              TextStyle(color: Colors.grey[600], fontSize: 13)),
-                      const SizedBox(height: 20),
-                      FilledButton.icon(
-                        icon: const Icon(Icons.add),
-                        label: const Text('Add Floor'),
-                        onPressed: _addFloor,
-                      ),
-                    ],
-                  ),
+      body: FutureBuilder<Map<String, dynamic>>(
+        future: _floorsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return _WsError(
+                error: snapshot.error, onRetry: () => setState(_loadFloors));
+          }
+          final floors = (snapshot.data?['items'] as List?)
+                  ?.cast<Map<String, dynamic>>() ??
+              [];
+          if (floors.isEmpty) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.domain_outlined,
+                        size: 48, color: Colors.grey[400]),
+                    const SizedBox(height: 12),
+                    const Text('No floors yet',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 15)),
+                    const SizedBox(height: 6),
+                    Text('Tap "Add Floor" to build the layout.',
+                        textAlign: TextAlign.center,
+                        style:
+                            TextStyle(color: Colors.grey[600], fontSize: 13)),
+                    const SizedBox(height: 20),
+                    FilledButton.icon(
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add Floor'),
+                      onPressed: _addFloor,
+                    ),
+                  ],
                 ),
-              );
-            }
-            return ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-              itemCount: floors.length,
-              itemBuilder: (context, index) => _FloorTile(
-                floor: floors[index],
-                key: ValueKey(floors[index]['facilityId']),
-                onReload: () => setState(_loadFloors),
-                propertyId: widget.propertyId,
-                expandedFloorId: _expandedFloorId,
-                onFloorExpand: (id) => setState(() => _expandedFloorId = id),
               ),
             );
-          },
-        ),
+          }
+
+          // Keep tab keys list in sync with floor count
+          while (_tabKeys.length < floors.length) {
+            _tabKeys.add(GlobalKey());
+          }
+          final page = _currentPage.clamp(0, floors.length - 1);
+
+          return Column(
+            children: [
+              // ── Floor tab strip ─────────────────────────────────────
+              Container(
+                color: Colors.white,
+                child: Column(
+                  children: [
+                    SingleChildScrollView(
+                      controller: _tabScrollController,
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                      child: Row(
+                        children: List.generate(floors.length, (i) {
+                          final isSelected = i == page;
+                          final name =
+                              '${floors[i]['facilityName'] ?? 'Floor'}';
+                          return Padding(
+                            key: _tabKeys[i],
+                            padding: EdgeInsets.only(
+                                right: i < floors.length - 1 ? 8 : 0),
+                            child: GestureDetector(
+                              onTap: () => _selectTab(i),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 220),
+                                curve: Curves.easeInOut,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? PgColors.primary
+                                      : Colors.white,
+                                  borderRadius: BorderRadius.circular(22),
+                                  border: isSelected
+                                      ? null
+                                      : Border.all(
+                                          color: const Color(0xFFE5E7EB),
+                                          width: 1.5),
+                                  boxShadow: isSelected
+                                      ? [
+                                          BoxShadow(
+                                            color: PgColors.primary
+                                                .withValues(alpha: 0.28),
+                                            blurRadius: 10,
+                                            offset: const Offset(0, 4),
+                                          )
+                                        ]
+                                      : [],
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.layers_outlined,
+                                      size: 13,
+                                      color: isSelected
+                                          ? Colors.white
+                                          : Colors.grey.shade500,
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Text(
+                                      name,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: isSelected
+                                            ? FontWeight.w700
+                                            : FontWeight.w500,
+                                        color: isSelected
+                                            ? Colors.white
+                                            : Colors.grey.shade600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+                    ),
+                    Container(height: 1, color: const Color(0xFFE5E7EB)),
+                  ],
+                ),
+              ),
+              // ── Floor pages ─────────────────────────────────────────
+              Expanded(
+                child: PageView.builder(
+                  controller: _pageController,
+                  onPageChanged: _onPageChanged,
+                  itemCount: floors.length,
+                  itemBuilder: (_, i) => _FloorPage(
+                    key: ValueKey(floors[i]['facilityId']),
+                    floor: floors[i],
+                    propertyId: widget.propertyId,
+                    onReload: () => setState(_loadFloors),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1917,53 +2054,40 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-// ─── Floor Tile ───────────────────────────────────────────────────────────────
+// ─── Floor Page ───────────────────────────────────────────────────────────────
 
-class _FloorTile extends StatefulWidget {
+class _FloorPage extends StatefulWidget {
   final Map<String, dynamic> floor;
   final VoidCallback onReload;
   final int propertyId;
-  final int? expandedFloorId;
-  final void Function(int?) onFloorExpand;
-  const _FloorTile({
+  const _FloorPage({
     required this.floor,
     required this.onReload,
     required this.propertyId,
-    required this.expandedFloorId,
-    required this.onFloorExpand,
     super.key,
   });
 
   @override
-  State<_FloorTile> createState() => _FloorTileState();
+  State<_FloorPage> createState() => _FloorPageState();
 }
 
-class _FloorTileState extends State<_FloorTile> {
+class _FloorPageState extends State<_FloorPage> {
   Future<Map<String, dynamic>>? _roomsFuture;
-  int? _expandedRoomId;
 
   int get _floorId => (widget.floor['facilityId'] as num).toInt();
   String get _floorName => '${widget.floor['facilityName'] ?? 'Floor'}';
-  String get _floorCode => '${widget.floor['facilityCode'] ?? ''}';
-  bool get _expanded => widget.expandedFloorId == _floorId;
 
   @override
-  void didUpdateWidget(_FloorTile old) {
-    super.didUpdateWidget(old);
-    final wasExpanded = old.expandedFloorId == _floorId;
-    if (!wasExpanded && _expanded && _roomsFuture == null) {
-      _roomsFuture = context.read<AppState>().apiClient.get('/floors/$_floorId/rooms');
-    }
-    if (wasExpanded && !_expanded) {
-      _expandedRoomId = null;
-    }
+  void initState() {
+    super.initState();
+    _roomsFuture =
+        context.read<AppState>().apiClient.get('/floors/$_floorId/rooms');
   }
-
-  void _toggle() => widget.onFloorExpand(_expanded ? null : _floorId);
 
   void _loadRooms() {
     setState(() {
-      _roomsFuture = context.read<AppState>().apiClient.get('/floors/$_floorId/rooms');
+      _roomsFuture =
+          context.read<AppState>().apiClient.get('/floors/$_floorId/rooms');
     });
   }
 
@@ -1988,176 +2112,164 @@ class _FloorTileState extends State<_FloorTile> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => _EditFloorSheet(floor: widget.floor),
     );
-    if (saved == true) widget.onReload();
+    if (saved == true) {
+      _loadRooms();
+      widget.onReload();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final floorNum = widget.floor['floorNumber'];
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      color: const Color(0xFFFAF8FF),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: Color(0xFFE9D5FF), width: 1),
-      ),
-      child: Column(
-        children: [
-          ListTile(
-            contentPadding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
-            leading: CircleAvatar(
-              backgroundColor: PgColors.lavender,
-              child: Text(
-                floorNum != null ? '$floorNum' : _floorCode.split('_').last,
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w700, color: PgColors.primary),
-              ),
-            ),
-            title: Text(_floorName, style: const TextStyle(fontWeight: FontWeight.w700)),
-            subtitle: _floorCode.isNotEmpty
-                ? Text(_floorCode, style: const TextStyle(fontSize: 12, color: Colors.grey))
-                : null,
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                InkWell(
-                  borderRadius: BorderRadius.circular(20),
-                  onTap: _toggle,
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _expanded ? PgColors.lavender : Colors.transparent,
-                      border: Border.all(color: const Color(0xFFE9D5FF)),
-                    ),
-                    child: Icon(
-                      _expanded
-                          ? Icons.keyboard_arrow_up
-                          : Icons.keyboard_arrow_down,
-                      color:
-                          _expanded ? PgColors.primary : Colors.grey.shade600,
-                      size: 20,
-                    ),
-                  ),
+    return RefreshIndicator(
+      onRefresh: () async => setState(_loadRooms),
+      child: FutureBuilder<Map<String, dynamic>>(
+        future: _roomsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+                child: CircularProgressIndicator(strokeWidth: 2));
+          }
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.error_outline,
+                        color: Colors.red, size: 36),
+                    const SizedBox(height: 8),
+                    Text('Failed to load rooms',
+                        style: TextStyle(color: Colors.grey[600])),
+                    const SizedBox(height: 12),
+                    TextButton(
+                        onPressed: () => setState(_loadRooms),
+                        child: const Text('Retry')),
+                  ],
                 ),
-                PopupMenuButton<String>(
-                  icon: Icon(Icons.more_vert,
-                      size: 20, color: Colors.grey.shade600),
-                  padding: EdgeInsets.zero,
-                  onSelected: (v) {
-                    if (v == 'edit') _editFloor();
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
-                      value: 'edit',
-                      child: Row(children: [
-                        Icon(Icons.edit_outlined, size: 18),
-                        SizedBox(width: 8),
-                        Text('Edit Floor'),
-                      ]),
+              ),
+            );
+          }
+
+          final rooms = (snapshot.data?['items'] as List?)
+                  ?.cast<Map<String, dynamic>>() ??
+              [];
+
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            children: [
+              // Floor header card
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF4F46E5), Color(0xFF3730A3)],
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.layers_outlined,
+                          color: Colors.white, size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(_floorName,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                  color: Colors.white)),
+                          Text(
+                            '${rooms.length} Room${rooms.length == 1 ? '' : 's'}',
+                            style: const TextStyle(
+                                fontSize: 12, color: Colors.white70),
+                          ),
+                        ],
+                      ),
+                    ),
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert,
+                          size: 20, color: Colors.white),
+                      padding: EdgeInsets.zero,
+                      onSelected: (v) {
+                        if (v == 'edit') _editFloor();
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(
+                          value: 'edit',
+                          child: Row(children: [
+                            Icon(Icons.edit_outlined, size: 18),
+                            SizedBox(width: 8),
+                            Text('Edit Floor'),
+                          ]),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
-            onTap: _toggle,
-          ),
-          if (_expanded)
-            FutureBuilder<Map<String, dynamic>>(
-              future: _roomsFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
-                }
-                if (snapshot.hasError) {
-                  return Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Text('Failed to load rooms',
-                        style: const TextStyle(color: Colors.red)),
-                  );
-                }
-                final rooms =
-                    (snapshot.data?['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 12, 12),
+              ),
+
+              // Empty state
+              if (rooms.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 40),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      if (rooms.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.fromLTRB(0, 4, 0, 8),
-                          child: Text('No rooms yet.',
-                              style: TextStyle(color: Colors.grey, fontSize: 13)),
-                        ),
-                      // Timeline rows
-                      ...rooms.asMap().entries.map((entry) {
-                        final isLast = entry.key == rooms.length - 1;
-                        return IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SizedBox(
-                                width: 16,
-                                child: Column(
-                                  children: [
-                                    Container(
-                                        width: 2,
-                                        height: 20,
-                                        color: const Color(0xFFD8B4FE)),
-                                    Container(
-                                      width: 10,
-                                      height: 10,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: Colors.white,
-                                        border: Border.all(
-                                            color: Colors.grey.shade400, width: 1.5),
-                                      ),
-                                    ),
-                                    if (!isLast)
-                                      Expanded(
-                                        child: Container(
-                                            width: 2,
-                                            color: const Color(0xFFD8B4FE)),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: _RoomTile(
-                                  room: entry.value,
-                                  key: ValueKey(entry.value['facilityId']),
-                                  onReload: () => setState(_loadRooms),
-                                  propertyId: widget.propertyId,
-                                  expandedRoomId: _expandedRoomId,
-                                  onRoomExpand: (id) => setState(() => _expandedRoomId = id),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }),
-                      const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        onPressed: _addRoom,
-                        icon: const Icon(Icons.meeting_room_outlined, size: 16),
-                        label: const Text('Add Room'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: PgColors.primary,
-                          side: const BorderSide(color: PgColors.primary),
-                          minimumSize: const Size(double.infinity, 44),
-                        ),
-                      ),
+                      Icon(Icons.meeting_room_outlined,
+                          size: 44, color: Colors.grey[350]),
+                      const SizedBox(height: 10),
+                      Text('No rooms yet',
+                          style: TextStyle(
+                              color: Colors.grey[500],
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500)),
+                      const SizedBox(height: 4),
+                      Text('Add a room to get started.',
+                          style: TextStyle(
+                              color: Colors.grey[400], fontSize: 12)),
                     ],
                   ),
-                );
-              },
-            ),
-        ],
+                ),
+
+              // Room cards
+              ...rooms.map((room) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _RoomTile(
+                      room: room,
+                      key: ValueKey(room['facilityId']),
+                      onReload: () => setState(_loadRooms),
+                      propertyId: widget.propertyId,
+                    ),
+                  )),
+
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _addRoom,
+                icon: const Icon(Icons.meeting_room_outlined, size: 16),
+                label: const Text('Add Room'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: PgColors.primary,
+                  side: const BorderSide(color: PgColors.primary),
+                  minimumSize: const Size(double.infinity, 44),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -2169,14 +2281,10 @@ class _RoomTile extends StatefulWidget {
   final Map<String, dynamic> room;
   final VoidCallback onReload;
   final int propertyId;
-  final int? expandedRoomId;
-  final void Function(int?) onRoomExpand;
   const _RoomTile({
     required this.room,
     required this.onReload,
     required this.propertyId,
-    required this.expandedRoomId,
-    required this.onRoomExpand,
     super.key,
   });
 
@@ -2190,18 +2298,12 @@ class _RoomTileState extends State<_RoomTile> {
   int get _roomId => (widget.room['facilityId'] as num).toInt();
   String get _roomName => '${widget.room['facilityName'] ?? 'Room'}';
   String get _roomCode => '${widget.room['facilityCode'] ?? ''}';
-  bool get _expanded => widget.expandedRoomId == _roomId;
 
   @override
-  void didUpdateWidget(_RoomTile old) {
-    super.didUpdateWidget(old);
-    final wasExpanded = old.expandedRoomId == _roomId;
-    if (!wasExpanded && _expanded && _bedsFuture == null) {
-      _bedsFuture = context.read<AppState>().apiClient.get('/rooms/$_roomId/beds');
-    }
+  void initState() {
+    super.initState();
+    _bedsFuture = context.read<AppState>().apiClient.get('/rooms/$_roomId/beds');
   }
-
-  void _toggle() => widget.onRoomExpand(_expanded ? null : _roomId);
 
   void _loadBeds() {
     setState(() {
@@ -2209,16 +2311,23 @@ class _RoomTileState extends State<_RoomTile> {
     });
   }
 
-  void _addBed() async {
-    final added = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _AddBedSheet(roomId: _roomId, roomName: _roomName),
-    );
-    if (added == true && mounted) setState(_loadBeds);
+  void _addBed(int nextNum) async {
+    final api = context.read<AppState>().apiClient;
+    try {
+      await api.post('/facilities', {
+        'parentFacilityId': _roomId,
+        'facilityTypeId': 'BED',
+        'facilityName': 'BED$nextNum',
+        'capacity': 1,
+      });
+      if (mounted) setState(_loadBeds);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                e.toString().replaceFirst('Exception: ', ''))));
+      }
+    }
   }
 
   void _editRoom() async {
@@ -2240,109 +2349,108 @@ class _RoomTileState extends State<_RoomTile> {
   Widget build(BuildContext context) {
     final sharing = widget.room['sharingType'] as String?;
     final sharingLabel = sharing != null ? '$sharing-Sharing' : null;
+    final isAcRoom = widget.room['isAc'] == true;
+    const accent = Color(0xFFD8B4FE);
+    const iconBg = Color(0xFFF3E8FF);
+    const iconColor = Color(0xFF7C3AED);
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: const Color(0xFFEFF6FF),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFBFDBFE)),
-      ),
-      child: Column(
-        children: [
-          // ── Header row ───────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
-            child: Row(
-              children: [
-                // Room icon
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFDBEAFE),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.meeting_room_outlined,
-                      color: Color(0xFF2563EB), size: 20),
-                ),
-                const SizedBox(width: 10),
-                // Name + code + sharing
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(_roomName,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w600, fontSize: 14)),
-                      Row(
-                        children: [
-                          if (_roomCode.isNotEmpty)
-                            Text(_roomCode,
-                                style: const TextStyle(
-                                    fontSize: 11, color: Colors.grey)),
-                          if (_roomCode.isNotEmpty && sharingLabel != null)
-                            Container(
-                              width: 4,
-                              height: 4,
-                              margin: const EdgeInsets.symmetric(horizontal: 4),
-                              decoration: const BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: Colors.grey),
-                            ),
-                          if (sharingLabel != null)
-                            Text(sharingLabel,
-                                style: const TextStyle(
-                                    fontSize: 11, color: Colors.grey)),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                // Expand/collapse circle
-                InkWell(
-                  borderRadius: BorderRadius.circular(18),
-                  onTap: _toggle,
-                  child: Container(
-                    width: 30,
-                    height: 30,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: const Color(0xFFBFDBFE)),
-                    ),
-                    child: Icon(
-                      _expanded
-                          ? Icons.keyboard_arrow_up
-                          : Icons.keyboard_arrow_down,
-                      size: 18,
-                      color: const Color(0xFF2563EB),
-                    ),
-                  ),
-                ),
-                // 3-dots menu
-                PopupMenuButton<String>(
-                  icon: Icon(Icons.more_vert,
-                      size: 20, color: Colors.grey.shade600),
-                  padding: EdgeInsets.zero,
-                  onSelected: (v) {
-                    if (v == 'edit') _editRoom();
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
-                        value: 'edit',
-                        child: Row(children: [
-                          Icon(Icons.edit_outlined, size: 18),
-                          SizedBox(width: 8),
-                          Text('Edit Room'),
-                        ])),
-                  ],
-                ),
-              ],
-            ),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE9E9EF)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: .05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
-          // ── Expanded beds ─────────────────────────────────────────────
-          if (_expanded) ...[
-            const Divider(height: 1, color: Color(0xFFBFDBFE)),
-            FutureBuilder<Map<String, dynamic>>(
+        ],
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── Left accent bar ───────────────────────────────────
+            Container(width: 5, color: accent),
+            // ── Content ──────────────────────────────────────────
+            Expanded(
+              child: Column(
+                children: [
+                  // ── Header ───────────────────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: iconBg,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(Icons.meeting_room_outlined,
+                              color: iconColor, size: 22),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(_roomName,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 15,
+                                      color: Color(0xFF111827))),
+                              Row(children: [
+                                if (sharingLabel != null)
+                                  Text(sharingLabel,
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey.shade500)),
+                                if (isAcRoom) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFDBEAFE),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                                      Icon(Icons.ac_unit, size: 10, color: Color(0xFF1D4ED8)),
+                                      SizedBox(width: 2),
+                                      Text('AC', style: TextStyle(fontSize: 10, color: Color(0xFF1D4ED8), fontWeight: FontWeight.w700)),
+                                    ]),
+                                  ),
+                                ],
+                              ]),
+                            ],
+                          ),
+                        ),
+                        PopupMenuButton<String>(
+                          icon: Icon(Icons.more_vert,
+                              size: 20, color: Colors.grey.shade500),
+                          padding: EdgeInsets.zero,
+                          onSelected: (v) {
+                            if (v == 'edit') _editRoom();
+                          },
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(
+                                value: 'edit',
+                                child: Row(children: [
+                                  Icon(Icons.edit_outlined, size: 18),
+                                  SizedBox(width: 8),
+                                  Text('Edit Room'),
+                                ])),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  // ── Beds ─────────────────────────────────────────
+                  Divider(height: 1, color: Colors.grey.shade100),
+                  FutureBuilder<Map<String, dynamic>>(
               future: _bedsFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -2365,8 +2473,13 @@ class _RoomTileState extends State<_RoomTile> {
                     [];
                 final capacity = widget.room['capacity'] as int?;
                 final atCapacity = capacity != null && beds.length >= capacity;
+                final sharingStr = widget.room['sharingType'] as String?;
+                final roomIsAc = widget.room['isAc'] == true;
+                const cols = 3;
+                const tileH = 66.0;
+                const gap = 8.0;
                 return Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -2374,65 +2487,93 @@ class _RoomTileState extends State<_RoomTile> {
                         const Padding(
                           padding: EdgeInsets.only(bottom: 6),
                           child: Text('No beds yet.',
-                              style: TextStyle(
-                                  color: Colors.grey, fontSize: 12)),
+                              style:
+                                  TextStyle(color: Colors.grey, fontSize: 12)),
                         ),
-                      ...beds.map((bed) => _BedTile(
-                            bed: bed,
-                            onChanged: () => setState(_loadBeds),
-                            propertyId: widget.propertyId,
-                            sharingType: widget.room['sharingType'] as String?,
-                          )),
-                      const SizedBox(height: 4),
-                      if (atCapacity)
+                      Builder(builder: (ctx) {
+                        final items = <Widget>[
+                          ...beds.map((bed) => _BedGridTile(
+                                bed: bed,
+                                onChanged: () => setState(_loadBeds),
+                                propertyId: widget.propertyId,
+                                sharingType: sharingStr,
+                                isAc: roomIsAc,
+                              )),
+                          if (!atCapacity)
+                            _AddBedGridTile(
+                                onTap: () => _addBed(beds.length + 1),
+                                capacity: capacity),
+                        ];
+                        final rows = <Widget>[];
+                        for (int i = 0; i < items.length; i += cols) {
+                          final slice = items.sublist(
+                              i, (i + cols).clamp(0, items.length));
+                          if (rows.isNotEmpty) {
+                            rows.add(const SizedBox(height: gap));
+                          }
+                          rows.add(Row(children: [
+                            for (int j = 0; j < slice.length; j++) ...[
+                              if (j > 0) const SizedBox(width: gap),
+                              Expanded(
+                                  child: SizedBox(
+                                      height: tileH, child: slice[j])),
+                            ],
+                            for (int j = slice.length; j < cols; j++) ...[
+                              const SizedBox(width: gap),
+                              const Expanded(child: SizedBox()),
+                            ],
+                          ]));
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: rows,
+                        );
+                      }),
+                      if (atCapacity && beds.isNotEmpty) ...[
+                        const SizedBox(height: 10),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.check_circle_outline,
-                                size: 13, color: Colors.grey[400]),
+                            const Icon(Icons.check_circle_outline,
+                                size: 14, color: Color(0xFF22C55E)),
                             const SizedBox(width: 5),
                             Text('All $capacity beds added',
-                                style: TextStyle(
-                                    color: Colors.grey[500], fontSize: 12)),
+                                style: const TextStyle(
+                                    color: Color(0xFF16A34A),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500)),
                           ],
-                        )
-                      else
-                        OutlinedButton.icon(
-                          onPressed: _addBed,
-                          icon: const Icon(Icons.add, size: 14),
-                          label: const Text('Add Bed'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: PgColors.primary,
-                            side: const BorderSide(color: PgColors.primary),
-                            minimumSize: const Size(double.infinity, 36),
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            textStyle: const TextStyle(fontSize: 12),
-                          ),
                         ),
+                      ],
                     ],
                   ),
                 );
               },
             ),
+                ],
+              ),
+            ),
           ],
-        ],
+        ),
       ),
     );
   }
 }
 
-// ─── Bed Tile ─────────────────────────────────────────────────────────────────
+// ─── Bed Grid Tile ────────────────────────────────────────────────────────────
 
-class _BedTile extends StatelessWidget {
+class _BedGridTile extends StatelessWidget {
   final Map<String, dynamic> bed;
   final VoidCallback onChanged;
   final int? propertyId;
   final String? sharingType;
-  const _BedTile({
+  final bool isAc;
+  const _BedGridTile({
     required this.bed,
     required this.onChanged,
     this.propertyId,
     this.sharingType,
+    this.isAc = false,
   });
 
   @override
@@ -2445,151 +2586,61 @@ class _BedTile extends StatelessWidget {
         ? (bed['occupantPartyId'] as num).toInt()
         : null;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 4),
-      decoration: BoxDecoration(
-        color: isOccupied ? const Color(0xFFFFF1F2) : const Color(0xFFF0FDF4),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-            color: isOccupied
-                ? const Color(0xFFFECACA)
-                : const Color(0xFFBBF7D0)),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: isOccupied && occupantPartyId != null
-              ? () => _goToTenant(context, occupantPartyId)
-              : !isOccupied
-                  ? () => _openAssign(context, bedId, name)
-                  : null,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
-            child: Row(
+    final isTemporary = bed['temporaryStay'] == true;
+    final tileBg      = isTemporary ? const Color(0xFFFFF7ED) : isOccupied ? const Color(0xFFF0FDF4) : Colors.white;
+    final borderColor = isTemporary ? const Color(0xFFFBBF24) : isOccupied ? const Color(0xFF86EFAC) : const Color(0xFFE5E7EB);
+    final iconBg      = isTemporary ? const Color(0xFFF59E0B) : isOccupied ? const Color(0xFF22C55E) : const Color(0xFFE5E7EB);
+    const iconColor   = Colors.white;
+    const nameColor   = Color(0xFF111827);
+    final subColor    = isTemporary ? const Color(0xFFB45309) : isOccupied ? const Color(0xFF15803D) : const Color(0xFF9CA3AF);
+
+    return GestureDetector(
+      onTap: isOccupied && occupantPartyId != null
+          ? () => _goToTenant(context, occupantPartyId)
+          : !isOccupied
+              ? () => _openAssign(context, bedId, name)
+              : null,
+      child: Container(
+        decoration: BoxDecoration(
+          color: tileBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: borderColor, width: 1.5),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Row(
           children: [
-            // Bed icon container
             Container(
               width: 36,
               height: 36,
-              decoration: BoxDecoration(
-                color: isOccupied
-                    ? const Color(0xFFFECACA)
-                    : const Color(0xFFBBF7D0),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                isOccupied ? Icons.bed : Icons.bed_outlined,
-                color: isOccupied ? PgColors.danger : PgColors.success,
-                size: 20,
-              ),
+              decoration:
+                  BoxDecoration(color: iconBg, shape: BoxShape.circle),
+              child: Icon(Icons.bed, color: iconColor, size: 18),
             ),
-            const SizedBox(width: 10),
-            // Name + status
+            const SizedBox(width: 8),
             Expanded(
               child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(name,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 13)),
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                          color: nameColor),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
                   Text(
-                    isOccupied ? occupantName : 'Available',
-                    style: TextStyle(
-                        color: isOccupied
-                            ? Colors.grey[600]
-                            : PgColors.success,
-                        fontSize: 12),
-                  ),
+                      isOccupied
+                          ? occupantName.split(' ').first
+                          : 'Vacant',
+                      style: TextStyle(fontSize: 10, color: subColor),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
                 ],
               ),
             ),
-            // Status badge
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: isOccupied
-                    ? PgColors.danger.withValues(alpha: .1)
-                    : PgColors.success.withValues(alpha: .12),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                isOccupied ? 'Occupied' : 'Available',
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: isOccupied ? PgColors.danger : PgColors.success),
-              ),
-            ),
-            // 3-dots menu
-            PopupMenuButton<String>(
-              icon:
-                  Icon(Icons.more_vert, size: 20, color: Colors.grey.shade600),
-              padding: EdgeInsets.zero,
-              onSelected: (v) async {
-                if (v == 'assign') {
-                  _openAssign(context, bedId, name);
-                } else if (v == 'checkout') {
-                  if (occupantPartyId != null) {
-                    await showModalBottomSheet<bool>(
-                      context: context,
-                      isScrollControlled: true,
-                      useSafeArea: true,
-                      backgroundColor: Colors.white,
-                      shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.vertical(
-                              top: Radius.circular(20))),
-                      builder: (_) => CheckoutSheet(
-                        partyId: occupantPartyId,
-                        tenantName: occupantName ?? 'Tenant',
-                        onCheckedOut: onChanged,
-                      ),
-                    );
-                  }
-                } else if (v == 'edit') {
-                  final saved = await showModalBottomSheet<bool>(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: Colors.white,
-                    shape: const RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.vertical(top: Radius.circular(20))),
-                    builder: (_) => _EditBedSheet(bed: bed),
-                  );
-                  if (saved == true) onChanged();
-                }
-              },
-              itemBuilder: (_) => [
-                if (!isOccupied)
-                  const PopupMenuItem(
-                      value: 'assign',
-                      child: Row(children: [
-                        Icon(Icons.person_add_outlined, size: 18),
-                        SizedBox(width: 8),
-                        Text('Assign Tenant'),
-                      ])),
-                if (isOccupied)
-                  const PopupMenuItem(
-                      value: 'checkout',
-                      child: Row(children: [
-                        Icon(Icons.logout, size: 18),
-                        SizedBox(width: 8),
-                        Text('Checkout Tenant'),
-                      ])),
-                const PopupMenuItem(
-                    value: 'edit',
-                    child: Row(children: [
-                      Icon(Icons.edit_outlined, size: 18),
-                      SizedBox(width: 8),
-                      Text('Edit Bed'),
-                    ])),
-              ],
-            ),
           ],
-            ),
-          ),
         ),
       ),
     );
@@ -2607,6 +2658,7 @@ class _BedTile extends StatelessWidget {
         bedName: name,
         propertyId: propertyId,
         sharingType: sharingType,
+        isAc: isAc,
       ),
     );
     if (done == true) onChanged();
@@ -2636,6 +2688,63 @@ class _BedTile extends StatelessWidget {
                 Text(e.toString().replaceFirst('Exception: ', ''))));
       }
     }
+  }
+}
+
+// ─── Add Bed Grid Tile ────────────────────────────────────────────────────────
+
+class _AddBedGridTile extends StatelessWidget {
+  final VoidCallback onTap;
+  final int? capacity;
+  const _AddBedGridTile({required this.onTap, this.capacity});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFD1D5DB), width: 1.5),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF3F4F6),
+                shape: BoxShape.circle,
+                border: Border.all(
+                    color: const Color(0xFFD1D5DB), width: 1.5),
+              ),
+              child: const Icon(Icons.add_rounded,
+                  color: Color(0xFF6B7280), size: 18),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Add Bed',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF374151))),
+                  if (capacity != null)
+                    Text('Max $capacity',
+                        style: const TextStyle(
+                            fontSize: 10, color: Color(0xFF9CA3AF))),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -3244,6 +3353,7 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
   final _nameCtrl = TextEditingController();
   final _roomNumCtrl = TextEditingController();
   String _sharing = '2';
+  bool _isAc = false;
   bool _saving = false;
 
   static const _sharingOptions = [
@@ -3277,6 +3387,7 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
         'facilityName': _nameCtrl.text.trim(),
         'sharingType': _sharing,
         'capacity': capacity,
+        'isAc': _isAc,
         if (_roomNumCtrl.text.trim().isNotEmpty) 'roomNumber': _roomNumCtrl.text.trim(),
       });
       final roomId = result['facilityId'];
@@ -3341,6 +3452,20 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
             onChanged: (v) {
               if (v != null) setState(() => _sharing = v);
             },
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Icon(Icons.ac_unit, size: 18, color: Color(0xFF6B7280)),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('Air Conditioned (AC Room)',
+                  style: TextStyle(fontSize: 14, color: Color(0xFF374151)))),
+              Switch(
+                value: _isAc,
+                onChanged: (v) => setState(() => _isAc = v),
+                activeColor: PgColors.primary,
+              ),
+            ],
           ),
           const SizedBox(height: 20),
           FilledButton(
@@ -3563,6 +3688,7 @@ class _EditRoomSheetState extends State<_EditRoomSheet> {
   late final TextEditingController _name;
   late final TextEditingController _roomNum;
   late String _sharing;
+  late bool _isAc;
   bool _saving = false;
 
   static const _sharingOptions = [
@@ -3583,6 +3709,7 @@ class _EditRoomSheetState extends State<_EditRoomSheet> {
         text: '${widget.room['roomNumber'] ?? ''}');
     _sharing = '${widget.room['sharingType'] ?? '2'}';
     if (!_sharingOptions.any((o) => o.$1 == _sharing)) _sharing = '2';
+    _isAc = widget.room['isAc'] == true;
   }
 
   @override
@@ -3650,6 +3777,7 @@ class _EditRoomSheetState extends State<_EditRoomSheet> {
         if (_roomNum.text.trim().isNotEmpty) 'roomNumber': _roomNum.text.trim(),
         'sharingType': _sharing,
         'capacity': newSharing,
+        'isAc': _isAc,
       });
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
@@ -3703,6 +3831,20 @@ class _EditRoomSheetState extends State<_EditRoomSheet> {
             onChanged: (v) {
               if (v != null) setState(() => _sharing = v);
             },
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const Icon(Icons.ac_unit, size: 18, color: Color(0xFF6B7280)),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('Air Conditioned (AC Room)',
+                  style: TextStyle(fontSize: 14, color: Color(0xFF374151)))),
+              Switch(
+                value: _isAc,
+                onChanged: (v) => setState(() => _isAc = v),
+                activeColor: PgColors.primary,
+              ),
+            ],
           ),
           const SizedBox(height: 20),
           FilledButton(
@@ -3845,6 +3987,7 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
 
   final Map<String, TextEditingController> _rentCtrl = {};
   final Map<String, TextEditingController> _depositCtrl = {};
+  final Map<String, TextEditingController> _acCtrl = {};
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -3855,6 +3998,7 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
     for (final o in _sharingOptions) {
       _rentCtrl[o.$1] = TextEditingController();
       _depositCtrl[o.$1] = TextEditingController();
+      _acCtrl[o.$1] = TextEditingController();
     }
     _load();
   }
@@ -3863,6 +4007,7 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
   void dispose() {
     for (final c in _rentCtrl.values) { c.dispose(); }
     for (final c in _depositCtrl.values) { c.dispose(); }
+    for (final c in _acCtrl.values) { c.dispose(); }
     super.dispose();
   }
 
@@ -3876,9 +4021,11 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
         final type = '${item['sharingType']}';
         final rent = item['monthlyRent'];
         final deposit = item['securityDeposit'];
+        final ac = item['acCharges'];
         if (_rentCtrl.containsKey(type)) {
           _rentCtrl[type]!.text = rent != null ? '$rent' : '';
           _depositCtrl[type]!.text = (deposit != null && deposit != 0) ? '$deposit' : '';
+          _acCtrl[type]!.text = (ac != null && ac != 0) ? '$ac' : '';
         }
       }
       setState(() => _loading = false);
@@ -3895,10 +4042,12 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
       final rent = double.tryParse(rentText);
       if (rent == null) continue;
       final depositText = _depositCtrl[o.$1]!.text.trim();
+      final acText = _acCtrl[o.$1]!.text.trim();
       prices.add({
         'sharingType': o.$1,
         'monthlyRent': rent,
         if (depositText.isNotEmpty) 'securityDeposit': double.tryParse(depositText) ?? 0,
+        if (acText.isNotEmpty) 'acCharges': double.tryParse(acText) ?? 0,
       });
     }
     if (prices.isEmpty) {
@@ -3937,9 +4086,9 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Room Pricing',
+            Text('Price Master',
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
-            Text('Monthly rent per sharing type',
+            Text('Monthly rent & AC charges per sharing type',
                 style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w400)),
           ],
         ),
@@ -3968,7 +4117,7 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
                           SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Set standard prices for each sharing type. These auto-fill when assigning a tenant to a bed.',
+                              'Set standard rent, deposit, and AC charges per sharing type. These auto-fill when assigning a tenant to a bed.',
                               style: TextStyle(fontSize: 12, color: PgColors.primary),
                             ),
                           ),
@@ -3980,6 +4129,7 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
                           label: o.$2,
                           rentCtrl: _rentCtrl[o.$1]!,
                           depositCtrl: _depositCtrl[o.$1]!,
+                          acCtrl: _acCtrl[o.$1]!,
                         )),
                     const SizedBox(height: 24),
                     FilledButton(
@@ -3991,7 +4141,7 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
                           ? const SizedBox(
                               height: 18, width: 18,
                               child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Text('Save Prices'),
+                          : const Text('Save'),
                     ),
                   ],
                 ),
@@ -4003,7 +4153,13 @@ class _PriceRow extends StatelessWidget {
   final String label;
   final TextEditingController rentCtrl;
   final TextEditingController depositCtrl;
-  const _PriceRow({required this.label, required this.rentCtrl, required this.depositCtrl});
+  final TextEditingController acCtrl;
+  const _PriceRow({
+    required this.label,
+    required this.rentCtrl,
+    required this.depositCtrl,
+    required this.acCtrl,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -4048,6 +4204,19 @@ class _PriceRow extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: acCtrl,
+            decoration: const InputDecoration(
+              labelText: 'AC Charges (₹) — optional',
+              prefixIcon: Icon(Icons.ac_unit, size: 18),
+              isDense: true,
+              helperText: 'Default AC surcharge for AC rooms',
+              helperStyle: TextStyle(fontSize: 10),
+            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
           ),
         ],
       ),

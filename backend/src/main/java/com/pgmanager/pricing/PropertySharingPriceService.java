@@ -41,6 +41,7 @@ public class PropertySharingPriceService {
             entity.setSharingType(item.sharingType());
             entity.setMonthlyRent(item.monthlyRent());
             entity.setSecurityDeposit(item.securityDeposit() != null ? item.securityDeposit() : BigDecimal.ZERO);
+            entity.setAcCharges(item.acCharges() != null ? item.acCharges() : BigDecimal.ZERO);
             repo.save(entity);
         }
         return list(orgId, propertyId);
@@ -59,6 +60,6 @@ public class PropertySharingPriceService {
     }
 
     private SharingPriceResponse toResponse(PropertySharingPrice p) {
-        return new SharingPriceResponse(p.getSharingType(), p.getMonthlyRent(), p.getSecurityDeposit());
+        return new SharingPriceResponse(p.getSharingType(), p.getMonthlyRent(), p.getSecurityDeposit(), p.getAcCharges());
     }
 }

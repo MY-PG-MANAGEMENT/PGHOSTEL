@@ -35,4 +35,7 @@ public class PropertySharingPrice {
 
     @Column(name = "security_deposit", nullable = false, precision = 10, scale = 2)
     private BigDecimal securityDeposit = BigDecimal.ZERO;
+
+    @Column(name = "ac_charges", nullable = false, precision = 10, scale = 2)
+    private BigDecimal acCharges = BigDecimal.ZERO;
 }
