@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <application
-        android:label="pg_manager_owner_app"
+        android:label="UrbanNest"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

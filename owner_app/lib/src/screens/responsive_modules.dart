@@ -6,6 +6,25 @@ import '../theme/app_theme.dart';
 import '../widgets/animations.dart';
 import 'property_workspace_screen.dart';
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+String _greeting() {
+  final h = DateTime.now().hour;
+  if (h < 12) return 'Good Morning';
+  if (h < 17) return 'Good Afternoon';
+  return 'Good Evening';
+}
+
+String _compactAmount(dynamic v) {
+  if (v == null) return '—';
+  final d = (v is num) ? v.toDouble() : double.tryParse('$v') ?? 0.0;
+  if (d >= 100000) return '₹${(d / 100000).toStringAsFixed(2)}L';
+  if (d >= 1000) return '₹${(d / 1000).toStringAsFixed(0)}K';
+  return '₹${d.toStringAsFixed(0)}';
+}
+
+// ─── Dashboard Screen ─────────────────────────────────────────────────────────
+
 class PgDashboardScreen extends StatefulWidget {
   const PgDashboardScreen({super.key});
   @override
@@ -13,7 +32,7 @@ class PgDashboardScreen extends StatefulWidget {
 }
 
 class _PgDashboardScreenState extends State<PgDashboardScreen> {
-  late Future<Map<String, dynamic>> _future;
+  late Future<_DashData> _future;
 
   @override
   void initState() {
@@ -22,7 +41,16 @@ class _PgDashboardScreenState extends State<PgDashboardScreen> {
   }
 
   void _load() {
-    _future = context.read<AppState>().apiClient.get('/owner/properties');
+    final api = context.read<AppState>().apiClient;
+    _future = Future.wait([
+      api.get('/owner/dashboard'),
+      api.get('/owner/properties'),
+    ]).then((results) => _DashData(
+          stats: results[0],
+          properties: results[1]['items'] is List
+              ? (results[1]['items'] as List).cast<Map<String, dynamic>>()
+              : <Map<String, dynamic>>[],
+        ));
   }
 
   void _openAddProperty() {
@@ -34,185 +62,397 @@ class _PgDashboardScreenState extends State<PgDashboardScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) => _DashAddPropertySheet(onSaved: () => setState(_load)),
-    );
+    ).then((added) {
+      if (added == true) setState(_load);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final ownerName = context.watch<AppState>().ownerName ?? 'Owner';
+    final firstName = ownerName.split(' ').first;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6FA),
       body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ─── Top bar ───────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 16, 0),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.menu, size: 24),
-                    style: IconButton.styleFrom(
-                        padding: EdgeInsets.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                    onPressed: () => context.go('/settings'),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.notifications_outlined, size: 24),
-                    style: IconButton.styleFrom(
-                        padding: EdgeInsets.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                    onPressed: () => context.push('/notifications'),
-                  ),
-                ],
-              ),
-            ),
-            // ─── Title ────────────────────────────────────────────────
-            FadeSlideIn(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Property Dashboard',
-                        style: TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.w800,
-                            color: PgColors.textPrimary)),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Welcome back, ${context.watch<AppState>().ownerName ?? 'Owner'}!',
-                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            // ─── Section header ───────────────────────────────────────
-            FadeSlideIn(
-              delay: const Duration(milliseconds: 60),
-              child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 16, 12),
-              child: Row(
-                children: [
-                  const Text('Your Properties',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700,
-                          color: PgColors.textPrimary)),
-                  const Spacer(),
-                  OutlinedButton.icon(
-                    onPressed: _openAddProperty,
-                    icon: const Icon(Icons.add, size: 16),
-                    label: const Text('Add Property'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: PgColors.primary,
-                      side: const BorderSide(color: PgColors.primary),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        child: FutureBuilder<_DashData>(
+          future: _future,
+          builder: (context, snapshot) {
+            final data = snapshot.data;
+            final stats = data?.stats ?? {};
+            final properties = data?.properties ?? [];
+
+            return RefreshIndicator(
+              onRefresh: () async => setState(_load),
+              child: CustomScrollView(
+                slivers: [
+                  // ── Top bar ─────────────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
+                      child: Row(
+                        children: [
+                          // Purple hamburger circle
+                          GestureDetector(
+                            onTap: () => context.go('/settings'),
+                            child: Container(
+                              width: 46,
+                              height: 46,
+                              decoration: BoxDecoration(
+                                color: PgColors.primary,
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: const Icon(Icons.menu_rounded,
+                                  color: Colors.white, size: 22),
+                            ),
+                          ),
+                          const Spacer(),
+                          // Notification bell with badge
+                          Stack(
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.notifications_outlined,
+                                    size: 26, color: PgColors.textPrimary),
+                                onPressed: () => context.push('/notifications'),
+                              ),
+                              Positioned(
+                                top: 8,
+                                right: 8,
+                                child: Container(
+                                  width: 9,
+                                  height: 9,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFEF4444),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ],
-              ),
-            ),
-            ),
-            // ─── Property list ────────────────────────────────────────
-            Expanded(
-              child: FutureBuilder<Map<String, dynamic>>(
-                future: _future,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (snapshot.hasError) {
-                    return Center(
+
+                  // ── Greeting ─────────────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: FadeSlideIn(
                       child: Padding(
-                        padding: const EdgeInsets.all(32),
+                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
                         child: Column(
-                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(Icons.cloud_off, size: 48, color: PgColors.danger),
-                            const SizedBox(height: 12),
-                            const Text('Could not load properties',
-                                style: TextStyle(fontWeight: FontWeight.w700)),
-                            const SizedBox(height: 8),
-                            Text('${snapshot.error}',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(color: Colors.grey[600], fontSize: 13)),
-                            const SizedBox(height: 16),
-                            OutlinedButton(
-                                onPressed: () => setState(_load),
-                                child: const Text('Try again')),
+                            RichText(
+                              text: TextSpan(
+                                style: const TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
+                                    color: PgColors.textPrimary),
+                                children: [
+                                  TextSpan(text: '${_greeting()}, $firstName! '),
+                                  const TextSpan(text: '👋'),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              "Here's what's happening with your properties today.",
+                              style: TextStyle(
+                                  fontSize: 13.5,
+                                  color: PgColors.textSecondary,
+                                  height: 1.4),
+                            ),
                           ],
                         ),
                       ),
-                    );
-                  }
-                  final items =
-                      (snapshot.data?['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-                  if (items.isEmpty) {
-                    return Center(
+                    ),
+                  ),
+
+                  // ── Stats row ─────────────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: FadeSlideIn(
+                      delay: const Duration(milliseconds: 60),
                       child: Padding(
-                        padding: const EdgeInsets.all(32),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 80,
-                              height: 80,
-                              decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  colors: [PgColors.primary, PgColors.primaryDark],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                borderRadius: BorderRadius.circular(20),
+                        padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+                        child: snapshot.connectionState ==
+                                ConnectionState.waiting
+                            ? _StatsShimmer()
+                            : Row(
+                                children: [
+                                  _StatCard(
+                                    icon: Icons.apartment_rounded,
+                                    iconColor: PgColors.primary,
+                                    iconBg: const Color(0xFFEDE9FF),
+                                    value: '${properties.length}',
+                                    label: 'Properties',
+                                    accentColor: PgColors.primary,
+                                  ),
+                                  _StatCard(
+                                    icon: Icons.bed_outlined,
+                                    iconColor: const Color(0xFF0D9488),
+                                    iconBg: const Color(0xFFCCFBF1),
+                                    value: '${stats['totalBeds'] ?? 0}',
+                                    label: 'Total Beds',
+                                    accentColor: const Color(0xFF0D9488),
+                                  ),
+                                  _StatCard(
+                                    icon: Icons.people_alt_outlined,
+                                    iconColor: const Color(0xFF2563EB),
+                                    iconBg: const Color(0xFFDBEAFE),
+                                    value: '${stats['occupiedBeds'] ?? 0}',
+                                    label: 'Occupied',
+                                    accentColor: const Color(0xFF2563EB),
+                                  ),
+                                  _StatCard(
+                                    icon: Icons.account_balance_wallet_outlined,
+                                    iconColor: const Color(0xFFD97706),
+                                    iconBg: const Color(0xFFFEF3C7),
+                                    value: _compactAmount(stats['revenue']),
+                                    label: 'Monthly',
+                                    accentColor: const Color(0xFFD97706),
+                                  ),
+                                ],
                               ),
-                              child: const Icon(Icons.apartment_outlined,
-                                  size: 40, color: Colors.white),
-                            ),
-                            const SizedBox(height: 20),
-                            const Text('No properties yet',
-                                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Add your first property to start managing\ntenants, rooms, and payments.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.grey[600], height: 1.5),
-                            ),
-                            const SizedBox(height: 24),
+                      ),
+                    ),
+                  ),
+
+                  // ── Section header ────────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: FadeSlideIn(
+                      delay: const Duration(milliseconds: 100),
+                      child: Padding(
+                        padding:
+                            const EdgeInsets.fromLTRB(20, 24, 16, 14),
+                        child: Row(
+                          children: [
+                            const Text('Your Properties',
+                                style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    color: PgColors.textPrimary)),
+                            const Spacer(),
                             FilledButton.icon(
                               onPressed: _openAddProperty,
-                              icon: const Icon(Icons.add),
+                              icon: const Icon(Icons.add, size: 16),
                               label: const Text('Add Property'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: PgColors.primary,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 10),
+                                textStyle: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius:
+                                        BorderRadius.circular(24)),
+                              ),
                             ),
                           ],
                         ),
                       ),
-                    );
-                  }
-                  return RefreshIndicator(
-                    onRefresh: () async => setState(_load),
-                    child: ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-                      itemCount: items.length,
-                      itemBuilder: (context, index) {
-                        final prop = items[index];
-                        return FadeSlideIn(
-                          delay: Duration(
-                              milliseconds: 40 * (index.clamp(0, 8))),
+                    ),
+                  ),
+
+                  // ── Property list ──────────────────────────────────────────
+                  if (snapshot.connectionState == ConnectionState.waiting)
+                    const SliverToBoxAdapter(
+                      child: Center(
+                          child: Padding(
+                        padding: EdgeInsets.all(48),
+                        child: CircularProgressIndicator(),
+                      )),
+                    )
+                  else if (snapshot.hasError)
+                    SliverToBoxAdapter(child: _ErrorBanner(onRetry: () => setState(_load)))
+                  else if (properties.isEmpty)
+                    SliverToBoxAdapter(child: _EmptyProperties(onAdd: _openAddProperty))
+                  else
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      sliver: SliverList.separated(
+                        itemCount: properties.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(height: 12),
+                        itemBuilder: (context, i) => FadeSlideIn(
+                          delay: Duration(milliseconds: 40 * i.clamp(0, 8)),
                           child: _PropertyCard(
-                            property: prop,
+                            property: properties[i],
+                            colorIndex: i,
                             onTap: () => Navigator.push(
                               context,
                               MaterialPageRoute(
-                                  builder: (_) =>
-                                      PropertyWorkspaceScreen(property: prop)),
+                                  builder: (_) => PropertyWorkspaceScreen(
+                                      property: properties[i])),
                             ).then((_) => setState(_load)),
                           ),
-                        );
-                      },
+                        ),
+                      ),
                     ),
-                  );
-                },
+
+                  // ── Grow CTA ──────────────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: FadeSlideIn(
+                      delay: const Duration(milliseconds: 150),
+                      child: Padding(
+                        padding:
+                            const EdgeInsets.fromLTRB(16, 4, 16, 28),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEDE9FF),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 52,
+                                height: 52,
+                                decoration: BoxDecoration(
+                                  color:
+                                      PgColors.primary.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: const Icon(Icons.bar_chart_rounded,
+                                    color: PgColors.primary, size: 26),
+                              ),
+                              const SizedBox(width: 14),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text('Grow Your Business',
+                                        style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w800,
+                                            color: PgColors.primary)),
+                                    SizedBox(height: 3),
+                                    Text(
+                                      'Add more properties and manage everything in one place.',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: PgColors.textSecondary,
+                                          height: 1.4),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              TextButton(
+                                onPressed: _openAddProperty,
+                                style: TextButton.styleFrom(
+                                    foregroundColor: PgColors.primary,
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6)),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text('Add',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 13)),
+                                    SizedBox(width: 2),
+                                    Icon(Icons.chevron_right, size: 18),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Data container ────────────────────────────────────────────────────────────
+
+class _DashData {
+  final Map<String, dynamic> stats;
+  final List<Map<String, dynamic>> properties;
+  const _DashData({required this.stats, required this.properties});
+}
+
+// ─── Stat Card ────────────────────────────────────────────────────────────────
+
+class _StatCard extends StatelessWidget {
+  const _StatCard({
+    required this.icon,
+    required this.iconColor,
+    required this.iconBg,
+    required this.value,
+    required this.label,
+    required this.accentColor,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final Color iconBg;
+  final String value;
+  final String label;
+  final Color accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: .05),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: iconBg,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: iconColor, size: 18),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: accentColor,
+              ),
+            ),
+            const SizedBox(height: 1),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 10, color: PgColors.textSecondary),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 8),
+            Container(
+              height: 3,
+              width: 22,
+              decoration: BoxDecoration(
+                color: accentColor,
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
           ],
@@ -222,118 +462,362 @@ class _PgDashboardScreenState extends State<PgDashboardScreen> {
   }
 }
 
+// ─── Stats shimmer (loading placeholder) ──────────────────────────────────────
+
+class _StatsShimmer extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: List.generate(
+        4,
+        (_) => Expanded(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            height: 100,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ─── Property Card ────────────────────────────────────────────────────────────
 
-class _PropertyCard extends StatelessWidget {
+class _PropertyCard extends StatefulWidget {
+  const _PropertyCard({
+    required this.property,
+    required this.colorIndex,
+    required this.onTap,
+  });
   final Map<String, dynamic> property;
+  final int colorIndex;
   final VoidCallback onTap;
-  const _PropertyCard({required this.property, required this.onTap});
+
+  @override
+  State<_PropertyCard> createState() => _PropertyCardState();
+}
+
+class _PropertyCardState extends State<_PropertyCard> {
+  Map<String, dynamic>? _stats;
+
+  static const _gradients = [
+    [Color(0xFF4F46E5), Color(0xFF7C3AED)], // indigo → violet
+    [Color(0xFF059669), Color(0xFF0D9488)], // emerald → teal
+    [Color(0xFF0284C7), Color(0xFF0EA5E9)], // sky blue
+    [Color(0xFFDC2626), Color(0xFFEA580C)], // red → orange
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchStats();
+  }
+
+  Future<void> _fetchStats() async {
+    final id = widget.property['facilityId'];
+    if (id == null) return;
+    try {
+      final data = await context.read<AppState>().apiClient.get('/properties/$id/stats');
+      if (mounted) setState(() => _stats = data as Map<String, dynamic>?);
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
-    final name = '${property['facilityName'] ?? 'Property'}';
-    final desc = '${property['description'] ?? ''}';
-    final capacity = property['capacity'];
-    // Color derived from property name for visual variety
-    final colors = [
-      [const Color(0xFF6C5CE7), const Color(0xFF4A3FA6)],
-      [const Color(0xFF00B894), const Color(0xFF007A63)],
-      [const Color(0xFF0984E3), const Color(0xFF0652A1)],
-      [const Color(0xFFE17055), const Color(0xFFA84532)],
-    ];
-    final colorPair = colors[name.hashCode.abs() % colors.length];
+    final p = widget.property;
+    final name = '${p['facilityName'] ?? 'Property'}';
+    final desc = '${p['description'] ?? ''}';
+    final capacity = p['capacity'];
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: .06),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
+    final pair = _gradients[widget.colorIndex % _gradients.length];
+
+    final totalFloors = _stats?['totalFloors'] ?? '—';
+    final totalRooms = _stats?['totalRooms'] ?? _stats?['totalBeds'] ?? capacity ?? '—';
+    final occupied = _stats?['occupiedBeds'] ?? '—';
+    final vacant = _stats?['vacantBeds'] ?? '—';
+
+    return GestureDetector(
+      onTap: widget.onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                // Building image placeholder
-                Container(
-                  width: 76,
-                  height: 76,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: colorPair,
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.apartment, color: Colors.white, size: 30),
-                      const SizedBox(height: 4),
-                      Text(
-                        name.isNotEmpty ? name[0].toUpperCase() : 'P',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 16),
-                      ),
-                    ],
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: .06),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Gradient thumbnail ───────────────────────────────────────
+            ClipRRect(
+              borderRadius: const BorderRadius.horizontal(left: Radius.circular(16)),
+              child: Container(
+                width: 110,
+                height: 130,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: pair,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(name,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 15,
-                              color: Color(0xFF1A1A2E))),
-                      if (desc.isNotEmpty) ...[
-                        const SizedBox(height: 3),
-                        Text(desc,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    const Icon(Icons.apartment_rounded,
+                        color: Colors.white54, size: 52),
+                    Positioned(
+                      bottom: 8,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.35),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.layers_outlined,
+                                  color: Colors.white, size: 12),
+                              const SizedBox(width: 3),
+                              Text(
+                                '$totalFloors Floors',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // ── Content ───────────────────────────────────────────────────
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            name,
                             style: const TextStyle(
-                                color: Color(0xFF6B7280), fontSize: 13)),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                              color: PgColors.textPrimary,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF3F4F6),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(Icons.chevron_right,
+                              color: PgColors.textSecondary, size: 18),
+                        ),
                       ],
-                      const SizedBox(height: 8),
+                    ),
+                    if (desc.isNotEmpty) ...[
+                      const SizedBox(height: 5),
                       Row(
                         children: [
-                          Icon(Icons.bed_outlined,
-                              size: 14, color: colorPair[0]),
-                          const SizedBox(width: 4),
-                          Text(
-                            capacity != null ? '$capacity Rooms' : 'Tap to view',
-                            style: TextStyle(
-                                color: colorPair[0],
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600),
+                          const Icon(Icons.location_on_outlined,
+                              size: 12, color: PgColors.textSecondary),
+                          const SizedBox(width: 3),
+                          Expanded(
+                            child: Text(
+                              desc,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 12, color: PgColors.textSecondary),
+                            ),
                           ),
                         ],
                       ),
                     ],
-                  ),
+                    const SizedBox(height: 10),
+                    // Stats chips
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _MiniStat(
+                          icon: Icons.bed_outlined,
+                          value: '$totalRooms',
+                          label: 'Rooms',
+                          color: const Color(0xFF2563EB),
+                          bg: const Color(0xFFEFF6FF),
+                        ),
+                        _MiniStat(
+                          icon: Icons.people_alt_outlined,
+                          value: '$occupied',
+                          label: 'Occupied',
+                          color: const Color(0xFF059669),
+                          bg: const Color(0xFFECFDF5),
+                        ),
+                        _MiniStat(
+                          icon: Icons.door_front_door_outlined,
+                          value: '$vacant',
+                          label: 'Vacant',
+                          color: const Color(0xFFD97706),
+                          bg: const Color(0xFFFEF3C7),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                const Icon(Icons.chevron_right, color: Color(0xFFD1D5DB)),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── Mini Stat Chip ───────────────────────────────────────────────────────────
+
+class _MiniStat extends StatelessWidget {
+  const _MiniStat({
+    required this.icon,
+    required this.value,
+    required this.label,
+    required this.color,
+    required this.bg,
+  });
+  final IconData icon;
+  final String value;
+  final String label;
+  final Color color;
+  final Color bg;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(value,
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: color)),
+              Text(label,
+                  style: const TextStyle(
+                      fontSize: 9,
+                      color: PgColors.textSecondary)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Error banner ─────────────────────────────────────────────────────────────
+
+class _ErrorBanner extends StatelessWidget {
+  const _ErrorBanner({required this.onRetry});
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.cloud_off_outlined, size: 48, color: PgColors.danger),
+          const SizedBox(height: 12),
+          const Text('Could not load data',
+              style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Empty state ──────────────────────────────────────────────────────────────
+
+class _EmptyProperties extends StatelessWidget {
+  const _EmptyProperties({required this.onAdd});
+  final VoidCallback onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                  colors: [PgColors.primary, Color(0xFF7C3AED)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Icon(Icons.apartment_rounded,
+                size: 40, color: Colors.white),
+          ),
+          const SizedBox(height: 20),
+          const Text('No properties yet',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+          const SizedBox(height: 8),
+          Text(
+            'Add your first property to start managing\ntenants, rooms, and payments.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey[600], height: 1.5),
+          ),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: onAdd,
+            icon: const Icon(Icons.add),
+            label: const Text('Add Property'),
+          ),
+        ],
       ),
     );
   }
@@ -367,25 +851,25 @@ class _DashAddPropertySheetState extends State<_DashAddPropertySheet> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     try {
-      final orgId = await context.read<AppState>().storage.read(key: 'organizationId');
-      await context.read<AppState>().apiClient.post('/facilities', {
+      final api = context.read<AppState>().apiClient;
+      final storage = context.read<AppState>().storage;
+      final orgId = await storage.read(key: 'organizationId');
+      await api.post('/facilities', {
         'parentFacilityId': int.parse(orgId ?? '0'),
         'facilityTypeId': 'PROPERTY',
         'facilityName': _name.text.trim(),
         if (_desc.text.isNotEmpty) 'description': _desc.text.trim(),
         if (_capacity.text.isNotEmpty) 'capacity': int.parse(_capacity.text),
       });
-      if (mounted) {
-        Navigator.pop(context);
-        widget.onSaved();
-      }
+      if (!mounted) return;
+      Navigator.pop(context);
+      widget.onSaved();
     } catch (e) {
       setState(() => _saving = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
     }
   }
 
@@ -458,14 +942,13 @@ class _DashAddPropertySheetState extends State<_DashAddPropertySheet> {
   }
 }
 
-// ─── Shared widgets re-exported for other files ────────────────────────────────
+// ─── Analytics stub ───────────────────────────────────────────────────────────
 
 class AnalyticsScreen extends StatelessWidget {
   const AnalyticsScreen({super.key});
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Analytics')),
-        body: const FadeSlideIn(
-            child: Center(child: Text('Analytics coming soon'))),
+        body: const FadeSlideIn(child: Center(child: Text('Analytics coming soon'))),
       );
 }
