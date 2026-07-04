@@ -676,10 +676,10 @@ class _BedTile extends StatelessWidget {
     final tenant = bed['occupantName'] as String?;
     final isOccupied = tenant != null;
     final isTemp = bed['temporaryStay'] == true;
-    // Vacant = green, temporary stay = orange, permanent occupant = red.
+    // Vacant = green, temporary stay = orange, active tenant = gray.
     final statusColor = !isOccupied
         ? PgColors.success
-        : (isTemp ? PgColors.warning : PgColors.danger);
+        : (isTemp ? PgColors.warning : Colors.grey);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -691,9 +691,7 @@ class _BedTile extends StatelessWidget {
         title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
         subtitle: Text(
           isOccupied ? (isTemp ? '$tenant · Temporary' : tenant) : 'Available',
-          style: TextStyle(
-              color: isOccupied ? Colors.grey[700] : PgColors.success,
-              fontWeight: FontWeight.w500),
+          style: TextStyle(color: statusColor, fontWeight: FontWeight.w500),
         ),
         trailing: !isOccupied
             ? FilledButton(

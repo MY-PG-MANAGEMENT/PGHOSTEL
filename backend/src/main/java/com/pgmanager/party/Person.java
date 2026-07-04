@@ -67,4 +67,7 @@ public class Person extends BaseEntity {
 
     @Column(name = "emergency_contact_relation")
     private String emergencyContactRelation;
+
+    @Column(name = "has_vehicle", nullable = false)
+    private boolean hasVehicle = false;
 }

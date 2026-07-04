@@ -23,6 +23,7 @@ public final class TenantDtos {
             String employerName,
             String designation,
             String workAddress,
+            boolean hasVehicle,
             Long propertyId
     ) {}
 
@@ -40,7 +41,8 @@ public final class TenantDtos {
             String emergencyContactRelation,
             String employerName,
             String designation,
-            String workAddress
+            String workAddress,
+            boolean hasVehicle
     ) {}
 
     public record TenantPatchRequest(
@@ -67,6 +69,7 @@ public final class TenantDtos {
             String employerName,
             String designation,
             String workAddress,
+            boolean hasVehicle,
             String currentBedName,
             String currentRoomName,
             Long currentPropertyId,

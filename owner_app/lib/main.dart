@@ -6,6 +6,8 @@ import 'src/app_state.dart';
 import 'src/screens/auth/login_screen.dart';
 import 'src/screens/account_screens.dart';
 import 'src/screens/billing_screen.dart';
+import 'src/screens/expenses_screen.dart';
+import 'src/screens/staff_screen.dart';
 import 'src/screens/onboarding_screen.dart';
 import 'src/screens/property_screen.dart';
 import 'src/screens/splash_screen.dart';
@@ -49,6 +51,8 @@ class PgManagerOwnerApp extends StatelessWidget {
               GoRoute(path: '/tenants', builder: (_, __) => const TenantScreen()),
               GoRoute(path: '/tenants/manage', redirect: (_, __) => '/tenants'),
               GoRoute(path: '/billing', builder: (_, __) => const BillingScreen()),
+              GoRoute(path: '/expenses', builder: (_, __) => const ExpensesScreen()),
+              GoRoute(path: '/staff', builder: (_, __) => const StaffScreen()),
               GoRoute(path: '/billing/manage', redirect: (_, __) => '/billing'),
               GoRoute(path: '/payments', redirect: (_, __) => '/billing'),
               GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),

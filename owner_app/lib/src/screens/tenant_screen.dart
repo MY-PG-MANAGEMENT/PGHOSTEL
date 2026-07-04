@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
@@ -11,6 +14,18 @@ import 'billing_screen.dart' show InvoiceDetailSheet;
 import 'checkout_sheet.dart' show CheckoutSheet, TransferBedSheet;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// Official WhatsApp glyph (FontAwesome brand path) rendered inline — no asset/network needed.
+const String _kWhatsAppSvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512">'
+    '<path fill="#25D366" d="M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 '
+    '10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 '
+    '0-59.3-25.2-115-67.2-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 '
+    '0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 '
+    '2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 '
+    '16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 '
+    '0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 '
+    '83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/></svg>';
 
 String _initial(String name) {
   final parts = name.trim().split(' ').where((w) => w.isNotEmpty).toList();
@@ -46,7 +61,7 @@ class _TenantScreenState extends State<TenantScreen> {
   late Future<Map<String, dynamic>> _future;
   final _search = TextEditingController();
   String _query = '';
-  String _filter = 'ALL';
+  String _filter = 'ACTIVE'; // default to current tenants; All/Inactive on tap
 
   @override
   void initState() {
@@ -371,8 +386,6 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
               const PopupMenuItem(value: 'edit', child: Text('Edit Profile')),
               const PopupMenuItem(value: 'emergency', child: Text('Emergency Contact')),
               const PopupMenuItem(value: 'employment', child: Text('Employment')),
-              if (_tenant['hasActiveAdmission'] == true)
-                const PopupMenuItem(value: 'transfer', child: Text('Transfer Bed')),
             ],
           ),
         ],
@@ -390,7 +403,7 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
       ),
       body: Column(
         children: [
-          _TenantHeader(tenant: _tenant, active: active),
+          _TenantHeader(tenant: _tenant, active: active, onShift: _openTransfer),
           if (_tenant['inTemporaryStay'] == true)
             _TempStayBanner(
               bedName: '${_tenant['tempBedName'] ?? 'a bed'}',
@@ -483,29 +496,34 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
         ),
         builder: (_) => _EditEmploymentSheet(tenant: _tenant),
       );
-    } else if (action == 'transfer') {
-      // Refresh first so we have the latest currentPropertyId from the detail API
-      await _refreshTenant();
-      if (!mounted) return;
-      final propertyId = _tenant['currentPropertyId'];
-      changed = await showModalBottomSheet<bool>(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        backgroundColor: Colors.white,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (_) => TransferBedSheet(
-          partyId: (_tenant['tenantId'] as num).toInt(),
-          tenantName: '${_tenant['fullName'] ?? 'Tenant'}',
-          currentPropertyId: propertyId != null ? (propertyId as num).toInt() : null,
-          moveInDateIso: _tenant['moveInDate'] as String?,
-          currentSharingType: _tenant['currentSharingType'] as String?,
-          onTransferred: _refreshTenant,
-        ),
-      );
     }
+    if (changed == true && mounted) {
+      await _refreshTenant();
+    }
+  }
+
+  Future<void> _openTransfer() async {
+    // Refresh first so we have the latest currentPropertyId from the detail API
+    await _refreshTenant();
+    if (!mounted) return;
+    final propertyId = _tenant['currentPropertyId'];
+    final changed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => TransferBedSheet(
+        partyId: (_tenant['tenantId'] as num).toInt(),
+        tenantName: '${_tenant['fullName'] ?? 'Tenant'}',
+        currentPropertyId: propertyId != null ? (propertyId as num).toInt() : null,
+        moveInDateIso: _tenant['moveInDate'] as String?,
+        currentSharingType: _tenant['currentSharingType'] as String?,
+        onTransferred: _refreshTenant,
+      ),
+    );
     if (changed == true && mounted) {
       await _refreshTenant();
     }
@@ -513,10 +531,36 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
 }
 
 class _TenantHeader extends StatelessWidget {
-  const _TenantHeader({required this.tenant, required this.active});
+  const _TenantHeader({required this.tenant, required this.active, required this.onShift});
 
   final Map<String, dynamic> tenant;
   final bool active;
+  final VoidCallback onShift;
+
+  String _digits(String mobile) => mobile.replaceAll(RegExp(r'\D'), '');
+
+  String _waNumber(String mobile) {
+    final d = _digits(mobile);
+    // wa.me needs a country code — assume India (+91) for plain 10-digit numbers.
+    return d.length == 10 ? '91$d' : d;
+  }
+
+  Future<void> _launch(BuildContext context, Uri uri) async {
+    try {
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No app available for this action')),
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No app available for this action')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -524,39 +568,194 @@ class _TenantHeader extends StatelessWidget {
     final mobile = '${tenant['mobileNumber'] ?? ''}';
     final room = tenant['currentRoomName'];
     final bed = tenant['currentBedName'];
+    final hasMobile = _digits(mobile).isNotEmpty;
 
     return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        children: [
-          _tenantAvatar(name, radius: 32),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      color: const Color(0xFFF5F6FA),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 3)),
+          ],
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+        child: Column(
+          children: [
+            // ── Avatar on the left, details on the right ──
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text(name,
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-                if (mobile.isNotEmpty)
-                  Text(mobile, style: TextStyle(color: Colors.grey[600])),
-                if (active && (room != null || bed != null)) ...[
-                  const SizedBox(height: 4),
-                  Row(children: [
-                    const Icon(Icons.bed_outlined, size: 14, color: PgColors.primary),
-                    const SizedBox(width: 4),
-                    Text(
-                      [if (room != null) room, if (bed != null) bed].join(' › '),
-                      style: const TextStyle(
-                          color: PgColors.primary, fontWeight: FontWeight.w600),
-                    ),
-                  ]),
-                ],
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: _avatarColor(name).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    _initial(name),
+                    style: TextStyle(
+                        color: _avatarColor(name), fontWeight: FontWeight.w800, fontSize: 26),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(name,
+                                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+                          ),
+                          const SizedBox(width: 8),
+                          _StatusPill(active: active),
+                        ],
+                      ),
+                      if (mobile.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Row(children: [
+                          Icon(Icons.phone_outlined, size: 13, color: Colors.grey[600]),
+                          const SizedBox(width: 4),
+                          Text(mobile, style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+                        ]),
+                      ],
+                      if (active && (room != null || bed != null)) ...[
+                        const SizedBox(height: 4),
+                        Row(children: [
+                          const Icon(Icons.bed_outlined, size: 14, color: PgColors.primary),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              [if (room != null) room, if (bed != null) bed].join(' › '),
+                              style: const TextStyle(
+                                  color: PgColors.primary, fontWeight: FontWeight.w600, fontSize: 13),
+                            ),
+                          ),
+                        ]),
+                      ],
+                    ],
+                  ),
+                ),
               ],
             ),
-          ),
-          _ActiveBadge(active),
+            const SizedBox(height: 18),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _TenantAction(
+                  icon: Icons.call,
+                  label: 'Call',
+                  bg: const Color(0xFFE8EEFF),
+                  fg: const Color(0xFF2563EB),
+                  onTap: hasMobile ? () => _launch(context, Uri(scheme: 'tel', path: mobile)) : null,
+                ),
+                _TenantAction(
+                  label: 'WhatsApp',
+                  bg: const Color(0xFFD9F7E3),
+                  fg: const Color(0xFF25D366),
+                  iconChild: SvgPicture.string(_kWhatsAppSvg, width: 26, height: 26),
+                  onTap: hasMobile
+                      ? () => _launch(context, Uri.parse('https://wa.me/${_waNumber(mobile)}'))
+                      : null,
+                ),
+                _TenantAction(
+                  icon: Icons.sms_outlined,
+                  label: 'Message',
+                  bg: const Color(0xFFEDE7FB),
+                  fg: const Color(0xFF7C3AED),
+                  onTap: hasMobile ? () => _launch(context, Uri(scheme: 'sms', path: mobile)) : null,
+                ),
+                _TenantAction(
+                  icon: Icons.swap_horiz,
+                  label: 'Shift',
+                  bg: const Color(0xFFFDEFC9),
+                  fg: const Color(0xFFD97706),
+                  onTap: active ? onShift : null,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.active});
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = active ? PgColors.success : Colors.grey;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+          const SizedBox(width: 6),
+          Text(active ? 'Active' : 'Inactive',
+              style: TextStyle(color: color, fontSize: 12.5, fontWeight: FontWeight.w700)),
         ],
+      ),
+    );
+  }
+}
+
+class _TenantAction extends StatelessWidget {
+  const _TenantAction({
+    this.icon,
+    this.iconChild,
+    required this.label,
+    required this.bg,
+    required this.fg,
+    required this.onTap,
+  }) : assert(icon != null || iconChild != null);
+
+  final IconData? icon;
+  final Widget? iconChild;
+  final String label;
+  final Color bg;
+  final Color fg;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = onTap == null;
+    return Opacity(
+      opacity: disabled ? 0.4 : 1,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 54,
+              height: 54,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: bg,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: iconChild ?? Icon(icon, color: fg, size: 24),
+            ),
+            const SizedBox(height: 6),
+            Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+          ],
+        ),
       ),
     );
   }
@@ -891,6 +1090,7 @@ class _ProfileTabState extends State<_ProfileTab> {
           ('Gender', '${tenant['gender'] ?? '—'}', Icons.wc_outlined),
           ('Date of Birth', '${tenant['dateOfBirth'] ?? '—'}', Icons.cake_outlined),
           ('Email', '${tenant['email'] ?? '—'}', Icons.email_outlined),
+          ('Vehicle', tenant['hasVehicle'] == true ? 'Yes' : 'No', Icons.two_wheeler_outlined),
         ]),
         const SizedBox(height: 12),
         _InfoSection(title: 'Identity', items: [
@@ -1480,6 +1680,255 @@ class _AmountChip extends StatelessWidget {
   }
 }
 
+// ─── Tenant Self Check-in (QR → form) ─────────────────────────────────────
+
+class _SelfCheckinCard extends StatelessWidget {
+  const _SelfCheckinCard({this.propertyId});
+
+  final int? propertyId;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+        builder: (_) => _SelfCheckinSheet(propertyId: propertyId),
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF4F2DE4), Color(0xFF7C5CF6)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Row(children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(12)),
+            child: const Icon(Icons.qr_code_2, color: Colors.white, size: 26),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Tenant Self Check-in',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15)),
+              SizedBox(height: 2),
+              Text('Show a QR the new tenant scans to fill their own details',
+                  style: TextStyle(color: Colors.white70, fontSize: 12)),
+            ]),
+          ),
+          const Icon(Icons.chevron_right, color: Colors.white70),
+        ]),
+      ),
+    );
+  }
+}
+
+class _SelfCheckinSheet extends StatefulWidget {
+  const _SelfCheckinSheet({this.propertyId});
+
+  final int? propertyId;
+
+  @override
+  State<_SelfCheckinSheet> createState() => _SelfCheckinSheetState();
+}
+
+class _SelfCheckinSheetState extends State<_SelfCheckinSheet> {
+  String? _url;
+  Object? _error;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final api = context.read<AppState>().apiClient;
+      final query = widget.propertyId != null ? '?propertyId=${widget.propertyId}' : '';
+      final data = await api.get('/tenants/self-checkin-link$query');
+      if (!mounted) return;
+      // Build the QR URL from the SAME backend origin the app is talking to, so the
+      // QR host can never diverge from a working server (fixes localhost/LAN mismatch).
+      final path = '${data['path'] ?? ''}';
+      final base = api.baseUrl; // e.g. http://192.168.1.25:8080/api
+      final origin = base.endsWith('/api') ? base.substring(0, base.length - 4) : base;
+      setState(() {
+        _url = path.isNotEmpty ? '$origin$path' : '${data['url'] ?? ''}';
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e;
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                    color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            Row(children: const [
+              Icon(Icons.qr_code_2, color: PgColors.primary),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text('Tenant Self Check-in',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            if (_loading)
+              const Padding(
+                  padding: EdgeInsets.all(40),
+                  child: Center(child: CircularProgressIndicator()))
+            else if (_error != null)
+              _buildError()
+            else
+              ..._buildQr(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildError() => Column(children: [
+        Text(_error.toString().replaceFirst('Exception: ', ''),
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: PgColors.danger, fontSize: 13)),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          icon: const Icon(Icons.refresh, size: 16),
+          label: const Text('Retry'),
+          onPressed: _load,
+        ),
+      ]);
+
+  List<Widget> _buildQr() => [
+        Text(
+          'Ask the new tenant to scan this with their phone camera. They fill in their '
+          'details and submit — the tenant then appears in your Tenants list, ready for '
+          'bed assignment.',
+          style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+        ),
+        const SizedBox(height: 16),
+        Center(
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: PgColors.hairline),
+            ),
+            child: QrImageView(data: _url!, size: 220, backgroundColor: Colors.white),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+              color: const Color(0xFFF5F6FA), borderRadius: BorderRadius.circular(8)),
+          child: Row(children: [
+            Expanded(
+              child: Text(_url!,
+                  style: const TextStyle(fontSize: 12),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ),
+            IconButton(
+              icon: const Icon(Icons.copy, size: 18),
+              tooltip: 'Copy link',
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: _url!));
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Link copied')));
+              },
+            ),
+          ]),
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          icon: const Icon(Icons.open_in_new, size: 16),
+          label: const Text('Preview form'),
+          onPressed: () =>
+              launchUrl(Uri.parse(_url!), mode: LaunchMode.externalApplication),
+        ),
+      ];
+}
+
+// ─── Vehicle Yes/No field ─────────────────────────────────────────────────
+
+class _VehicleField extends StatelessWidget {
+  const _VehicleField({required this.value, required this.onChanged});
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return InputDecorator(
+      decoration: const InputDecoration(
+        labelText: 'Vehicle',
+        prefixIcon: Icon(Icons.two_wheeler_outlined),
+        border: OutlineInputBorder(),
+        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      ),
+      child: Row(
+        children: [
+          const Expanded(child: Text('Owns a vehicle?')),
+          SegmentedButton<bool>(
+            showSelectedIcon: false,
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            segments: const [
+              ButtonSegment(value: false, label: Text('No')),
+              ButtonSegment(value: true, label: Text('Yes')),
+            ],
+            selected: {value},
+            onSelectionChanged: (s) => onChanged(s.first),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ─── Add Tenant Screen ────────────────────────────────────────────────────
 
 class AddTenantScreen extends StatefulWidget {
@@ -1499,6 +1948,7 @@ class _AddTenantScreenState extends State<AddTenantScreen> {
   DateTime? _dob;
   final _address = TextEditingController();
   String? _gender;
+  bool _hasVehicle = false;
 
   @override
   void dispose() {
@@ -1536,6 +1986,8 @@ class _AddTenantScreenState extends State<AddTenantScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  _SelfCheckinCard(propertyId: widget.propertyId),
+                  const SizedBox(height: 16),
                   const Text('Personal Details',
                       style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                   const SizedBox(height: 12),
@@ -1638,6 +2090,11 @@ class _AddTenantScreenState extends State<AddTenantScreen> {
                     textInputAction: TextInputAction.done,
                     textCapitalization: TextCapitalization.sentences,
                   ),
+                  const SizedBox(height: 12),
+                  _VehicleField(
+                    value: _hasVehicle,
+                    onChanged: (v) => setState(() => _hasVehicle = v),
+                  ),
                   const SizedBox(height: 24),
                   AsyncActionButton(
                     label: 'Register Tenant',
@@ -1655,6 +2112,7 @@ class _AddTenantScreenState extends State<AddTenantScreen> {
                             'dateOfBirth': '${_dob!.year}-${_dob!.month.toString().padLeft(2, '0')}-${_dob!.day.toString().padLeft(2, '0')}',
                           if (_address.text.isNotEmpty)
                             'permanentAddress': _address.text.trim(),
+                          'hasVehicle': _hasVehicle,
                           if (widget.propertyId != null)
                             'propertyId': widget.propertyId,
                         });
@@ -1704,6 +2162,7 @@ class _EditTenantScreenState extends State<EditTenantScreen> {
   late final _address =
       TextEditingController(text: '${widget.tenant['permanentAddress'] ?? ''}');
   late String? _gender = widget.tenant['gender'] as String?;
+  late bool _hasVehicle = widget.tenant['hasVehicle'] == true;
 
   @override
   void dispose() {
@@ -1819,6 +2278,11 @@ class _EditTenantScreenState extends State<EditTenantScreen> {
                     maxLines: 2,
                     textCapitalization: TextCapitalization.sentences,
                   ),
+                  const SizedBox(height: 12),
+                  _VehicleField(
+                    value: _hasVehicle,
+                    onChanged: (v) => setState(() => _hasVehicle = v),
+                  ),
                   const SizedBox(height: 24),
                   AsyncActionButton(
                     label: 'Save Changes',
@@ -1836,6 +2300,7 @@ class _EditTenantScreenState extends State<EditTenantScreen> {
                             'dateOfBirth': '${_dob!.year}-${_dob!.month.toString().padLeft(2, '0')}-${_dob!.day.toString().padLeft(2, '0')}',
                           if (_address.text.isNotEmpty)
                             'permanentAddress': _address.text.trim(),
+                          'hasVehicle': _hasVehicle,
                         });
                         if (mounted) Navigator.pop(context, true);
                       } catch (e) {

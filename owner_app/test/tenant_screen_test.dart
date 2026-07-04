@@ -58,11 +58,16 @@ void main() {
       await pumpDataScreen(tester, const TenantScreen(), state: ownerState(fake));
       await tester.pumpAndSettle();
 
+      // ACTIVE is the default filter: only the active tenant is listed.
       expect(find.text('Asha Rao'), findsOneWidget);
       expect(find.text('9876543210'), findsOneWidget);
+      expect(find.text('Vikram Singh'), findsNothing);
+
+      // "All Tenants" shows both, with their Active/Inactive badges.
+      await tester.tap(find.text('All Tenants'));
+      await tester.pumpAndSettle();
+      expect(find.text('Asha Rao'), findsOneWidget);
       expect(find.text('Vikram Singh'), findsOneWidget);
-      // Active/Inactive badges from _ActiveBadge.
-      expect(find.text('Active'), findsOneWidget);
       expect(find.text('Inactive'), findsOneWidget);
       // No empty/error chrome when data is present.
       expect(find.text('No tenants found'), findsNothing);
@@ -95,7 +100,13 @@ void main() {
       // Next fetch should succeed.
       fake.stubGet('/tenants', {
         'items': [
-          {'tenantId': 9, 'fullName': 'Recovered Tenant', 'mobileNumber': '9000000000'},
+          {
+            'tenantId': 9,
+            'fullName': 'Recovered Tenant',
+            'mobileNumber': '9000000000',
+            // Active so the default ACTIVE filter shows it.
+            'hasActiveAdmission': true,
+          },
         ],
       });
 

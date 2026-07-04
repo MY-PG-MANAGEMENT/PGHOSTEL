@@ -3,6 +3,7 @@ package com.pgmanager.tenant;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pgmanager.common.exception.GlobalExceptionHandler;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.selfcheckin.SelfCheckinTokenService;
 import com.pgmanager.tenant.dto.TenantDtos.TenantResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,7 +39,8 @@ class TenantControllerTest {
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
 
-        mvc = MockMvcBuilders.standaloneSetup(new TenantController(tenantService, currentUser))
+        SelfCheckinTokenService selfCheckinTokenService = mock(SelfCheckinTokenService.class);
+        mvc = MockMvcBuilders.standaloneSetup(new TenantController(tenantService, currentUser, selfCheckinTokenService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setValidator(validator)
                 .build();
@@ -46,8 +48,8 @@ class TenantControllerTest {
 
     private TenantResponse sampleResponse() {
         return new TenantResponse(100L, "Asha Rao", "9876543210", null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, false, null, null, null, null,
-                null, false, null, null);
+                null, null, null, null, null, null, false, null, null, null, null, false, null, null, null,
+                null, null, false, null, null);
     }
 
     @Test

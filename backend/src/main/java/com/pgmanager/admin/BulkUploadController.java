@@ -187,6 +187,7 @@ public class BulkUploadController {
                             nullIfEmpty(col(record, "emergency_contact_mobile")),
                             nullIfEmpty(col(record, "emergency_contact_relation")),
                             null, null, null,
+                            false,
                             null
                     );
                     var tenant = tenantService.create(organizationId, currentUser.userLoginId(), req);

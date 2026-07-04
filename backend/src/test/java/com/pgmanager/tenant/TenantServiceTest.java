@@ -50,7 +50,7 @@ class TenantServiceTest {
 
     private TenantCreateRequest request(Long propertyId) {
         return new TenantCreateRequest("Asha Rao", "9876543210", null, null, null, null,
-                null, null, null, null, null, null, null, null, propertyId);
+                null, null, null, null, null, null, null, null, false, propertyId);
     }
 
     private void stubSaves() {
