@@ -702,7 +702,10 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
         final enabled = item['enabled'] == true || item['enabled'] == 1;
         return Card(child: SwitchListTile(value: enabled, title: Text('${item['name']}', style: const TextStyle(fontWeight: FontWeight.w700)), subtitle: Text('${item['description'] ?? ''}'), onChanged: (value) async {
           await context.read<AppState>().apiClient.patch('/notifications/preferences', {'${item['category_id']}': value});
-          setState(() => future = context.read<AppState>().apiClient.get('/notifications/preferences'));
+          if (!context.mounted) return;
+          // Block body: an arrow closure here would return the Future and trip
+          // setState's debug assert before the rebuild is scheduled.
+          setState(() { future = context.read<AppState>().apiClient.get('/notifications/preferences'); });
         }));
       }).toList()));
     }),

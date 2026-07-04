@@ -98,7 +98,7 @@ class DtoValidationTest {
 
     private TenantCreateRequest tenant(String fullName, String mobile) {
         return new TenantCreateRequest(fullName, mobile, null, null, null, null, null, null,
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, null, false, null);
     }
 
     @Test
@@ -124,14 +124,14 @@ class DtoValidationTest {
     @Test
     void tenantRejectsBadEmail() {
         var req = new TenantCreateRequest("Asha Rao", "9876543210", "not-an-email", null, null, null,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, false, null);
         assertThat(validator.validate(req)).isNotEmpty();
     }
 
     @Test
     void tenantRejectsBadGender() {
         var req = new TenantCreateRequest("Asha Rao", "9876543210", null, "X", null, null,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, false, null);
         assertThat(validator.validate(req)).isNotEmpty();
     }
 

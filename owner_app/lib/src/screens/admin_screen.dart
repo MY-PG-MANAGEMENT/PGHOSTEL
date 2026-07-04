@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1037,24 +1039,69 @@ class _AdminDataUploadState extends State<_AdminDataUpload> {
   Map<String, dynamic>? _selectedOrg;
   String _uploadType = 'FACILITIES';
   XFile? _pickedFile;
+  bool _pasteMode = false;
+  final _pasteCtrl = TextEditingController();
   Map<String, dynamic>? _result;
   bool _uploading = false;
   Object? _uploadError;
 
-  static const _facilityCols = [
-    'property_name', 'floor_name', 'floor_number', 'room_name',
-    'room_number', 'sharing_type', 'monthly_rent', 'bed_name',
-  ];
-  static const _tenantCols = [
-    'full_name', 'mobile_number', 'email', 'gender', 'date_of_birth',
-    'aadhaar_number', 'occupation', 'permanent_address',
-    'emergency_contact_name', 'emergency_contact_mobile', 'emergency_contact_relation',
-    'property_name', 'floor_name', 'room_name', 'bed_name',
-    'move_in_date', 'monthly_rent', 'security_deposit',
-  ];
+  // Column → human description. Keys match the backend BulkUploadController parser.
+  static const _facilityColDesc = {
+    'property_name': 'Existing property name — required',
+    'floor_name': 'Floor label, e.g. Ground Floor',
+    'floor_number': 'Numeric floor, e.g. 0, 1, 2',
+    'room_name': 'Room label, e.g. Room 101',
+    'room_number': 'Short room code, e.g. 101',
+    'sharing_type': 'SINGLE, DOUBLE, TRIPLE, …',
+    'monthly_rent': 'Rent per bed for the room',
+    'bed_name': 'Bed label, e.g. Bed A',
+  };
+  static const _tenantColDesc = {
+    'full_name': 'Tenant full name — required',
+    'mobile_number': '10-digit mobile — required, unique',
+    'email': 'Email address — optional',
+    'gender': 'MALE, FEMALE or OTHER',
+    'date_of_birth': 'Format YYYY-MM-DD',
+    'aadhaar_number': '12-digit Aadhaar — optional',
+    'occupation': 'Job / occupation',
+    'permanent_address': 'Home address',
+    'emergency_contact_name': 'Emergency contact name',
+    'emergency_contact_mobile': 'Emergency contact mobile',
+    'emergency_contact_relation': 'e.g. Father, Mother',
+    'property_name': 'Property to assign a bed in — optional',
+    'floor_name': 'Floor of the bed — optional',
+    'room_name': 'Room of the bed — optional',
+    'bed_name': 'Bed to assign — optional',
+    'move_in_date': 'Format YYYY-MM-DD',
+    'monthly_rent': 'Override rent — optional',
+    'security_deposit': 'Security deposit — optional',
+  };
+
+  // Ready-made example CSV — mirrors the backend template endpoints exactly.
+  static const _facilitiesExample =
+      'property_name,floor_name,floor_number,room_name,room_number,sharing_type,monthly_rent,bed_name\n'
+      'My PG Property,Ground Floor,0,Room G01,G01,DOUBLE,5000,Bed A\n'
+      'My PG Property,Ground Floor,0,Room G01,G01,DOUBLE,5000,Bed B\n'
+      'My PG Property,First Floor,1,Room 101,101,SINGLE,7000,Bed 1\n';
+  static const _tenantsExample =
+      'full_name,mobile_number,email,gender,date_of_birth,aadhaar_number,occupation,'
+      'permanent_address,emergency_contact_name,emergency_contact_mobile,emergency_contact_relation,'
+      'property_name,floor_name,room_name,bed_name,move_in_date,monthly_rent,security_deposit\n'
+      'Ravi Kumar,9876543210,ravi@example.com,MALE,1998-05-20,123456789012,Software Engineer,'
+      'Hyderabad,Suresh Kumar,9876543211,Father,My PG Property,Ground Floor,Room G01,Bed A,2024-01-15,5000,10000\n'
+      'Priya Sharma,9887654321,,,,,,Chennai,,,,,,,,2024-02-01,,\n';
+
+  Map<String, String> get _colDesc =>
+      _uploadType == 'FACILITIES' ? _facilityColDesc : _tenantColDesc;
+  String get _exampleCsv =>
+      _uploadType == 'FACILITIES' ? _facilitiesExample : _tenantsExample;
+  List<String> get _cols => _colDesc.keys.toList();
 
   @override
   void initState() { super.initState(); _loadOrgs(); }
+
+  @override
+  void dispose() { _pasteCtrl.dispose(); super.dispose(); }
 
   Future<void> _loadOrgs() async {
     try {
@@ -1062,8 +1109,6 @@ class _AdminDataUploadState extends State<_AdminDataUpload> {
       setState(() { _orgs = (data['items'] as List? ?? []).cast<Map<String, dynamic>>(); });
     } catch (_) {}
   }
-
-  List<String> get _cols => _uploadType == 'FACILITIES' ? _facilityCols : _tenantCols;
 
   @override
   Widget build(BuildContext context) {
@@ -1174,89 +1219,220 @@ class _AdminDataUploadState extends State<_AdminDataUpload> {
     ])),
   );
 
-  Widget _buildStep3() => Card(
-    child: Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('Upload CSV File', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: PgColors.ink)),
-      const SizedBox(height: 4),
-      Text('Uploading ${_uploadType.toLowerCase()} for: ${_selectedOrg?['facility_name'] ?? '—'}',
-          style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280))),
-      const SizedBox(height: 20),
-      InkWell(
-        onTap: _pickFile,
-        borderRadius: BorderRadius.circular(10),
-        child: Container(
+  bool get _canUpload =>
+      _pasteMode ? _pasteCtrl.text.trim().isNotEmpty : _pickedFile != null;
+
+  Widget _buildStep3() => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    // ── Step marker: download the template ──
+    Card(child: Padding(padding: const EdgeInsets.all(20),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          _StepBadge(1),
+          const SizedBox(width: 10),
+          const Text('Download the Template',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: PgColors.ink)),
+        ]),
+        const SizedBox(height: 10),
+        const Text(
+          'Get our ready-made CSV template. Fill it with your data, then come back here to upload.',
+          style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 28),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF9F9FD),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: _pickedFile != null ? PgColors.primary : PgColors.border,
-              width: _pickedFile != null ? 1.5 : 1,
-              style: BorderStyle.solid,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.download_outlined, size: 18),
+            label: const Text('Copy Template (.csv)'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: PgColors.primary,
+              side: const BorderSide(color: PgColors.primary),
+              backgroundColor: PgColors.lavender,
+              padding: const EdgeInsets.symmetric(vertical: 14),
             ),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: _exampleCsv));
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Template copied — paste it into a spreadsheet, fill it, and save as .csv'),
+                duration: Duration(seconds: 3),
+              ));
+            },
           ),
-          child: Column(children: [
-            Icon(
-              _pickedFile != null ? Icons.check_circle : Icons.upload_file_outlined,
-              size: 36,
-              color: _pickedFile != null ? PgColors.success : const Color(0xFF9CA3AF),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _pickedFile?.name ?? 'Tap to browse CSV file',
-              style: TextStyle(
-                fontWeight: _pickedFile != null ? FontWeight.w600 : FontWeight.normal,
-                color: _pickedFile != null ? PgColors.ink : const Color(0xFF9CA3AF),
+        ),
+      ]),
+    )),
+    const SizedBox(height: 12),
+    // ── Column reference (expandable) ──
+    Card(
+      clipBehavior: Clip.antiAlias,
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          leading: const Icon(Icons.list_alt_outlined, color: PgColors.primary),
+          title: const Text('View all column names & descriptions',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: PgColors.primary)),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          children: _colDesc.entries.map((e) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: PgColors.lavender, borderRadius: BorderRadius.circular(4)),
+                child: Text(e.key,
+                    style: const TextStyle(fontSize: 11, color: PgColors.primary, fontFamily: 'monospace')),
               ),
-            ),
-            if (_pickedFile == null)
-              const Text('.csv files only', style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
-          ]),
+              const SizedBox(width: 10),
+              Expanded(child: Text(e.value,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)))),
+            ]),
+          )).toList(),
         ),
       ),
-      if (_uploadError != null) ...[
-        const SizedBox(height: 10),
+    ),
+    const SizedBox(height: 12),
+    // ── Step marker: upload ──
+    Card(child: Padding(padding: const EdgeInsets.all(20),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          _StepBadge(2),
+          const SizedBox(width: 10),
+          const Text('Upload Your CSV',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: PgColors.ink)),
+        ]),
+        const SizedBox(height: 6),
+        Text('Importing ${_uploadType.toLowerCase()} for: ${_selectedOrg?['facility_name'] ?? '—'}',
+            style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280))),
+        const SizedBox(height: 14),
+        // Pick File / Paste CSV toggle
         Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(color: PgColors.danger.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(8)),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF3F4F6),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          padding: const EdgeInsets.all(4),
           child: Row(children: [
-            const Icon(Icons.error_outline, size: 16, color: PgColors.danger),
-            const SizedBox(width: 6),
-            Expanded(child: Text('$_uploadError', style: const TextStyle(color: PgColors.danger, fontSize: 12))),
+            _ModeTab(label: 'Pick File', icon: Icons.folder_open,
+                selected: !_pasteMode, onTap: () => setState(() => _pasteMode = false)),
+            _ModeTab(label: 'Paste CSV', icon: Icons.content_paste,
+                selected: _pasteMode, onTap: () => setState(() => _pasteMode = true)),
           ]),
         ),
-      ],
-      const SizedBox(height: 20),
-      if (_uploading)
-        const LinearProgressIndicator()
-      else
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          OutlinedButton(onPressed: () => setState(() => _step = 1), child: const Text('Back')),
-          FilledButton.icon(
-            icon: const Icon(Icons.upload, size: 18),
-            label: const Text('Upload'),
-            onPressed: _pickedFile == null ? null : _upload,
+        const SizedBox(height: 14),
+        if (!_pasteMode) _buildPickFile() else _buildPasteCsv(),
+        if (_uploadError != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: PgColors.danger.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(8)),
+            child: Row(children: [
+              const Icon(Icons.error_outline, size: 16, color: PgColors.danger),
+              const SizedBox(width: 6),
+              Expanded(child: Text('$_uploadError', style: const TextStyle(color: PgColors.danger, fontSize: 12))),
+            ]),
           ),
-        ]),
-    ])),
+        ],
+        const SizedBox(height: 18),
+        if (_uploading)
+          const LinearProgressIndicator()
+        else
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            OutlinedButton(onPressed: () => setState(() => _step = 1), child: const Text('Back')),
+            FilledButton.icon(
+              icon: const Icon(Icons.upload, size: 18),
+              label: const Text('Import'),
+              onPressed: _canUpload ? _upload : null,
+            ),
+          ]),
+      ]),
+    )),
+  ]);
+
+  Widget _buildPickFile() => InkWell(
+    onTap: _pickFile,
+    borderRadius: BorderRadius.circular(10),
+    child: DottedBorderBox(
+      active: _pickedFile != null,
+      child: Column(children: [
+        Container(
+          width: 56, height: 56,
+          decoration: const BoxDecoration(color: Color(0xFFF3F4F6), shape: BoxShape.circle),
+          child: Icon(
+            _pickedFile != null ? Icons.check_circle : Icons.cloud_upload_outlined,
+            size: 30,
+            color: _pickedFile != null ? PgColors.success : const Color(0xFF9CA3AF),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          _pickedFile?.name ?? 'Tap to select your CSV file',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: _pickedFile != null ? PgColors.ink : PgColors.ink,
+          ),
+        ),
+        if (_pickedFile == null)
+          const Padding(
+            padding: EdgeInsets.only(top: 2),
+            child: Text('Supports .csv and .txt files',
+                style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
+          ),
+      ]),
+    ),
   );
 
+  Widget _buildPasteCsv() => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Row(children: [
+      const Text('Paste your CSV data below',
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+      const Spacer(),
+      TextButton(
+        onPressed: () => setState(() {
+          _pasteCtrl.text = _exampleCsv;
+          _uploadError = null;
+        }),
+        style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8), minimumSize: Size.zero),
+        child: const Text('Use example', style: TextStyle(fontSize: 13)),
+      ),
+    ]),
+    const SizedBox(height: 6),
+    TextField(
+      controller: _pasteCtrl,
+      onChanged: (_) => setState(() => _uploadError = null),
+      maxLines: 8,
+      style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+      decoration: InputDecoration(
+        hintText: '${_cols.take(3).join(',')},…\n${_exampleCsv.split('\n').length > 1 ? _exampleCsv.split('\n')[1].split(',').take(3).join(',') : ''},…',
+        hintStyle: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: Color(0xFF9CA3AF)),
+        alignLabelWithHint: true,
+        border: const OutlineInputBorder(),
+        contentPadding: const EdgeInsets.all(12),
+      ),
+    ),
+  ]);
+
   Future<void> _pickFile() async {
-    const typeGroup = XTypeGroup(label: 'CSV', extensions: ['csv']);
+    const typeGroup = XTypeGroup(label: 'CSV', extensions: ['csv', 'txt']);
     final file = await openFile(acceptedTypeGroups: [typeGroup]);
     if (file != null) setState(() { _pickedFile = file; _uploadError = null; });
   }
 
   Future<void> _upload() async {
-    if (_pickedFile == null || _selectedOrg == null) return;
+    if (_selectedOrg == null || !_canUpload) return;
     setState(() { _uploading = true; _uploadError = null; });
     try {
-      final bytes = await _pickedFile!.readAsBytes();
+      final Uint8List bytes;
+      final String filename;
+      if (_pasteMode) {
+        bytes = Uint8List.fromList(utf8.encode(_pasteCtrl.text.trim()));
+        filename = '${_uploadType.toLowerCase()}.csv';
+      } else {
+        bytes = await _pickedFile!.readAsBytes();
+        filename = _pickedFile!.name;
+      }
       final orgId = _selectedOrg!['organization_id'];
       final type = _uploadType.toLowerCase();
       final data = await context.read<AppState>().apiClient.postFile(
-        '/super-admin/upload/$type/$orgId', bytes, _pickedFile!.name);
+        '/super-admin/upload/$type/$orgId', bytes, filename);
       setState(() { _result = data; _uploading = false; });
     } catch (e) {
       setState(() { _uploadError = e; _uploading = false; });
@@ -1265,8 +1441,93 @@ class _AdminDataUploadState extends State<_AdminDataUpload> {
 
   void _reset() => setState(() {
     _step = 0; _selectedOrg = null; _pickedFile = null;
+    _pasteMode = false; _pasteCtrl.clear();
     _result = null; _uploadError = null; _uploading = false;
   });
+}
+
+class _StepBadge extends StatelessWidget {
+  const _StepBadge(this.n);
+  final int n;
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 26, height: 26,
+    decoration: const BoxDecoration(color: PgColors.primary, shape: BoxShape.circle),
+    alignment: Alignment.center,
+    child: Text('$n', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+  );
+}
+
+class _ModeTab extends StatelessWidget {
+  const _ModeTab({required this.label, required this.icon, required this.selected, required this.onTap});
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? PgColors.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, size: 16, color: selected ? Colors.white : const Color(0xFF6B7280)),
+          const SizedBox(width: 6),
+          Text(label, style: TextStyle(
+            fontSize: 13, fontWeight: FontWeight.w600,
+            color: selected ? Colors.white : const Color(0xFF6B7280),
+          )),
+        ]),
+      ),
+    ),
+  );
+}
+
+/// Dashed-border drop zone used by the CSV file picker.
+class DottedBorderBox extends StatelessWidget {
+  const DottedBorderBox({required this.child, this.active = false, super.key});
+  final Widget child;
+  final bool active;
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+    painter: _DashedRectPainter(color: active ? PgColors.primary : const Color(0xFFCBD2DE)),
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 16),
+      child: child,
+    ),
+  );
+}
+
+class _DashedRectPainter extends CustomPainter {
+  _DashedRectPainter({required this.color});
+  final Color color;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    final rrect = RRect.fromRectAndRadius(
+        Offset.zero & size, const Radius.circular(12));
+    final path = Path()..addRRect(rrect);
+    const dash = 6.0, gap = 4.0;
+    for (final metric in path.computeMetrics()) {
+      double dist = 0;
+      while (dist < metric.length) {
+        canvas.drawPath(metric.extractPath(dist, dist + dash), paint);
+        dist += dash + gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRectPainter old) => old.color != color;
 }
 
 class _StepIndicator extends StatelessWidget {

@@ -21,6 +21,9 @@ spring:
     validate-on-migrate: false
 
 app:
+  # Base URL the tenant self check-in QR points to. Must be reachable from the
+  # tenant's phone (a LAN IP for local testing, or your public domain in prod).
+  public-base-url: ${APP_PUBLIC_BASE_URL:http://192.168.1.25:8080}
   security:
     jwt-secret: change-this-development-secret-change-before-production-123456789
     access-token-minutes: 30

@@ -6,6 +6,9 @@ import '../app_state.dart';
 import '../theme/app_theme.dart';
 import 'tenant_screen.dart';
 import 'billing_screen.dart';
+import 'expenses_screen.dart';
+import 'staff_screen.dart';
+import 'transactions_screen.dart';
 import 'room_screen.dart' show AssignBedSheet;
 import '../widgets/error_retry_view.dart';
 import '../widgets/animations.dart';
@@ -186,7 +189,7 @@ class _PropertyWorkspaceScreenState extends State<PropertyWorkspaceScreen> {
           _PropertyDashboardTab(
             propertyId: _propertyId,
             property: widget.property,
-            onNavigateToTenants: () => setState(() => _tab = 1),
+            onNavigate: (i) => setState(() => _tab = i),
           ),
           _PropertyTenantsTab(propertyId: _propertyId),
           _PropertyPaymentsTab(propertyId: _propertyId),
@@ -231,11 +234,11 @@ class _PropertyWorkspaceScreenState extends State<PropertyWorkspaceScreen> {
 class _PropertyDashboardTab extends StatefulWidget {
   final int propertyId;
   final Map<String, dynamic> property;
-  final VoidCallback onNavigateToTenants;
+  final void Function(int tabIndex) onNavigate;
   const _PropertyDashboardTab({
     required this.propertyId,
     required this.property,
-    required this.onNavigateToTenants,
+    required this.onNavigate,
   });
 
   @override
@@ -301,11 +304,38 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Overview',
-                        style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF1A1A2E))),
+                    Row(
+                      children: [
+                        const Text('Overview',
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF1A1A2E))),
+                        const Spacer(),
+                        InkWell(
+                          onTap: () => widget.onNavigate(3),
+                          borderRadius: BorderRadius.circular(20),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: PgColors.lavender,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                              Text('View All',
+                                  style: TextStyle(
+                                      color: PgColors.primary,
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700)),
+                              SizedBox(width: 3),
+                              Icon(Icons.chevron_right,
+                                  size: 16, color: PgColors.primary),
+                            ]),
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 12),
                     Row(
                       children: [
@@ -318,7 +348,7 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
                             value: '$totalTenants',
                             sub: 'Active',
                             subColor: const Color(0xFF2563EB),
-                            onTap: widget.onNavigateToTenants,
+                            onTap: () => widget.onNavigate(1),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -344,40 +374,185 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
               );
             },
           ),
-          // ── Floors & Rooms shortcut ───────────────────────────────
+          // ── Quick Actions ─────────────────────────────────────────
           FadeSlideIn(
             delay: const Duration(milliseconds: 80),
             child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-            child: _ShortcutCard(
-              icon: Icons.domain_outlined,
-              title: 'Floors & Rooms',
-              subtitle: 'Manage floors, rooms and bed assignments',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => FloorsRoomsScreen(propertyId: widget.propertyId),
-                ),
+              padding: const EdgeInsets.fromLTRB(16, 22, 16, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Quick Actions',
+                      style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1A1A2E))),
+                  const SizedBox(height: 12),
+                  GridView(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    // Fixed cell height keeps cards compact on every width —
+                    // an aspect ratio would stretch them (and the icon–title
+                    // gap) as the screen gets wider.
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      mainAxisSpacing: 10,
+                      crossAxisSpacing: 10,
+                      mainAxisExtent: 112,
+                    ),
+                    children: [
+                      _QuickActionCard(
+                        icon: Icons.domain_outlined,
+                        iconBg: PgColors.lavender,
+                        iconColor: PgColors.primary,
+                        title: 'Floors & Rooms',
+                        subtitle: 'Rooms & beds',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                FloorsRoomsScreen(propertyId: widget.propertyId),
+                          ),
+                        ),
+                      ),
+                      _QuickActionCard(
+                        icon: Icons.badge_outlined,
+                        iconBg: const Color(0xFFEBF3FF),
+                        iconColor: const Color(0xFF2563EB),
+                        title: 'Staff',
+                        subtitle: 'Manage staff',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => StaffScreen(
+                              propertyId: widget.propertyId,
+                              propertyName:
+                                  '${widget.property['facilityName'] ?? 'Property'}',
+                            ),
+                          ),
+                        ),
+                      ),
+                      _QuickActionCard(
+                        icon: Icons.account_balance_wallet_outlined,
+                        iconBg: const Color(0xFFFCE7F3),
+                        iconColor: const Color(0xFFDB2777),
+                        title: 'Expenses',
+                        subtitle: 'Track expenses',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ExpensesScreen(
+                              propertyId: widget.propertyId,
+                              propertyName:
+                                  '${widget.property['facilityName'] ?? 'Property'}',
+                            ),
+                          ),
+                        ),
+                      ),
+                      _QuickActionCard(
+                        icon: Icons.receipt_long_outlined,
+                        iconBg: const Color(0xFFFEF3C7),
+                        iconColor: const Color(0xFFD97706),
+                        title: 'Transactions',
+                        subtitle: 'Money in & out',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => TransactionsScreen(
+                              propertyId: widget.propertyId,
+                              propertyName:
+                                  '${widget.property['facilityName'] ?? 'Property'}',
+                            ),
+                          ),
+                        ),
+                      ),
+                      _QuickActionCard(
+                        icon: Icons.currency_rupee,
+                        iconBg: const Color(0xFFDCFCE7),
+                        iconColor: const Color(0xFF16A34A),
+                        title: 'Price Master',
+                        subtitle: 'Rent & deposit',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                _SharingPricesScreen(propertyId: widget.propertyId),
+                          ),
+                        ),
+                      ),
+                      _QuickActionCard(
+                        icon: Icons.bar_chart_outlined,
+                        iconBg: const Color(0xFFEDE9FE),
+                        iconColor: const Color(0xFF6D28D9),
+                        title: 'Reports',
+                        subtitle: 'Analytics',
+                        onTap: () => widget.onNavigate(3),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-            ),
           ),
-          // ── Shortcuts ──────────────────────────────────────────────
+          // ── Smart Insights banner ─────────────────────────────────
           FadeSlideIn(
             delay: const Duration(milliseconds: 120),
             child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
-            child: _ShortcutCard(
-              icon: Icons.currency_rupee_outlined,
-              title: 'Price Master',
-              subtitle: 'Set rent, deposit & AC charges per sharing type',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => _SharingPricesScreen(propertyId: widget.propertyId),
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1EEFE),
+                  borderRadius: BorderRadius.circular(16),
                 ),
+                child: Row(children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Smart Insights',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w800, fontSize: 15)),
+                        const SizedBox(height: 4),
+                        Text(
+                          'AI-powered insights on occupancy, collections and upcoming checkouts.',
+                          style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 12,
+                              height: 1.4),
+                        ),
+                        const SizedBox(height: 12),
+                        InkWell(
+                          onTap: () => widget.onNavigate(3),
+                          borderRadius: BorderRadius.circular(20),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                              Text('Explore',
+                                  style: TextStyle(
+                                      color: PgColors.primary,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700)),
+                              SizedBox(width: 4),
+                              Icon(Icons.chevron_right,
+                                  size: 17, color: PgColors.primary),
+                            ]),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(Icons.insights_rounded,
+                      size: 52, color: PgColors.primary.withValues(alpha: 0.35)),
+                ]),
               ),
-            ),
             ),
           ),
         ],
@@ -386,13 +561,23 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
   }
 }
 
-class _ShortcutCard extends StatelessWidget {
+void _comingSoon(BuildContext context, String feature) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text('$feature is coming soon'), duration: const Duration(seconds: 2)),
+  );
+}
+
+class _QuickActionCard extends StatelessWidget {
   final IconData icon;
+  final Color iconBg;
+  final Color iconColor;
   final String title;
   final String subtitle;
   final VoidCallback onTap;
-  const _ShortcutCard({
+  const _QuickActionCard({
     required this.icon,
+    required this.iconBg,
+    required this.iconColor,
     required this.title,
     required this.subtitle,
     required this.onTap,
@@ -401,45 +586,52 @@ class _ShortcutCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(16),
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: PgColors.border),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFECECF2)),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: .04),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                  color: PgColors.lavender, borderRadius: BorderRadius.circular(12)),
-              child: Icon(icon, color: PgColors.primary, size: 22),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                      color: iconBg, borderRadius: BorderRadius.circular(11)),
+                  child: Icon(icon, color: iconColor, size: 20),
+                ),
+                const Spacer(),
+                Icon(Icons.chevron_right, size: 18, color: Colors.grey.shade400),
+              ],
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-                  const SizedBox(height: 2),
-                  Text(subtitle,
-                      style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: Colors.grey),
+            const SizedBox(height: 10),
+            Text(title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: Color(0xFF111827))),
+            const SizedBox(height: 2),
+            Text(subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
           ],
         ),
       ),
@@ -1058,6 +1250,10 @@ class _VacantBedsFilterPanelState extends State<_VacantBedsFilterPanel> {
     final roomLbls = _roomLabels;
     final sharingTypes = _sharingTypes;
     final pad = MediaQuery.viewInsetsOf(context).bottom;
+    final hasFilters = _floorId != null ||
+        _roomId != null ||
+        _sharingType != null ||
+        _checkout != null;
 
     return Padding(
       padding: EdgeInsets.only(bottom: pad),
@@ -1073,155 +1269,206 @@ class _VacantBedsFilterPanelState extends State<_VacantBedsFilterPanel> {
                 color: Colors.grey.shade300,
                 borderRadius: BorderRadius.circular(2)),
           ),
-          // Header
+          // ── Header ──────────────────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 8, 0),
+            padding: const EdgeInsets.fromLTRB(20, 14, 12, 0),
             child: Row(children: [
-              const Text('Filters',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+              const Text('Vacant Beds',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 22)),
               const Spacer(),
-              TextButton(
-                onPressed: () => setState(() {
-                  _floorId = null;
-                  _roomId = null;
-                  _sharingType = null;
-                  _checkout = null;
-                }),
+              TextButton.icon(
+                onPressed: hasFilters
+                    ? () => setState(() {
+                          _floorId = null;
+                          _roomId = null;
+                          _sharingType = null;
+                          _checkout = null;
+                        })
+                    : null,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Reset All'),
                 style: TextButton.styleFrom(
-                    foregroundColor: Colors.red.shade400,
-                    textStyle: const TextStyle(fontSize: 13)),
-                child: const Text('Reset'),
+                    foregroundColor: PgColors.primary,
+                    textStyle:
+                        const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
               ),
-              IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context)),
+              const SizedBox(width: 2),
+              InkWell(
+                onTap: () => Navigator.pop(context),
+                borderRadius: BorderRadius.circular(20),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: const BoxDecoration(
+                      color: Color(0xFFF3F4F6), shape: BoxShape.circle),
+                  child: const Icon(Icons.close, size: 20, color: Color(0xFF4B5563)),
+                ),
+              ),
             ]),
           ),
-          Container(height: 1, color: const Color(0xFFF3F4F6)),
-          // Scrollable content
+          // ── Scrollable content ──────────────────────────────────────
           Flexible(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── Floor ──────────────────────────────────────────
-                  _FilterSectionLabel(label: 'Floor'),
-                  const SizedBox(height: 10),
-                  if (floors.isEmpty)
-                    Text('No floors available',
-                        style: TextStyle(color: Colors.grey.shade400, fontSize: 13))
-                  else
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: floors
-                          .map((id) => _PanelFilterChip(
-                                label: floorLbls[id]!,
-                                selected: _floorId == id,
-                                onTap: () => setState(() {
-                                  _floorId = _floorId == id ? null : id;
-                                  _roomId = null;
-                                }),
-                              ))
-                          .toList(),
-                    ),
-                  // ── Room (appears after floor is chosen) ───────────
+                  // Hero banner
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                        color: const Color(0xFFF1EEFE),
+                        borderRadius: BorderRadius.circular(14)),
+                    child: Row(children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12)),
+                        child: const Icon(Icons.filter_alt_outlined,
+                            color: PgColors.primary),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Find the perfect bed with smart filters',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14,
+                                      height: 1.2)),
+                              SizedBox(height: 3),
+                              Text('Select your preferences and apply',
+                                  style: TextStyle(
+                                      color: Color(0xFF6B7280), fontSize: 12)),
+                            ]),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(Icons.saved_search,
+                          size: 34,
+                          color: PgColors.primary.withValues(alpha: 0.35)),
+                    ]),
+                  ),
+                  const SizedBox(height: 14),
+                  // ── Floor ──
+                  _FilterGroupCard(
+                    icon: Icons.apartment_outlined,
+                    title: 'Floor',
+                    child: floors.isEmpty
+                        ? Text('No floors available',
+                            style: TextStyle(
+                                color: Colors.grey.shade400, fontSize: 13))
+                        : Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: floors
+                                .map((id) => _PanelFilterChip(
+                                      label: floorLbls[id]!,
+                                      selected: _floorId == id,
+                                      onTap: () => setState(() {
+                                        _floorId = _floorId == id ? null : id;
+                                        _roomId = null;
+                                      }),
+                                    ))
+                                .toList()),
+                  ),
+                  // ── Room (appears after floor is chosen) ──
                   if (_floorId != null && rooms.isNotEmpty) ...[
-                    const SizedBox(height: 20),
-                    _FilterSectionLabel(label: 'Room'),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: rooms
-                          .map((id) => _PanelFilterChip(
-                                label: roomLbls[id]!,
-                                selected: _roomId == id,
-                                onTap: () => setState(() {
-                                  _roomId = _roomId == id ? null : id;
-                                }),
-                              ))
-                          .toList(),
+                    const SizedBox(height: 12),
+                    _FilterGroupCard(
+                      icon: Icons.meeting_room_outlined,
+                      title: 'Room',
+                      child: Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: rooms
+                              .map((id) => _PanelFilterChip(
+                                    label: roomLbls[id]!,
+                                    selected: _roomId == id,
+                                    onTap: () => setState(() {
+                                      _roomId = _roomId == id ? null : id;
+                                    }),
+                                  ))
+                              .toList()),
                     ),
                   ],
-                  // ── Sharing Type ───────────────────────────────────
+                  // ── Sharing Type ──
                   if (sharingTypes.isNotEmpty) ...[
-                    const SizedBox(height: 20),
-                    _FilterSectionLabel(label: 'Sharing Type'),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: sharingTypes
-                          .map((t) => _PanelFilterChip(
-                                label: '$t-Sharing',
-                                selected: _sharingType == t,
-                                accent: const Color(0xFF7C3AED),
-                                onTap: () => setState(() {
-                                  _sharingType = _sharingType == t ? null : t;
-                                }),
-                              ))
-                          .toList(),
+                    const SizedBox(height: 12),
+                    _FilterGroupCard(
+                      icon: Icons.groups_outlined,
+                      title: 'Sharing Type',
+                      child: Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: sharingTypes
+                              .map((t) => _PanelFilterChip(
+                                    label: '$t-Sharing',
+                                    selected: _sharingType == t,
+                                    onTap: () => setState(() {
+                                      _sharingType = _sharingType == t ? null : t;
+                                    }),
+                                  ))
+                              .toList()),
                     ),
                   ],
-                  // ── Expected Checkout ──────────────────────────────
-                  const SizedBox(height: 20),
-                  Row(children: [
-                    _FilterSectionLabel(label: 'Expected Checkout'),
-                    const SizedBox(width: 8),
-                    Container(
+                  // ── Expected Checkout ──
+                  const SizedBox(height: 12),
+                  _FilterGroupCard(
+                    icon: Icons.event_outlined,
+                    title: 'Expected Checkout',
+                    trailing: Container(
                       padding:
-                          const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF0FDF4),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFFBBF7D0)),
+                        color: const Color(0xFFDCFCE7),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Text('Upcoming',
                           style: TextStyle(
-                              fontSize: 10,
+                              fontSize: 11,
                               color: Color(0xFF16A34A),
-                              fontWeight: FontWeight.w600)),
+                              fontWeight: FontWeight.w700)),
                     ),
-                  ]),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _checkoutOptions
-                        .map((opt) => _PanelFilterChip(
-                              label: opt[1],
-                              selected: _checkout == opt[0],
-                              accent: const Color(0xFF0D9488),
-                              onTap: () => setState(() {
-                                _checkout = _checkout == opt[0] ? null : opt[0];
-                              }),
-                            ))
-                        .toList(),
+                    child: Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: _checkoutOptions
+                            .map((opt) => _PanelFilterChip(
+                                  label: opt[1],
+                                  selected: _checkout == opt[0],
+                                  onTap: () => setState(() {
+                                    _checkout = _checkout == opt[0] ? null : opt[0];
+                                  }),
+                                ))
+                            .toList()),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 20),
                 ],
               ),
             ),
           ),
-          // Apply button
+          // ── Apply button ────────────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-            child: FilledButton(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+            child: FilledButton.icon(
               onPressed: () {
                 widget.onApply(_floorId, _roomId, _sharingType, _checkout);
                 Navigator.pop(context);
               },
+              icon: const Icon(Icons.filter_alt_outlined, size: 20),
+              label: const Text('Apply Filters'),
               style: FilledButton.styleFrom(
                 backgroundColor: PgColors.primary,
-                minimumSize: const Size(double.infinity, 48),
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 54),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                textStyle: const TextStyle(
-                    fontSize: 15, fontWeight: FontWeight.w700),
+                    borderRadius: BorderRadius.circular(16)),
+                textStyle:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
-              child: const Text('Apply Filters'),
             ),
           ),
         ],
@@ -1230,17 +1477,52 @@ class _VacantBedsFilterPanelState extends State<_VacantBedsFilterPanel> {
   }
 }
 
-class _FilterSectionLabel extends StatelessWidget {
-  final String label;
-  const _FilterSectionLabel({required this.label});
+class _FilterGroupCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final Widget child;
+  final Widget? trailing;
+  const _FilterGroupCard({
+    required this.icon,
+    required this.title,
+    required this.child,
+    this.trailing,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Text(label,
-        style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 14,
-            color: Color(0xFF111827)));
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F8FC),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+                color: const Color(0xFFEDE9FE),
+                borderRadius: BorderRadius.circular(10)),
+            child: Icon(icon, size: 18, color: PgColors.primary),
+          ),
+          const SizedBox(width: 10),
+          Text(title,
+              style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                  color: Color(0xFF111827))),
+          if (trailing != null) ...[
+            const SizedBox(width: 8),
+            trailing!,
+          ],
+        ]),
+        const SizedBox(height: 14),
+        child,
+      ]),
+    );
   }
 }
 
@@ -1248,42 +1530,80 @@ class _PanelFilterChip extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  final Color? accent;
   const _PanelFilterChip({
     required this.label,
     required this.selected,
     required this.onTap,
-    this.accent,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = accent ?? PgColors.primary;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        duration: const Duration(milliseconds: 150),
+        padding: EdgeInsets.only(
+            left: 18, right: selected ? 10 : 18, top: 11, bottom: 11),
         decoration: BoxDecoration(
-          color: selected ? color : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
+          color: selected ? PgColors.primary : Colors.white,
+          borderRadius: BorderRadius.circular(24),
           border: Border.all(
-              color: selected ? color : Colors.grey.shade300, width: 1.5),
+              color: selected ? PgColors.primary : const Color(0xFFE5E7EB),
+              width: 1.4),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: selected ? Colors.white : Colors.grey.shade700,
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: selected ? Colors.white : const Color(0xFF374151),
+            ),
           ),
-        ),
+          if (selected) ...[
+            const SizedBox(width: 8),
+            Container(
+              width: 18,
+              height: 18,
+              decoration:
+                  const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+              child: const Icon(Icons.check, size: 12, color: PgColors.primary),
+            ),
+          ],
+        ]),
       ),
     );
   }
 }
 
 // ─── Vacant Bed Card ──────────────────────────────────────────────────────────
+
+/// Highlighted room / floor tag shown under the bed name on a vacant-bed card.
+class _LocationTag extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _LocationTag({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEDE9FE),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 15, color: PgColors.primary),
+        const SizedBox(width: 5),
+        Text(label,
+            style: const TextStyle(
+                color: PgColors.primary,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w700)),
+      ]),
+    );
+  }
+}
 
 class _VacantBedCard extends StatelessWidget {
   final Map<String, dynamic> bed;
@@ -1313,60 +1633,73 @@ class _VacantBedCard extends StatelessWidget {
     final borderColor = isUpcoming ? const Color(0xFFFED7AA) : const Color(0xFFE5E7EB);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: borderColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: .04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: Colors.black.withValues(alpha: .05),
+            blurRadius: 16,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ── Top row: icon · name · status badge ──────────────────
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Container(
-                width: 46,
-                height: 46,
+                width: 50,
+                height: 50,
                 decoration: BoxDecoration(
                   color: iconBg,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(15),
                 ),
                 child: Icon(
                   isUpcoming ? Icons.bed : Icons.bed_outlined,
                   color: iconColor,
-                  size: 24,
+                  size: 26,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(bedName,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 15,
-                            color: Color(0xFF111827))),
-                    const SizedBox(height: 3),
+                    // ── Room + Floor — primary, big ──
                     Row(children: [
-                      Icon(Icons.location_on_outlined,
-                          size: 12, color: Colors.grey.shade500),
-                      const SizedBox(width: 3),
-                      Expanded(
-                        child: Text('$roomName  ·  $floorName',
-                            style: TextStyle(
-                                color: Colors.grey.shade500, fontSize: 12),
-                            overflow: TextOverflow.ellipsis),
+                      Flexible(
+                        child: Text(
+                          roomName.isNotEmpty ? roomName : bedName,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 18,
+                              color: Color(0xFF111827)),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
+                      if (floorName.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        _LocationTag(
+                            icon: Icons.apartment_outlined, label: floorName),
+                      ],
+                    ]),
+                    const SizedBox(height: 6),
+                    // ── Bed name — secondary, light ──
+                    Row(children: [
+                      const Icon(Icons.bed_outlined,
+                          size: 14, color: Color(0xFF9CA3AF)),
+                      const SizedBox(width: 5),
+                      Text(bedName,
+                          style: const TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFF9CA3AF),
+                              fontWeight: FontWeight.w500)),
                     ]),
                   ],
                 ),
@@ -2587,12 +2920,13 @@ class _BedGridTile extends StatelessWidget {
         : null;
 
     final isTemporary = bed['temporaryStay'] == true;
-    final tileBg      = isTemporary ? const Color(0xFFFFF7ED) : isOccupied ? const Color(0xFFF0FDF4) : Colors.white;
-    final borderColor = isTemporary ? const Color(0xFFFBBF24) : isOccupied ? const Color(0xFF86EFAC) : const Color(0xFFE5E7EB);
-    final iconBg      = isTemporary ? const Color(0xFFF59E0B) : isOccupied ? const Color(0xFF22C55E) : const Color(0xFFE5E7EB);
+    // Vacant = green, temporary stay = orange, active tenant (occupied) = gray.
+    final tileBg      = isTemporary ? const Color(0xFFFFF7ED) : isOccupied ? const Color(0xFFF9FAFB) : const Color(0xFFF0FDF4);
+    final borderColor = isTemporary ? const Color(0xFFFBBF24) : isOccupied ? const Color(0xFFE5E7EB) : const Color(0xFF86EFAC);
+    final iconBg      = isTemporary ? const Color(0xFFF59E0B) : isOccupied ? const Color(0xFF9CA3AF) : const Color(0xFF22C55E);
     const iconColor   = Colors.white;
     const nameColor   = Color(0xFF111827);
-    final subColor    = isTemporary ? const Color(0xFFB45309) : isOccupied ? const Color(0xFF15803D) : const Color(0xFF9CA3AF);
+    final subColor    = isTemporary ? const Color(0xFFB45309) : isOccupied ? const Color(0xFF6B7280) : const Color(0xFF15803D);
 
     return GestureDetector(
       onTap: isOccupied && occupantPartyId != null
@@ -4035,6 +4369,9 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
   }
 
   Future<void> _save() async {
+    // Drop focus so the edited field doesn't stay highlighted (and the
+    // keyboard doesn't stay up) after saving.
+    FocusManager.instance.primaryFocus?.unfocus();
     final prices = <Map<String, dynamic>>[];
     for (final o in _sharingOptions) {
       final rentText = _rentCtrl[o.$1]!.text.trim();

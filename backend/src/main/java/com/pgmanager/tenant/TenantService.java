@@ -339,6 +339,7 @@ public class TenantService {
         person.setEmployerName(r.employerName());
         person.setDesignation(r.designation());
         person.setWorkAddress(r.workAddress());
+        person.setHasVehicle(r.hasVehicle());
     }
 
     private void applyFields(Person person, TenantUpdateRequest r) {
@@ -356,6 +357,7 @@ public class TenantService {
         person.setEmployerName(r.employerName());
         person.setDesignation(r.designation());
         person.setWorkAddress(r.workAddress());
+        person.setHasVehicle(r.hasVehicle());
     }
 
     public TenantResponse toResponse(Person person, String currentBedName, String currentRoomName,
@@ -387,6 +389,7 @@ public class TenantService {
                 person.getEmployerName(),
                 person.getDesignation(),
                 person.getWorkAddress(),
+                person.isHasVehicle(),
                 currentBedName,
                 currentRoomName,
                 currentPropertyId,
