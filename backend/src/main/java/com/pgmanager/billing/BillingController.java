@@ -186,6 +186,7 @@ public class BillingController {
                 paid, status, LocalDateTime.now(), request.invoiceId());
         Long partyId = ((Number) invoice.get("party_id")).longValue();
         notificationService.notifyPaymentReceipt(org, partyId, paymentId, request.amount());
+        notificationService.notifyTenantPaymentReceipt(org, partyId, paymentId, request.amount(), mode);
         return ApiResponse.ok("Payment recorded", Map.of("paymentId", paymentId, "invoiceId", request.invoiceId(),
                 "amount", request.amount(), "paymentMode", mode, "status", status, "receiptNumber", "RCP-" + paymentId));
     }
@@ -213,18 +214,25 @@ public class BillingController {
         argList.add(org);
         if (propertyId != null) { argList.add(org); argList.add(propertyId); }
         List<Map<String, Object>> accounts = jdbc.queryForList(
-                "SELECT ba.billing_account_id,ba.party_id,fp.monthly_rent,fp.from_date " +
+                "SELECT ba.billing_account_id,ba.party_id,fp.monthly_rent,fp.ac_charges,fp.from_date " +
                 "FROM billing_account ba JOIN facility_party fp ON fp.party_id=ba.party_id " +
                 "  AND fp.organization_id=ba.organization_id AND fp.role_type_id='OCCUPANT' AND fp.thru_date IS NULL " +
                 "WHERE ba.organization_id=?" + propFilter + " AND ba.status='ACTIVE'", argList.toArray());
+        // Pre-load which accounts already have an invoice for this month (one query) instead
+        // of a COUNT(*) existence check per account inside the loop.
+        java.util.Set<Long> alreadyInvoiced = new java.util.HashSet<>(jdbc.queryForList(
+                "SELECT billing_account_id FROM invoice WHERE organization_id=? AND invoice_month=?",
+                Long.class, org, invoiceMonth));
         int generated = 0;
         for (Map<String, Object> account : accounts) {
             Long baId = ((Number) account.get("billing_account_id")).longValue();
             Long partyId = ((Number) account.get("party_id")).longValue();
             BigDecimal rent = account.get("monthly_rent") != null ? decimal(account.get("monthly_rent")) : BigDecimal.ZERO;
-            Long exists = jdbc.queryForObject("SELECT COUNT(*) FROM invoice WHERE billing_account_id=? AND invoice_month=?",
-                    Long.class, baId, invoiceMonth);
-            if (exists != null && exists > 0) continue;
+            // ac_charges is a breakdown of monthly_rent (already included in it) — it
+            // only splits the invoice items, never changes the total.
+            BigDecimal ac = account.get("ac_charges") != null ? decimal(account.get("ac_charges")) : BigDecimal.ZERO;
+            if (ac.compareTo(BigDecimal.ZERO) < 0 || ac.compareTo(rent) > 0) ac = BigDecimal.ZERO;
+            if (alreadyInvoiced.contains(baId)) continue;
             int dayOfMonth = 1;
             if (account.get("from_date") != null) {
                 dayOfMonth = ((java.sql.Date) account.get("from_date")).toLocalDate().getDayOfMonth();
@@ -236,7 +244,12 @@ public class BillingController {
                     org, baId, invNum, invoiceMonth, invoiceMonth, dueDate, rent, LocalDateTime.now(), LocalDateTime.now());
             Long invoiceId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
             jdbc.update("INSERT INTO invoice_item(invoice_id,item_type_id,description,amount,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-                    invoiceId, "MONTHLY_RENT", "Monthly Rent", rent, LocalDateTime.now(), LocalDateTime.now());
+                    invoiceId, "MONTHLY_RENT", "Monthly Rent", rent.subtract(ac), LocalDateTime.now(), LocalDateTime.now());
+            if (ac.compareTo(BigDecimal.ZERO) > 0) {
+                jdbc.update("INSERT INTO invoice_item(invoice_id,item_type_id,description,amount,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                        invoiceId, "AC_CHARGES", "AC Charges", ac, LocalDateTime.now(), LocalDateTime.now());
+            }
+            notificationService.notifyTenantInvoice(org, partyId, invoiceId, invNum, rent, dueDate, invoiceMonth);
             generated++;
         }
         return ApiResponse.ok(Map.of("generated", generated, "skipped", accounts.size() - generated,

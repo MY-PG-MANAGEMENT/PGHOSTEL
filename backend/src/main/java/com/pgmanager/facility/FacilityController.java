@@ -1,6 +1,7 @@
 package com.pgmanager.facility;
 
 import com.pgmanager.common.api.ApiResponse;
+import com.pgmanager.common.cache.CacheConfig;
 import com.pgmanager.common.exception.NotFoundException;
 import com.pgmanager.facility.dto.FacilityDtos.FacilityCreateRequest;
 import com.pgmanager.facility.dto.FacilityDtos.FacilityResponse;
@@ -16,6 +17,7 @@ import com.pgmanager.tenant.TenantService;
 import com.pgmanager.tenant.dto.TenantDtos.TenantResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -76,13 +78,18 @@ public class FacilityController {
         return ApiResponse.ok(facilityService.bedsWithOccupancy(currentUser.organizationId(), roomId));
     }
 
+    // Reflects live occupancy → cached per org:property and evicted wholesale on every
+    // occupancy write (OccupancyService / TenantService.create / setExpectedCheckout) and
+    // structural change. Org comes from the request-scoped CurrentUser bean in the key.
+    @Cacheable(cacheNames = CacheConfig.VACANT_BEDS,
+            key = "@currentUser.organizationId() + ':' + #propertyId")
     @GetMapping("/properties/{propertyId}/vacant-beds")
     ApiResponse<List<Map<String, Object>>> vacantBeds(@PathVariable Long propertyId) {
         Long org = currentUser.organizationId();
         String base =
                 "bed.facility_id bed_id,bed.facility_name bed_name,bed.facility_code bed_code," +
                 "bed.monthly_rent monthly_rent," +
-                "room.facility_id room_id,room.facility_name room_name,room.room_number room_number,room.sharing_type sharing_type," +
+                "room.facility_id room_id,room.facility_name room_name,room.room_number room_number,room.sharing_type sharing_type,room.is_ac is_ac," +
                 "floor.facility_id floor_id,floor.facility_name floor_name,floor.floor_number floor_number ";
         String joins =
                 "FROM facility bed " +
@@ -180,7 +187,11 @@ public class FacilityController {
 
     @GetMapping("/properties/{propertyId}/tenants")
     ApiResponse<List<TenantResponse>> tenantsByProperty(@PathVariable Long propertyId) {
-        return ApiResponse.ok(tenantService.listByProperty(currentUser.organizationId(), propertyId));
+        List<TenantResponse> tenants = tenantService.listByProperty(currentUser.organizationId(), propertyId);
+        org.slf4j.LoggerFactory.getLogger(FacilityController.class)
+                .info("GET /api/properties/{}/tenants: org={} returned {} tenants",
+                        propertyId, currentUser.organizationId(), tenants.size());
+        return ApiResponse.ok(tenants);
     }
 
     @GetMapping("/properties/{propertyId}/sharing-prices")

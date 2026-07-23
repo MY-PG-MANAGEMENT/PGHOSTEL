@@ -4,17 +4,16 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../utils/money.dart';
 import '../widgets/animations.dart';
+import '../widgets/app_toast.dart';
+import '../widgets/skeleton.dart';
 import '../widgets/async_action_button.dart';
 import '../widgets/error_retry_view.dart';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-String _rupees(dynamic v) {
-  if (v == null) return '₹0';
-  final n = v is num ? v : num.tryParse('$v') ?? 0;
-  return '₹${n % 1 == 0 ? n.toInt() : n}';
-}
+String _rupees(dynamic v) => inr(v ?? 0, nullText: '₹0');
 
 String _fmtDate(dynamic v) {
   if (v == null) return '—';
@@ -210,18 +209,18 @@ class _BillingScreenState extends State<BillingScreen>
       if (mounted) {
         final gen = result['generated'] ?? 0;
         final skip = result['skipped'] ?? 0;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('$gen invoice(s) generated, $skip already existed.'),
-          backgroundColor: gen > 0 ? PgColors.success : Colors.grey,
-        ));
+        if (gen is num && gen > 0) {
+          AppToast.success(
+              context, '$gen invoice(s) generated, $skip already existed.',
+              title: 'Invoices Generated');
+        } else {
+          AppToast.info(context, 'All invoices for this month already exist.');
+        }
         setState(_load);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e.toString().replaceFirst('Exception: ', '')),
-          backgroundColor: PgColors.danger,
-        ));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -252,7 +251,7 @@ class _DashboardTabState extends State<_DashboardTab> {
       future: widget.dashFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return const SkeletonList(showLeading: false);
         }
         if (snapshot.hasError) {
           return _BillingErrorState(error: snapshot.error, onRetry: widget.onRefresh);
@@ -989,11 +988,129 @@ class _InvoiceCard extends StatelessWidget {
 
 // ─── Invoice Detail Sheet ─────────────────────────────────────────────────
 
-class InvoiceDetailSheet extends StatelessWidget {
+class InvoiceDetailSheet extends StatefulWidget {
   const InvoiceDetailSheet({required this.invoice, required this.onRefresh});
 
   final Map<String, dynamic> invoice;
   final VoidCallback onRefresh;
+
+  @override
+  State<InvoiceDetailSheet> createState() => _InvoiceDetailSheetState();
+}
+
+class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
+  Map<String, dynamic> get invoice => widget.invoice;
+
+  // Line items (PG rent / AC charges / security deposit …) fetched from the
+  // invoice detail endpoint so the sheet can explain how the total is made up.
+  List<Map<String, dynamic>>? _items;
+  bool _itemsLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadItems();
+  }
+
+  Future<void> _loadItems() async {
+    try {
+      final res = await context
+          .read<AppState>()
+          .apiClient
+          .get('/billing/invoices/${invoice['invoice_id']}');
+      final items = (res['items'] is List ? res['items'] as List : [])
+          .cast<Map<String, dynamic>>();
+      if (mounted) {
+        setState(() {
+          _items = items;
+          _itemsLoading = false;
+        });
+      }
+    } catch (_) {
+      // Breakdown is a nice-to-have — the sheet still shows the total.
+      if (mounted) setState(() => _itemsLoading = false);
+    }
+  }
+
+  String _itemLabel(Map<String, dynamic> item) {
+    switch ('${item['item_type_id']}') {
+      case 'MONTHLY_RENT':
+        return 'PG Rent';
+      case 'AC_CHARGES':
+        return 'AC Charges';
+      case 'SECURITY_DEPOSIT':
+        return 'Security Deposit (one-time)';
+      default:
+        final desc = '${item['description'] ?? ''}';
+        return desc.isNotEmpty ? desc : '${item['item_type_id']}';
+    }
+  }
+
+  Widget _chargesBreakdown(dynamic total) {
+    final items = _items ?? const <Map<String, dynamic>>[];
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('Charge Details',
+              style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.grey,
+                  letterSpacing: 0.4)),
+          const SizedBox(height: 8),
+          if (_itemsLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Center(
+                  child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))),
+            )
+          else
+            for (final item in items)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(_itemLabel(item),
+                          style: const TextStyle(
+                              fontSize: 13, color: PgColors.textSecondary)),
+                    ),
+                    Text(_rupees(item['amount']),
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+          const Divider(height: 14),
+          Row(
+            children: [
+              const Expanded(
+                child: Text('Total',
+                    style:
+                        TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+              ),
+              Text(_rupees(total),
+                  style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: PgColors.primary)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1030,7 +1147,7 @@ class InvoiceDetailSheet extends StatelessWidget {
           _DetailRow('Tenant', name),
           _DetailRow('Month', _fmtMonth(invoice['invoice_month'])),
           _DetailRow('Due Date', _fmtDate(invoice['due_date'])),
-          _DetailRow('Total', _rupees(total)),
+          _chargesBreakdown(total),
           _DetailRow('Paid', _rupees(paid)),
           _DetailRow('Balance', _rupees(balance), color: (balance is num && balance > 0) ? PgColors.danger : PgColors.success),
           const SizedBox(height: 20),
@@ -1048,7 +1165,7 @@ class InvoiceDetailSheet extends StatelessWidget {
                     borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
                   ),
                   builder: (_) => CollectPaymentSheet(preselectedInvoice: invoice),
-                ).then((done) { if (done == true) onRefresh(); });
+                ).then((done) { if (done == true) widget.onRefresh(); });
               },
             ),
         ],
@@ -1336,13 +1453,18 @@ class CollectPaymentSheetState extends State<CollectPaymentSheet> {
           ),
           const SizedBox(height: 20),
           Row(children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: () => setState(() => _step = 0),
-                child: const Text('← Back'),
+            // "Back" returns to the invoice picker (step 0). When the sheet was
+            // opened with a preselected invoice there is no picker to go back to,
+            // so hide it and let Confirm take the full width.
+            if (widget.preselectedInvoice == null) ...[
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => setState(() => _step = 0),
+                  child: const Text('← Back'),
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
+              const SizedBox(width: 12),
+            ],
             Expanded(
               child: AsyncActionButton(
                 label: 'Confirm',
@@ -1361,18 +1483,16 @@ class CollectPaymentSheetState extends State<CollectPaymentSheet> {
                       'idempotencyKey': idempotencyKey,
                     });
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('Payment recorded successfully'),
-                        backgroundColor: PgColors.success,
-                      ));
+                      final messenger = ScaffoldMessenger.of(context);
                       Navigator.pop(context, true);
+                      AppToast.successOf(
+                          messenger, 'Payment of ₹${_amount.text} recorded',
+                          title: 'Payment Collected');
                     }
                   } catch (e) {
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(e.toString().replaceFirst('Exception: ', '')),
-                        backgroundColor: PgColors.danger,
-                      ));
+                      AppToast.error(
+                          context, e.toString().replaceFirst('Exception: ', ''));
                     }
                   }
                 },
@@ -1471,7 +1591,7 @@ class _StatCard extends StatelessWidget {
             ? BorderSide(color: color, width: 2)
             : BorderSide.none,
       ),
-      color: selected ? color.withValues(alpha: 0.06) : Colors.white,
+      color: Colors.white,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,

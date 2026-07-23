@@ -5,7 +5,9 @@ import 'package:provider/provider.dart';
 
 import '../../app_state.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/validators.dart';
 import '../../widgets/animations.dart';
+import '../../widgets/app_toast.dart';
 import '../../widgets/async_action_button.dart';
 import 'auth_brand_header.dart';
 
@@ -23,6 +25,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _password = TextEditingController();
   final _confirmPassword = TextEditingController();
   final _orgName = TextEditingController();
+  final _orgEmail = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
@@ -35,6 +38,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _password.dispose();
     _confirmPassword.dispose();
     _orgName.dispose();
+    _orgEmail.dispose();
     super.dispose();
   }
 
@@ -143,8 +147,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       _orgName,
                       'Organization Name',
                       prefixIcon: Icons.business_outlined,
-                      textInputAction: TextInputAction.done,
+                      textInputAction: TextInputAction.next,
                       validator: _validateRequired,
+                    ),
+                    _field(
+                      _orgEmail,
+                      'Organization Email',
+                      prefixIcon: Icons.email_outlined,
+                      keyboardType: TextInputType.emailAddress,
+                      textInputAction: TextInputAction.done,
+                      validator: Validators.email,
                     ),
                     const SizedBox(height: 8),
                     SizedBox(
@@ -160,16 +172,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   username: _username.text.trim(),
                                   password: _password.text,
                                   organizationName: _orgName.text.trim(),
+                                  organizationEmail: _orgEmail.text.trim(),
                                 );
                             if (context.mounted) context.go('/onboarding');
                           } catch (e) {
                             if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                      e.toString().replaceFirst('Exception: ', '')),
-                                ),
-                              );
+                              AppToast.error(context,
+                                  e.toString().replaceFirst('Exception: ', ''));
                             }
                           }
                         },

@@ -44,6 +44,13 @@ public class FacilityParty extends BaseEntity {
     @Column(name = "monthly_rent", precision = 10, scale = 2)
     private BigDecimal monthlyRent;
 
+    /**
+     * How much of {@link #monthlyRent} is the AC premium (breakdown annotation
+     * only — monthlyRent already includes it, so billing totals are unaffected).
+     */
+    @Column(name = "ac_charges", precision = 10, scale = 2)
+    private BigDecimal acCharges;
+
     @Column(name = "security_deposit", precision = 10, scale = 2)
     private BigDecimal securityDeposit;
 

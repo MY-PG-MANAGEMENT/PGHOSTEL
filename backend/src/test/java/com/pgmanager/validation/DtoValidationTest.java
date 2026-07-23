@@ -139,20 +139,28 @@ class DtoValidationTest {
 
     @Test
     void registerOwnerAcceptsValidBody() {
-        var req = new RegisterOwnerRequest("Asha Rao", "9876543210", "asha_rao", "secret123", "Asha PG");
+        var req = new RegisterOwnerRequest("Asha Rao", "9876543210", "asha_rao", "secret123", "Asha PG", "owner@ashapg.com");
         assertThat(validator.validate(req)).isEmpty();
     }
 
     @Test
     void registerOwnerRejectsShortPassword() {
-        var req = new RegisterOwnerRequest("Asha Rao", "9876543210", "asha_rao", "short", "Asha PG");
+        var req = new RegisterOwnerRequest("Asha Rao", "9876543210", "asha_rao", "short", "Asha PG", "owner@ashapg.com");
         assertThat(validator.validate(req)).isNotEmpty();
     }
 
     @Test
     void registerOwnerRejectsIllegalUsername() {
-        var req = new RegisterOwnerRequest("Asha Rao", "9876543210", "asha rao!", "secret123", "Asha PG");
+        var req = new RegisterOwnerRequest("Asha Rao", "9876543210", "asha rao!", "secret123", "Asha PG", "owner@ashapg.com");
         assertThat(validator.validate(req)).isNotEmpty();
+    }
+
+    @Test
+    void registerOwnerRejectsMissingOrInvalidEmail() {
+        var blank = new RegisterOwnerRequest("Asha Rao", "9876543210", "asha_rao", "secret123", "Asha PG", "");
+        assertThat(validator.validate(blank)).isNotEmpty();
+        var malformed = new RegisterOwnerRequest("Asha Rao", "9876543210", "asha_rao", "secret123", "Asha PG", "not-an-email");
+        assertThat(validator.validate(malformed)).isNotEmpty();
     }
 
     // --- Bed assignment ---

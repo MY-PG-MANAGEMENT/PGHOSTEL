@@ -46,7 +46,8 @@ class SuperAdminAccessIntegrationTest {
         String username = "owner_" + Long.toUnsignedString(n);
         String mobile = "9" + String.format("%09d", Math.abs(n % 1_000_000_000L));
         String body = "{\"fullName\":\"Test Owner\",\"mobileNumber\":\"" + mobile + "\"," +
-                "\"username\":\"" + username + "\",\"password\":\"secret123\",\"organizationName\":\"Test PG\"}";
+                "\"username\":\"" + username + "\",\"password\":\"secret123\",\"organizationName\":\"Test PG\"," +
+                "\"organizationEmail\":\"" + username + "@testpg.com\"}";
         String resp = mvc.perform(post("/api/auth/register-owner")
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk())

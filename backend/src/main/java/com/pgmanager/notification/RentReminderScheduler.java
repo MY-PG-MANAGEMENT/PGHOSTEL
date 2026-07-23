@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -91,6 +92,8 @@ public class RentReminderScheduler {
                 }
 
                 notificationService.notifyOwners(orgId, "RENT_REMINDER", title, message, "RENT", rentId, important);
+                notificationService.notifyTenantRentReminder(orgId, toLong(rent.get("party_id")), rentId,
+                        toDecimal(rent.get("monthly_rent")), dueDate, daysUntil);
             } catch (Exception e) {
                 log.warn("Rent reminder failed for rent_id={}: {}", rent.get("rent_id"), e.getMessage());
             }
@@ -143,6 +146,7 @@ public class RentReminderScheduler {
                         name, dateStr, location.isEmpty() ? "" : " Room: " + location + ".");
 
                 notificationService.notifyOwners(orgId, "CHECKOUT_REMINDER", title, message, "FACILITY_PARTY", fpId, daysUntil <= 1);
+                notificationService.notifyTenantCheckoutReminder(orgId, toLong(row.get("party_id")), fpId, checkoutDate, daysUntil);
             } catch (Exception e) {
                 log.warn("Checkout reminder failed for facility_party_id={}: {}", row.get("facility_party_id"), e.getMessage());
             }
@@ -162,6 +166,17 @@ public class RentReminderScheduler {
     private Long toLong(Object obj) {
         if (obj == null) return null;
         return ((Number) obj).longValue();
+    }
+
+    private BigDecimal toDecimal(Object obj) {
+        if (obj == null) return BigDecimal.ZERO;
+        if (obj instanceof BigDecimal d) return d;
+        if (obj instanceof Number n) return BigDecimal.valueOf(n.doubleValue());
+        try {
+            return new BigDecimal(obj.toString());
+        } catch (NumberFormatException e) {
+            return BigDecimal.ZERO;
+        }
     }
 
     private String str(Object obj) {

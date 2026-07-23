@@ -26,13 +26,37 @@ import java.util.Map;
 @RequestMapping("/api/tenants")
 @RequiredArgsConstructor
 public class TenantController {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TenantController.class);
+
     private final TenantService tenantService;
     private final CurrentUser currentUser;
     private final SelfCheckinTokenService selfCheckinTokenService;
+    private final TenantLoginPolicy tenantLoginPolicy;
+    private final TenantLoginService tenantLoginService;
 
     @PostMapping
     ApiResponse<TenantResponse> create(@Valid @RequestBody TenantCreateRequest request) {
-        return ApiResponse.ok("Tenant created", tenantService.create(currentUser.organizationId(), currentUser.userLoginId(), request));
+        Long orgId = currentUser.organizationId();
+        log.info("POST /api/tenants received: org={}, mobile={}, propertyId={}", orgId, request.mobileNumber(), request.propertyId());
+        TenantResponse created = tenantService.create(orgId, currentUser.userLoginId(), request);
+        log.info("POST /api/tenants done: tenantId={} (org={})", created.tenantId(), orgId);
+        return ApiResponse.ok("Tenant created", created);
+    }
+
+    /** Whether Tenant Login is enabled for the caller's org (drives the owner "Generate Logins" affordance). */
+    @GetMapping("/login-feature")
+    ApiResponse<Map<String, Boolean>> loginFeature() {
+        return ApiResponse.ok(Map.of("enabled", tenantLoginPolicy.enabled(currentUser.organizationId())));
+    }
+
+    /**
+     * Owner action: generate tenant login accounts for existing tenants without one
+     * (skips inactive, checked-out, and already-provisioned tenants). Returns a summary.
+     */
+    @PostMapping("/generate-logins")
+    ApiResponse<Map<String, Object>> generateLogins() {
+        return ApiResponse.ok("Tenant logins generated",
+                tenantLoginService.generateForOrganization(currentUser.organizationId()));
     }
 
     @GetMapping("/self-checkin-link")
@@ -47,7 +71,9 @@ public class TenantController {
 
     @GetMapping
     ApiResponse<List<TenantResponse>> list() {
-        return ApiResponse.ok(tenantService.list(currentUser.organizationId()));
+        List<TenantResponse> tenants = tenantService.list(currentUser.organizationId());
+        log.info("GET /api/tenants: org={} returned {} tenants", currentUser.organizationId(), tenants.size());
+        return ApiResponse.ok(tenants);
     }
 
     @GetMapping("/{partyId}")

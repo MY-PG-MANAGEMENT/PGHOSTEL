@@ -26,4 +26,9 @@ public class CurrentUser {
     public Long userLoginId() {
         return principal().userLoginId();
     }
+
+    /** The authenticated principal's party id (e.g. the tenant's person/party for the tenant portal). */
+    public Long partyId() {
+        return principal().partyId();
+    }
 }

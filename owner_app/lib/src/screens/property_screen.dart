@@ -4,13 +4,16 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../utils/money.dart';
 import '../widgets/animations.dart';
 import '../widgets/app_shell.dart';
+import '../widgets/skeleton.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/async_action_button.dart';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-String _rupees(dynamic v) => v != null ? '₹$v' : '—';
+String _rupees(dynamic v) => inr(v);
 
 Color _statusColor(String? s) {
   switch (s?.toUpperCase()) {
@@ -93,7 +96,7 @@ class _PropertyScreenState extends State<PropertyScreen> {
               future: _future,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  return const SkeletonList(showLeading: false);
                 }
                 if (snapshot.hasError) {
                   return _ErrorState(error: snapshot.error, onRetry: () => setState(_load));
@@ -497,8 +500,8 @@ class _FloorsTabState extends State<_FloorsTab> {
                 if (ctx.mounted) Navigator.pop(ctx, true);
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+                  AppToast.error(
+                      context, e.toString().replaceFirst('Exception: ', ''));
                 }
               }
             },
@@ -841,8 +844,8 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
                 onPressed: () async {
                   if (!_formKey.currentState!.validate()) return;
                   if (_selectedFloorId == null) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Select a floor first')));
+                    AppToast.info(context, 'Select a floor first',
+                        title: 'Select Floor');
                     return;
                   }
                   try {
@@ -863,9 +866,8 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
                     if (mounted) Navigator.pop(context, true);
                   } catch (e) {
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text(
-                              e.toString().replaceFirst('Exception: ', ''))));
+                      AppToast.error(context,
+                          e.toString().replaceFirst('Exception: ', ''));
                     }
                   }
                 },
@@ -1067,9 +1069,8 @@ class _AddPropertySheetState extends State<_AddPropertySheet> {
                       if (mounted) Navigator.pop(context, true);
                     } catch (e) {
                       if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
-                        );
+                        AppToast.error(context,
+                            e.toString().replaceFirst('Exception: ', ''));
                       }
                     }
                   },
@@ -1185,9 +1186,8 @@ class _EditPropertySheetState extends State<_EditPropertySheet> {
                     if (mounted) Navigator.pop(context, true);
                   } catch (e) {
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
-                      );
+                      AppToast.error(context,
+                          e.toString().replaceFirst('Exception: ', ''));
                     }
                   }
                 },

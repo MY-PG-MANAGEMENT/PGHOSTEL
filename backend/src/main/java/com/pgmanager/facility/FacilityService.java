@@ -1,18 +1,23 @@
 package com.pgmanager.facility;
 
+import com.pgmanager.common.cache.CacheConfig;
 import com.pgmanager.common.exception.BadRequestException;
 import com.pgmanager.common.exception.NotFoundException;
 import com.pgmanager.facility.dto.FacilityDtos.*;
+import com.pgmanager.occupancy.FacilityParty;
 import com.pgmanager.occupancy.FacilityPartyRepository;
 import com.pgmanager.occupancy.OccupancyRole;
 import com.pgmanager.party.Person;
 import com.pgmanager.party.PersonRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -22,6 +27,12 @@ public class FacilityService {
     private final FacilityPartyRepository facilityPartyRepository;
     private final PersonRepository personRepository;
 
+    // A structural change (new/updated/deleted node, or a re-parenting link) invalidates
+    // the tree and every occupancy read model derived from it. Evict wholesale — cheap
+    // (these writes are rare) and immune to key-mismatch bugs.
+    @CacheEvict(cacheNames = {CacheConfig.FACILITY_TREE, CacheConfig.ROOM_SUMMARY,
+            CacheConfig.PROPERTY_STATS, CacheConfig.VACANT_BEDS, CacheConfig.TEMP_STAYS},
+            allEntries = true)
     @Transactional
     public Facility createChild(Long organizationId, FacilityCreateRequest request) {
         Facility parent = facilityRepository.findById(request.parentFacilityId())
@@ -51,6 +62,9 @@ public class FacilityService {
         return facility;
     }
 
+    @CacheEvict(cacheNames = {CacheConfig.FACILITY_TREE, CacheConfig.ROOM_SUMMARY,
+            CacheConfig.PROPERTY_STATS, CacheConfig.VACANT_BEDS, CacheConfig.TEMP_STAYS},
+            allEntries = true)
     @Transactional
     public Facility update(Long organizationId, Long facilityId, FacilityUpdateRequest request) {
         Facility facility = facilityRepository.findByFacilityIdAndOrganizationId(facilityId, organizationId)
@@ -74,6 +88,9 @@ public class FacilityService {
         return facility;
     }
 
+    @CacheEvict(cacheNames = {CacheConfig.FACILITY_TREE, CacheConfig.ROOM_SUMMARY,
+            CacheConfig.PROPERTY_STATS, CacheConfig.VACANT_BEDS, CacheConfig.TEMP_STAYS},
+            allEntries = true)
     @Transactional
     public void deleteBed(Long organizationId, Long facilityId) {
         Facility facility = facilityRepository.findByFacilityIdAndOrganizationId(facilityId, organizationId)
@@ -93,11 +110,41 @@ public class FacilityService {
         facilityRepository.delete(facility);
     }
 
+    // Structure (rarely changes); evicted by the structural writers above + BulkUpload.
+    @Cacheable(cacheNames = CacheConfig.FACILITY_TREE, key = "#organizationId")
     @Transactional(readOnly = true)
     public FacilityTreeResponse tree(Long organizationId) {
         Facility org = facilityRepository.findById(organizationId)
                 .orElseThrow(() -> new NotFoundException("Organization not found"));
-        return toTree(org);
+
+        // Preload the whole subtree by level (one group-member query per depth, ~5 for
+        // ORG→PROPERTY→FLOOR→ROOM→BED) instead of two queries per node, then assemble
+        // in memory. A visited guard makes the BFS safe against any stray cyclic link.
+        Map<Long, List<Long>> childrenByParent = new HashMap<>();
+        Set<Long> allChildIds = new HashSet<>();
+        Set<Long> visited = new HashSet<>();
+        visited.add(org.getFacilityId());
+        List<Long> frontier = List.of(org.getFacilityId());
+        while (!frontier.isEmpty()) {
+            List<Long> next = new ArrayList<>();
+            for (FacilityGroupMember m : groupMemberRepository.findByParentFacilityIdInAndThruDateIsNull(frontier)) {
+                childrenByParent.computeIfAbsent(m.getParentFacilityId(), k -> new ArrayList<>())
+                        .add(m.getChildFacilityId());
+                if (visited.add(m.getChildFacilityId())) {
+                    next.add(m.getChildFacilityId());
+                    allChildIds.add(m.getChildFacilityId());
+                }
+            }
+            frontier = next;
+        }
+
+        Map<Long, Facility> facilityMap = new HashMap<>();
+        facilityMap.put(org.getFacilityId(), org);
+        if (!allChildIds.isEmpty()) {
+            facilityRepository.findAllById(allChildIds)
+                    .forEach(f -> facilityMap.put(f.getFacilityId(), f));
+        }
+        return buildTree(org.getFacilityId(), facilityMap, childrenByParent);
     }
 
     @Transactional(readOnly = true)
@@ -107,8 +154,14 @@ public class FacilityService {
         if (!parent.getFacilityId().equals(organizationId) && !organizationId.equals(parent.getOrganizationId())) {
             throw new BadRequestException("Parent facility is outside current organization");
         }
-        return groupMemberRepository.findByParentFacilityIdAndThruDateIsNull(parentFacilityId).stream()
-                .map(member -> facilityRepository.findById(member.getChildFacilityId()).orElseThrow())
+        List<Long> childIds = groupMemberRepository.findByParentFacilityIdAndThruDateIsNull(parentFacilityId).stream()
+                .map(FacilityGroupMember::getChildFacilityId).toList();
+        Map<Long, Facility> byId = childIds.isEmpty() ? Map.of()
+                : facilityRepository.findAllById(childIds).stream()
+                        .collect(Collectors.toMap(Facility::getFacilityId, f -> f));
+        return childIds.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
                 .map(this::toResponse)
                 .toList();
     }
@@ -120,27 +173,39 @@ public class FacilityService {
         if (!organizationId.equals(room.getOrganizationId())) {
             throw new BadRequestException("Room not in current organization");
         }
-        return groupMemberRepository.findByParentFacilityIdAndThruDateIsNull(roomId).stream()
-                .map(member -> facilityRepository.findById(member.getChildFacilityId()).orElseThrow())
+        List<Long> bedIds = groupMemberRepository.findByParentFacilityIdAndThruDateIsNull(roomId).stream()
+                .map(FacilityGroupMember::getChildFacilityId).toList();
+        if (bedIds.isEmpty()) return List.of();
+
+        Map<Long, Facility> bedMap = facilityRepository.findAllById(bedIds).stream()
+                .collect(Collectors.toMap(Facility::getFacilityId, f -> f));
+
+        // One query for all active occupancy rows (permanent + temporary) on these beds.
+        List<FacilityParty> active = facilityPartyRepository
+                .findByOrganizationIdAndFacilityIdInAndRoleTypeIdInAndThruDateIsNull(
+                        organizationId, bedIds, List.of(OccupancyRole.OCCUPANT, OccupancyRole.TEMP_OCCUPANT));
+        // Prefer a permanent occupant over a temporary stay when a bed has both.
+        Map<Long, FacilityParty> occByBed = new HashMap<>();
+        for (FacilityParty fp : active) {
+            occByBed.merge(fp.getFacilityId(), fp,
+                    (a, b) -> OccupancyRole.OCCUPANT.equals(a.getRoleTypeId()) ? a : b);
+        }
+        List<Long> occupantPartyIds = active.stream().map(FacilityParty::getPartyId).distinct().toList();
+        Map<Long, Person> personMap = occupantPartyIds.isEmpty() ? Map.of()
+                : personRepository.findAllById(occupantPartyIds).stream()
+                        .collect(Collectors.toMap(Person::getPartyId, p -> p));
+
+        return bedIds.stream()
+                .map(bedMap::get)
+                .filter(Objects::nonNull)
                 .map(bed -> {
-                    var occupancy = facilityPartyRepository
-                            .findByOrganizationIdAndFacilityIdAndRoleTypeIdAndThruDateIsNull(
-                                    organizationId, bed.getFacilityId(), OccupancyRole.OCCUPANT);
-                    // No permanent occupant? Surface a temporary stay so the bed still
-                    // shows as occupied (distinctly coloured in the UI).
-                    boolean temporaryStay = false;
-                    if (occupancy.isEmpty()) {
-                        occupancy = facilityPartyRepository
-                                .findByOrganizationIdAndFacilityIdAndRoleTypeIdAndThruDateIsNull(
-                                        organizationId, bed.getFacilityId(), OccupancyRole.TEMP_OCCUPANT);
-                        temporaryStay = occupancy.isPresent();
-                    }
-                    String occupantName = occupancy
-                            .flatMap(fp -> personRepository.findById(fp.getPartyId()))
-                            .map(Person::getFullName)
-                            .orElse(null);
-                    Long occupantPartyId = occupancy.map(fp -> fp.getPartyId()).orElse(null);
-                    final boolean temp = temporaryStay;
+                    FacilityParty occ = occByBed.get(bed.getFacilityId());
+                    // A temporary stay still shows the bed as occupied (distinctly coloured in the UI).
+                    boolean temp = occ != null && OccupancyRole.TEMP_OCCUPANT.equals(occ.getRoleTypeId());
+                    String occupantName = occ == null ? null
+                            : Optional.ofNullable(personMap.get(occ.getPartyId()))
+                                    .map(Person::getFullName).orElse(null);
+                    Long occupantPartyId = occ != null ? occ.getPartyId() : null;
                     return new FacilityResponse(
                             bed.getFacilityId(),
                             bed.getFacilityCode(),
@@ -166,6 +231,9 @@ public class FacilityService {
                 .toList();
     }
 
+    // Reflects occupancy (occupied bed count) → evicted on occupancy writes (see
+    // OccupancyService / TenantService.create / setExpectedCheckout) + structural writes.
+    @Cacheable(cacheNames = CacheConfig.PROPERTY_STATS, key = "#organizationId + ':' + #propertyId")
     @Transactional(readOnly = true)
     public PropertyStatsResponse propertyStats(Long organizationId, Long propertyId) {
         Facility property = facilityRepository.findById(propertyId)
@@ -173,28 +241,28 @@ public class FacilityService {
         if (!organizationId.equals(property.getOrganizationId())) {
             throw new BadRequestException("Property not in current organization");
         }
-        List<Long> floorIds = groupMemberRepository
-                .findByParentFacilityIdAndThruDateIsNull(propertyId).stream()
-                .map(FacilityGroupMember::getChildFacilityId).toList();
-        List<Long> roomIds = floorIds.stream()
-                .flatMap(fId -> groupMemberRepository
-                        .findByParentFacilityIdAndThruDateIsNull(fId).stream())
-                .map(FacilityGroupMember::getChildFacilityId).toList();
-        List<Long> bedIds = roomIds.stream()
-                .flatMap(rId -> groupMemberRepository
-                        .findByParentFacilityIdAndThruDateIsNull(rId).stream())
-                .map(FacilityGroupMember::getChildFacilityId).toList();
-        int occupiedBeds = (int) bedIds.stream()
-                .filter(bedId -> facilityPartyRepository
-                        .findByOrganizationIdAndFacilityIdAndRoleTypeIdAndThruDateIsNull(
-                                organizationId, bedId, OccupancyRole.OCCUPANT)
-                        .isPresent())
-                .count();
+        // Walk the tree one level at a time with batched IN queries (3 queries total,
+        // independent of floor/room/bed count) instead of one query per node.
+        List<Long> floorIds = childIdsOf(List.of(propertyId));
+        List<Long> roomIds = childIdsOf(floorIds);
+        List<Long> bedIds = childIdsOf(roomIds);
+        int occupiedBeds = bedIds.isEmpty() ? 0
+                : (int) facilityPartyRepository.countByOrganizationIdAndFacilityIdInAndRoleTypeIdAndThruDateIsNull(
+                        organizationId, bedIds, OccupancyRole.OCCUPANT);
         return new PropertyStatsResponse(
                 floorIds.size(), roomIds.size(), bedIds.size(),
                 occupiedBeds, bedIds.size() - occupiedBeds, occupiedBeds);
     }
 
+    /** Active child-facility ids for a set of parents, in one batched query (empty-safe). */
+    private List<Long> childIdsOf(List<Long> parentIds) {
+        if (parentIds.isEmpty()) return List.of();
+        return groupMemberRepository.findByParentFacilityIdInAndThruDateIsNull(parentIds).stream()
+                .map(FacilityGroupMember::getChildFacilityId).toList();
+    }
+
+    // Reflects occupancy → same eviction as propertyStats.
+    @Cacheable(cacheNames = CacheConfig.ROOM_SUMMARY, key = "#organizationId + ':' + #propertyId")
     @Transactional(readOnly = true)
     public List<RoomSharingSummary> getRoomSummary(Long organizationId, Long propertyId) {
         Facility property = facilityRepository.findById(propertyId)
@@ -203,16 +271,12 @@ public class FacilityService {
             throw new BadRequestException("Property not in current organization");
         }
 
-        List<Long> floorIds = groupMemberRepository
-                .findByParentFacilityIdAndThruDateIsNull(propertyId).stream()
-                .map(FacilityGroupMember::getChildFacilityId)
-                .toList();
-
+        List<Long> floorIds = childIdsOf(List.of(propertyId));
+        List<Long> roomIds = childIdsOf(floorIds);
         Map<String, int[]> summary = new LinkedHashMap<>();
-        for (Long floorId : floorIds) {
-            groupMemberRepository.findByParentFacilityIdAndThruDateIsNull(floorId).stream()
-                    .map(m -> facilityRepository.findById(m.getChildFacilityId()).orElse(null))
-                    .filter(f -> f != null && "ROOM".equals(f.getFacilityTypeId()))
+        if (!roomIds.isEmpty()) {
+            facilityRepository.findAllById(roomIds).stream()
+                    .filter(f -> "ROOM".equals(f.getFacilityTypeId()))
                     .forEach(room -> {
                         String key = room.getSharingType() != null ? room.getSharingType() : "OTHER";
                         summary.computeIfAbsent(key, k -> new int[]{0, 0});
@@ -226,6 +290,10 @@ public class FacilityService {
                 .toList();
     }
 
+    // Re-parenting/attaching a node changes the tree; no org param here, so evict wholesale.
+    @CacheEvict(cacheNames = {CacheConfig.FACILITY_TREE, CacheConfig.ROOM_SUMMARY,
+            CacheConfig.PROPERTY_STATS, CacheConfig.VACANT_BEDS, CacheConfig.TEMP_STAYS},
+            allEntries = true)
     public void link(Long parentFacilityId, Long childFacilityId) {
         FacilityGroupMember member = new FacilityGroupMember();
         member.setParentFacilityId(parentFacilityId);
@@ -258,11 +326,13 @@ public class FacilityService {
         );
     }
 
-    private FacilityTreeResponse toTree(Facility facility) {
-        List<FacilityTreeResponse> children = groupMemberRepository
-                .findByParentFacilityIdAndThruDateIsNull(facility.getFacilityId()).stream()
-                .map(member -> facilityRepository.findById(member.getChildFacilityId()).orElseThrow())
-                .map(this::toTree)
+    private FacilityTreeResponse buildTree(Long facilityId, Map<Long, Facility> facilityMap,
+                                           Map<Long, List<Long>> childrenByParent) {
+        Facility facility = facilityMap.get(facilityId);
+        if (facility == null) return null;
+        List<FacilityTreeResponse> children = childrenByParent.getOrDefault(facilityId, List.of()).stream()
+                .map(childId -> buildTree(childId, facilityMap, childrenByParent))
+                .filter(Objects::nonNull)
                 .toList();
         return new FacilityTreeResponse(
                 facility.getFacilityId(),

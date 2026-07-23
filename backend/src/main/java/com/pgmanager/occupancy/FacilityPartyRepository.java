@@ -31,8 +31,21 @@ public interface FacilityPartyRepository extends JpaRepository<FacilityParty, Lo
     @Query("SELECT fp FROM FacilityParty fp WHERE fp.organizationId = :orgId AND fp.partyId IN :partyIds AND fp.roleTypeId = :role AND fp.thruDate IS NULL")
     List<FacilityParty> findActiveOccupantsByPartyIds(@Param("orgId") Long orgId, @Param("partyIds") List<Long> partyIds, @Param("role") String role);
 
+    // All rows (active + historical) for a batch of parties in one role — used by the
+    // property-scoped tenant list to decide membership without a per-tenant query.
+    @Query("SELECT fp FROM FacilityParty fp WHERE fp.organizationId = :orgId AND fp.partyId IN :partyIds AND fp.roleTypeId = :role")
+    List<FacilityParty> findByOrganizationIdAndPartyIdInAndRoleTypeId(@Param("orgId") Long orgId, @Param("partyIds") List<Long> partyIds, @Param("role") String role);
+
     boolean existsByOrganizationIdAndFacilityIdAndPartyIdAndRoleTypeIdAndThruDateIsNull(
             Long organizationId, Long facilityId, Long partyId, String roleTypeId);
+
+    // Batch occupancy lookups for a set of beds — used by facility bed-grid / stats screens
+    // to avoid one query per bed. Covered by idx_fp_org_facility_role_thru (V23).
+    List<FacilityParty> findByOrganizationIdAndFacilityIdInAndRoleTypeIdInAndThruDateIsNull(
+            Long organizationId, List<Long> facilityIds, List<String> roleTypeIds);
+
+    long countByOrganizationIdAndFacilityIdInAndRoleTypeIdAndThruDateIsNull(
+            Long organizationId, List<Long> facilityIds, String roleTypeId);
 
     void deleteAllByFacilityId(Long facilityId);
 }

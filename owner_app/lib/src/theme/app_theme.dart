@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'page_transitions.dart';
+
 abstract final class PgColors {
   static const primary = Color(0xFF4F2DE4);
   static const primaryDark = Color(0xFF21176C);
@@ -31,6 +33,9 @@ ThemeData buildAppTheme() {
     colorScheme: scheme,
     scaffoldBackgroundColor: const Color(0xFFF9F9FD),
     fontFamily: 'Roboto',
+    // Smooth fade + slide-up on every screen change (go_router pages AND
+    // Navigator.push(MaterialPageRoute)) — defined once here.
+    pageTransitionsTheme: smoothPageTransitionsTheme,
     appBarTheme: const AppBarTheme(
       backgroundColor: Colors.white,
       foregroundColor: PgColors.ink,

@@ -15,6 +15,7 @@ void main() {
     required String password,
     required String confirm,
     required String org,
+    String orgEmail = 'owner@acmepg.com',
   }) async {
     await tester.enterText(find.widgetWithText(TextFormField, 'Full Name'), fullName);
     await tester.enterText(find.widgetWithText(TextFormField, 'Mobile Number'), mobile);
@@ -22,6 +23,7 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField, 'Password'), password);
     await tester.enterText(find.widgetWithText(TextFormField, 'Confirm Password'), confirm);
     await tester.enterText(find.widgetWithText(TextFormField, 'Organization Name'), org);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Organization Email'), orgEmail);
   }
 
   group('RegisterScreen', () {
@@ -36,6 +38,7 @@ void main() {
         'Password',
         'Confirm Password',
         'Organization Name',
+        'Organization Email',
       ]) {
         expect(find.widgetWithText(TextFormField, label), findsOneWidget,
             reason: 'missing field: $label');
@@ -126,6 +129,7 @@ void main() {
       expect(call['mobileNumber'], '9876543210');
       expect(call['username'], 'jane_owner');
       expect(call['organizationName'], 'Acme PG');
+      expect(call['organizationEmail'], 'owner@acmepg.com');
       expect(find.text('route:onboarding'), findsOneWidget);
     });
   });

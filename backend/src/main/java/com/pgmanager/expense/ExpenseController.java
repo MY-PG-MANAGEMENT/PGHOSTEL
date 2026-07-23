@@ -49,7 +49,7 @@ public class ExpenseController {
     private final ExpenseWriter expenseWriter;
 
     static final Set<String> CATEGORIES = Set.of(
-            "FOOD", "SALARY", "ELECTRICITY", "MAINTENANCE", "LAUNDRY", "TRANSPORT", "RENT", "OTHERS");
+            "FOOD", "SALARY", "ELECTRICITY", "MAINTENANCE", "LAUNDRY", "TRANSPORT", "RENT", "DEPOSIT_REFUND", "OTHERS");
     static final Set<String> PAYMENT_METHODS = Set.of("CASH", "UPI", "CARD", "BANK_TRANSFER");
     private static final String SPENT_STATUSES = "('APPROVED','PAID')";
 

@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/animations.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/async_action_button.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
@@ -85,13 +86,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                             if (mounted) setState(() => _sent = true);
                           } catch (e) {
                             if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    e.toString().replaceFirst('Exception: ', ''),
-                                  ),
-                                ),
-                              );
+                              AppToast.error(context,
+                                  e.toString().replaceFirst('Exception: ', ''));
                             }
                           }
                         },
@@ -203,15 +199,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       {'fullName': name.text, 'mobileNumber': mobile.text},
                     );
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Profile updated')),
-                      );
+                      AppToast.success(context, 'Profile updated',
+                          title: 'Profile Updated');
                     }
                   } catch (e) {
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
-                      );
+                      AppToast.error(context,
+                          e.toString().replaceFirst('Exception: ', ''));
                     }
                   }
                 },
@@ -332,9 +326,8 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                   }
                 } catch (e) {
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
-                    );
+                    AppToast.error(context,
+                        e.toString().replaceFirst('Exception: ', ''));
                   }
                 }
               },
@@ -445,15 +438,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     await appState.setBiometricEnabled(value);
                     if (!mounted) return;
                     setState(() {});
-                    messenger.showSnackBar(SnackBar(
-                      content: Text(value
-                          ? 'Biometric unlock enabled'
-                          : 'Biometric unlock disabled'),
-                    ));
+                    AppToast.successOf(
+                        messenger,
+                        value
+                            ? 'Biometric unlock enabled'
+                            : 'Biometric unlock disabled',
+                        title: 'Biometric Updated');
                   } catch (e) {
-                    messenger.showSnackBar(SnackBar(
-                      content: Text(e.toString().replaceFirst('Exception: ', '')),
-                    ));
+                    AppToast.errorOf(
+                        messenger, e.toString().replaceFirst('Exception: ', ''));
                   }
                 },
               ),
@@ -483,8 +476,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 final cache = await SharedPreferences.getInstance();
                 await cache.clear();
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Local cache cleared.')));
+                  AppToast.success(context, 'Local cache cleared.',
+                      title: 'Cache Cleared');
                 }
               },
             ),

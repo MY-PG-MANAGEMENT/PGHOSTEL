@@ -1,17 +1,23 @@
 package com.pgmanager.admin;
 
+import com.pgmanager.audit.AuditService;
 import com.pgmanager.auth.AuthService;
 import com.pgmanager.auth.dto.AuthDtos.RegisterOwnerRequest;
 import com.pgmanager.common.api.ApiResponse;
 import com.pgmanager.common.exception.BadRequestException;
 import com.pgmanager.common.exception.NotFoundException;
 import com.pgmanager.notification.NotificationService;
+import com.pgmanager.notification.OrganizationChannelService;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.security.RoleType;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -35,6 +41,10 @@ public class SuperAdminController {
     private final CurrentUser currentUser;
     private final NotificationService notificationService;
     private final AuthService authService;
+    private final OrganizationChannelService channelService;
+    private final PasswordEncoder passwordEncoder;
+    private final AuditService auditService;
+    private final com.pgmanager.tenant.TenantLoginPolicy tenantLoginPolicy;
 
     private static final Set<String> ALLOWED_ORG_STATUSES = Set.of("ACTIVE", "INACTIVE", "SUSPENDED");
 
@@ -92,6 +102,29 @@ public class SuperAdminController {
                 "FROM user_login u JOIN person p ON p.party_id=u.party_id ORDER BY u.created_at DESC"));
     }
 
+    @PostMapping("/users/{userLoginId}/reset-password")
+    ApiResponse<Void> resetUserPassword(@PathVariable Long userLoginId, @Valid @RequestBody ResetPasswordRequest request) {
+        Map<String, Object> user;
+        try {
+            user = jdbc.queryForMap("SELECT username,role_type_id,organization_id FROM user_login WHERE user_login_id=?", userLoginId);
+        } catch (EmptyResultDataAccessException e) {
+            throw new NotFoundException("User login not found");
+        }
+        if (RoleType.SUPER_ADMIN.equals(user.get("role_type_id"))) {
+            throw new BadRequestException("Super admin passwords cannot be reset here");
+        }
+        jdbc.update("UPDATE user_login SET password_hash=?,updated_at=? WHERE user_login_id=?",
+                passwordEncoder.encode(request.newPassword()), LocalDateTime.now(), userLoginId);
+        // Invalidate any active sessions so the old password stops working immediately.
+        jdbc.update("UPDATE refresh_token SET revoked=TRUE,updated_at=? WHERE user_login_id=? AND revoked=FALSE",
+                LocalDateTime.now(), userLoginId);
+        Object orgRaw = user.get("organization_id");
+        Long orgId = orgRaw == null ? null : ((Number) orgRaw).longValue();
+        auditService.log(orgId, currentUser.userLoginId(), "PASSWORD_RESET_BY_ADMIN", "USER_LOGIN", userLoginId,
+                "Super admin reset password for " + user.get("username"));
+        return ApiResponse.ok("Password reset", null);
+    }
+
     @GetMapping("/roles")
     ApiResponse<List<Map<String, Object>>> roles() {
         return ApiResponse.ok(jdbc.queryForList("SELECT r.role_type_id,r.description,COUNT(rp.permission_id) permission_count " +
@@ -119,10 +152,23 @@ public class SuperAdminController {
         return ApiResponse.ok(Map.of("planId", id, "planCode", request.planCode(), "active", true));
     }
 
+    @PatchMapping("/plans/{planId}")
+    ApiResponse<Void> updatePlanStatus(@PathVariable Long planId, @RequestBody Map<String, Object> body) {
+        Object raw = body.get("active");
+        boolean active = Boolean.TRUE.equals(raw) || "true".equalsIgnoreCase(String.valueOf(raw));
+        int count = jdbc.update("UPDATE subscription_plan SET active=?,updated_at=? WHERE plan_id=?",
+                active, LocalDateTime.now(), planId);
+        if (count == 0) throw new NotFoundException("Plan not found");
+        return ApiResponse.ok("Plan updated", null);
+    }
+
     @GetMapping("/reports/revenue")
     ApiResponse<List<Map<String, Object>>> revenueReport() {
-        return ApiResponse.ok(jdbc.queryForList("SELECT DATE_FORMAT(payment_date,'%Y-%m') period,organization_id,SUM(amount) amount " +
-                "FROM payment WHERE status='RECEIVED' GROUP BY period,organization_id ORDER BY period DESC"));
+        return ApiResponse.ok(jdbc.queryForList(
+                "SELECT DATE_FORMAT(p.payment_date,'%Y-%m') period,p.organization_id," +
+                "o.facility_name organization_name,SUM(p.amount) amount " +
+                "FROM payment p LEFT JOIN facility o ON o.facility_id=p.organization_id " +
+                "WHERE p.status='RECEIVED' GROUP BY period,p.organization_id,o.facility_name ORDER BY period DESC"));
     }
 
     @GetMapping("/organizations/{organizationId}")
@@ -150,6 +196,36 @@ public class SuperAdminController {
                 "WHERE fp.organization_id=? AND fp.facility_id=? AND fp.role_type_id='TENANT' AND fp.thru_date IS NULL " +
                 "ORDER BY p.full_name",
                 organizationId, organizationId));
+    }
+
+    @GetMapping("/organizations/{organizationId}/channels")
+    ApiResponse<Map<String, Boolean>> organizationChannels(@PathVariable Long organizationId) {
+        return ApiResponse.ok(channelService.channels(organizationId));
+    }
+
+    @PatchMapping("/organizations/{organizationId}/channels")
+    ApiResponse<Map<String, Boolean>> updateOrganizationChannels(@PathVariable Long organizationId,
+                                                                 @RequestBody Map<String, Object> body) {
+        String channel = body.get("channel") == null ? null : String.valueOf(body.get("channel"));
+        Object raw = body.get("enabled");
+        boolean enabled = Boolean.TRUE.equals(raw) || "true".equalsIgnoreCase(String.valueOf(raw));
+        return ApiResponse.ok("Channel updated", channelService.setChannel(organizationId, channel, enabled));
+    }
+
+    @GetMapping("/organizations/{organizationId}/tenant-login")
+    ApiResponse<Map<String, Boolean>> tenantLoginStatus(@PathVariable Long organizationId) {
+        return ApiResponse.ok(Map.of("enabled", tenantLoginPolicy.enabled(organizationId)));
+    }
+
+    @PatchMapping("/organizations/{organizationId}/tenant-login")
+    ApiResponse<Map<String, Boolean>> setTenantLogin(@PathVariable Long organizationId,
+                                                     @RequestBody Map<String, Object> body) {
+        Object raw = body.get("enabled");
+        boolean enabled = Boolean.TRUE.equals(raw) || "true".equalsIgnoreCase(String.valueOf(raw));
+        tenantLoginPolicy.setEnabled(organizationId, enabled);
+        auditService.log(organizationId, currentUser.userLoginId(), "TENANT_LOGIN_FEATURE_TOGGLED",
+                "ORGANIZATION", organizationId, "Tenant Login " + (enabled ? "enabled" : "disabled"));
+        return ApiResponse.ok("Tenant Login " + (enabled ? "enabled" : "disabled"), Map.of("enabled", enabled));
     }
 
     @GetMapping("/audit-logs")
@@ -194,4 +270,5 @@ public class SuperAdminController {
 
     public record PlanRequest(@NotBlank String planCode, @NotBlank String name, @DecimalMin("0") BigDecimal priceMonthly, Integer propertyLimit) {}
     public record BroadcastRequest(@NotBlank String title, @NotBlank String message, Long targetOrgId, Boolean important) {}
+    public record ResetPasswordRequest(@NotBlank @Size(min = 8, message = "Password must be at least 8 characters") String newPassword) {}
 }

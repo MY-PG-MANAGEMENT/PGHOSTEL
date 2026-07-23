@@ -1,6 +1,7 @@
 package com.pgmanager.occupancy;
 
 import com.pgmanager.audit.AuditService;
+import com.pgmanager.common.cache.EvictOccupancyCaches;
 import com.pgmanager.common.exception.BadRequestException;
 import com.pgmanager.common.exception.NotFoundException;
 import com.pgmanager.facility.Facility;
@@ -14,8 +15,12 @@ import com.pgmanager.occupancy.dto.OccupancyDtos.EndTempStayRequest;
 import com.pgmanager.occupancy.dto.OccupancyDtos.OccupancyResponse;
 import com.pgmanager.occupancy.dto.OccupancyDtos.ScheduledTransferResponse;
 import com.pgmanager.occupancy.dto.OccupancyDtos.TempStayRequest;
+import com.pgmanager.occupancy.dto.OccupancyDtos.TempStayUpdateRequest;
 import com.pgmanager.occupancy.dto.OccupancyDtos.TransferResult;
+import com.pgmanager.expense.ExpenseWriter;
 import com.pgmanager.notification.NotificationService;
+import com.pgmanager.party.Person;
+import com.pgmanager.party.PersonRepository;
 import com.pgmanager.pricing.PropertySharingPrice;
 import com.pgmanager.pricing.PropertySharingPriceRepository;
 import lombok.RequiredArgsConstructor;
@@ -41,8 +46,12 @@ public class OccupancyService {
     private final ScheduledBedTransferRepository scheduledTransferRepository;
     private final AuditService auditService;
     private final NotificationService notificationService;
+    private final ExpenseWriter expenseWriter;
+    private final PersonRepository personRepository;
+    private final com.pgmanager.tenant.TenantLoginService tenantLoginService;
 
     @Transactional
+    @EvictOccupancyCaches
     public OccupancyResponse assign(Long organizationId, Long userLoginId, BedAssignRequest request) {
         LocalDate fromDate = request.fromDate() == null ? LocalDate.now() : request.fromDate();
         validateTenant(organizationId, request.partyId());
@@ -67,6 +76,7 @@ public class OccupancyService {
         occupancy.setRoleTypeId(OccupancyRole.OCCUPANT);
         occupancy.setFromDate(fromDate);
         occupancy.setMonthlyRent(effectiveRent);
+        occupancy.setAcCharges(request.acCharges());
         occupancy.setSecurityDeposit(request.securityDeposit());
         occupancy.setExpectedCheckoutDate(request.expectedCheckoutDate());
         occupancy = facilityPartyRepository.save(occupancy);
@@ -77,6 +87,8 @@ public class OccupancyService {
 
         auditService.log(organizationId, userLoginId, "BED_ASSIGNED", "FACILITY_PARTY", occupancy.getFacilityPartyId(), "Bed assigned");
         notificationService.notifyCheckIn(organizationId, request.partyId(), request.bedFacilityId());
+        notificationService.notifyTenantCheckIn(organizationId, request.partyId(), request.bedFacilityId(),
+                fromDate, effectiveRent, request.securityDeposit());
         return toResponse(occupancy);
     }
 
@@ -124,6 +136,7 @@ public class OccupancyService {
      * </ul>
      */
     @Transactional
+    @EvictOccupancyCaches
     public TransferResult transfer(Long organizationId, Long userLoginId, BedTransferRequest request) {
         validateBed(organizationId, request.newBedFacilityId());
         FacilityParty active = facilityPartyRepository.findByOrganizationIdAndPartyIdAndRoleTypeIdAndThruDateIsNull(
@@ -159,6 +172,9 @@ public class OccupancyService {
             // Preserve the original move-in date so the billing cycle/day is unchanged.
             next.setFromDate(active.getFromDate());
             next.setMonthlyRent(request.monthlyRent() != null ? request.monthlyRent() : active.getMonthlyRent());
+            // AC breakdown only carries over when the rent is unchanged — a custom
+            // rent makes the old split meaningless.
+            next.setAcCharges(request.monthlyRent() == null ? active.getAcCharges() : null);
             next.setSecurityDeposit(active.getSecurityDeposit());
             next.setExpectedCheckoutDate(active.getExpectedCheckoutDate());
             next = facilityPartyRepository.save(next);
@@ -166,6 +182,7 @@ public class OccupancyService {
             ensurePropertyTenantMembership(organizationId, request.partyId(), request.newBedFacilityId(), next.getFromDate());
             auditService.log(organizationId, userLoginId, "BED_TRANSFERRED", "FACILITY_PARTY", next.getFacilityPartyId(),
                     "Bed transferred (same sharing, immediate)");
+            notificationService.notifyTenantTransferApplied(organizationId, request.partyId(), request.newBedFacilityId());
             return new TransferResult("APPLIED", toResponse(next), null);
         }
 
@@ -194,11 +211,14 @@ public class OccupancyService {
 
         auditService.log(organizationId, userLoginId, "BED_TRANSFER_SCHEDULED", "SCHEDULED_BED_TRANSFER",
                 scheduled.getScheduledBedTransferId(), "Bed transfer scheduled for " + effective);
+        notificationService.notifyTenantTransferScheduled(organizationId, request.partyId(),
+                request.newBedFacilityId(), effective, newRent);
         return new TransferResult("SCHEDULED", null, toScheduledResponse(scheduled));
     }
 
     /** Applies all pending scheduled transfers whose effective date has arrived. */
     @Transactional
+    @EvictOccupancyCaches
     public int applyDueTransfers() {
         List<ScheduledBedTransfer> due = scheduledTransferRepository
                 .findByStatusAndEffectiveDateLessThanEqual(ScheduledBedTransfer.PENDING, LocalDate.now());
@@ -255,6 +275,7 @@ public class OccupancyService {
     }
 
     @Transactional
+    @EvictOccupancyCaches
     public void cancelScheduledTransfer(Long organizationId, Long userLoginId, Long scheduledTransferId) {
         ScheduledBedTransfer s = scheduledTransferRepository
                 .findByScheduledBedTransferIdAndOrganizationId(scheduledTransferId, organizationId)
@@ -270,12 +291,14 @@ public class OccupancyService {
     // ── Temporary stay ────────────────────────────────────────────────────────────
 
     /**
-     * Places a tenant in a bed on a temporary basis. No billing is created for the
-     * temporary period; the bed is marked occupied (TEMP_OCCUPANT) so it cannot be
-     * double-booked. End it with {@link #endTempStay} or convert it to a permanent
-     * assignment via the make-permanent flow.
+     * Places a tenant in a bed on a temporary basis. The one-time stay charge
+     * ({@code request.amount()}) is stored on the occupancy and billed as a single
+     * invoice by the controller. The bed is marked occupied (TEMP_OCCUPANT) so it
+     * cannot be double-booked. End it with {@link #endTempStay} or convert it to a
+     * permanent assignment via the make-permanent flow.
      */
     @Transactional
+    @EvictOccupancyCaches
     public OccupancyResponse tempStay(Long organizationId, Long userLoginId, TempStayRequest request) {
         LocalDate fromDate = request.fromDate() == null ? LocalDate.now() : request.fromDate();
         validateTenant(organizationId, request.partyId());
@@ -293,15 +316,57 @@ public class OccupancyService {
         temp.setPartyId(request.partyId());
         temp.setRoleTypeId(OccupancyRole.TEMP_OCCUPANT);
         temp.setFromDate(fromDate);
+        // Regular temp stay: monthly_rent holds the (editable) total stay charge.
+        // Bed allocation: the caller sends the future permanent monthlyRent + deposit,
+        // which we store on the row (prefilled at make-permanent); the one-time payment
+        // is the `amount`, billed as the separate TEMP invoice by the controller.
+        temp.setMonthlyRent(request.monthlyRent() != null ? request.monthlyRent() : request.amount());
+        temp.setSecurityDeposit(request.securityDeposit());
+        temp.setExpectedCheckoutDate(request.expectedCheckoutDate());
         temp = facilityPartyRepository.save(temp);
 
         ensurePropertyTenantMembership(organizationId, request.partyId(), request.bedFacilityId(), fromDate);
         auditService.log(organizationId, userLoginId, "TEMP_STAY_STARTED", "FACILITY_PARTY", temp.getFacilityPartyId(),
-                "Temporary stay started (no billing)");
+                "Temporary stay started" + (request.amount() != null ? " (amount " + request.amount() + ")" : ""));
+        notificationService.notifyTenantTempStay(organizationId, request.partyId(), request.bedFacilityId(), fromDate);
+        return toResponse(temp);
+    }
+
+    /**
+     * Edits an active temporary stay: planned check-out, total amount, and optionally the
+     * bed. The invoice is updated by the controller (which owns the billing dependency).
+     * Returns the updated occupancy (its {@code fromDate} anchors the temp invoice).
+     */
+    @Transactional
+    @EvictOccupancyCaches
+    public OccupancyResponse updateTempStay(Long organizationId, Long userLoginId,
+                                            Long facilityPartyId, TempStayUpdateRequest request) {
+        FacilityParty temp = facilityPartyRepository.findById(facilityPartyId)
+                .filter(f -> organizationId.equals(f.getOrganizationId())
+                        && OccupancyRole.TEMP_OCCUPANT.equals(f.getRoleTypeId())
+                        && f.getThruDate() == null)
+                .orElseThrow(() -> new NotFoundException("Active temporary stay not found"));
+
+        Long newBed = request.bedFacilityId();
+        if (newBed != null && !newBed.equals(temp.getFacilityId())) {
+            validateBed(organizationId, newBed);
+            ensureBedAvailable(organizationId, newBed);
+            temp.setFacilityId(newBed);
+            ensurePropertyTenantMembership(organizationId, temp.getPartyId(), newBed, temp.getFromDate());
+        }
+        if (request.expectedCheckoutDate() != null) {
+            temp.setExpectedCheckoutDate(request.expectedCheckoutDate());
+        }
+        if (request.amount() != null) {
+            temp.setMonthlyRent(request.amount());
+        }
+        auditService.log(organizationId, userLoginId, "TEMP_STAY_UPDATED", "FACILITY_PARTY",
+                temp.getFacilityPartyId(), "Temporary stay updated");
         return toResponse(temp);
     }
 
     @Transactional
+    @EvictOccupancyCaches
     public OccupancyResponse endTempStay(Long organizationId, Long userLoginId, EndTempStayRequest request) {
         LocalDate endDate = request.endDate() == null ? LocalDate.now() : request.endDate();
         FacilityParty temp = facilityPartyRepository.findByOrganizationIdAndPartyIdAndRoleTypeIdAndThruDateIsNull(
@@ -316,6 +381,7 @@ public class OccupancyService {
     // ── Checkout / history ──────────────────────────────────────────────────────
 
     @Transactional
+    @EvictOccupancyCaches
     public OccupancyResponse checkout(Long organizationId, Long userLoginId, CheckoutRequest request) {
         LocalDate checkoutDate = request.checkoutDate() == null ? LocalDate.now() : request.checkoutDate();
         FacilityParty active = facilityPartyRepository.findByOrganizationIdAndPartyIdAndRoleTypeIdAndThruDateIsNull(
@@ -328,8 +394,40 @@ public class OccupancyService {
         scheduledTransferRepository
                 .findByOrganizationIdAndPartyIdAndStatus(organizationId, request.partyId(), ScheduledBedTransfer.PENDING)
                 .forEach(s -> { s.setStatus(ScheduledBedTransfer.CANCELLED); s.setNote("Tenant checked out"); });
+        recordDepositRefund(organizationId, userLoginId, request, active, checkoutDate);
+        // Disable the tenant's login, revoke sessions/tokens (status → INACTIVE, reason CHECKED_OUT).
+        // The login row is preserved so a future rejoin can reactivate it.
+        tenantLoginService.disableForCheckout(organizationId, request.partyId());
         auditService.log(organizationId, userLoginId, "CHECKOUT", "FACILITY_PARTY", active.getFacilityPartyId(), "Tenant checked out");
+        notificationService.notifyTenantCheckout(organizationId, request.partyId(), checkoutDate,
+                request.refundAmount(), request.refundMethod());
         return toResponse(active);
+    }
+
+    /**
+     * Records the optional security-deposit refund handed back at checkout as a
+     * DEPOSIT_REFUND expense (money-out in the transactions ledger; CASH refunds
+     * also mirror into the petty-cash ledger via {@link ExpenseWriter}).
+     */
+    private void recordDepositRefund(Long organizationId, Long userLoginId, CheckoutRequest request,
+                                     FacilityParty active, LocalDate checkoutDate) {
+        BigDecimal refund = request.refundAmount();
+        if (refund == null || refund.compareTo(BigDecimal.ZERO) <= 0) return;
+        BigDecimal deposit = active.getSecurityDeposit();
+        if (deposit != null && refund.compareTo(deposit) > 0) {
+            throw new BadRequestException("Refund amount exceeds the security deposit held (" + deposit + ")");
+        }
+        String method = request.refundMethod() == null || request.refundMethod().isBlank()
+                ? "CASH" : request.refundMethod().trim().toUpperCase();
+        String tenantName = personRepository.findById(request.partyId())
+                .map(Person::getFullName).orElse("Tenant");
+        String title = "Deposit refund - " + tenantName;
+        Long propertyId = resolvePropertyId(active.getFacilityId());
+        Long expenseId = expenseWriter.insertApproved(organizationId, propertyId, "DEPOSIT_REFUND",
+                title, refund, method, checkoutDate, userLoginId);
+        auditService.log(organizationId, userLoginId, "DEPOSIT_REFUNDED", "EXPENSE", expenseId,
+                "Security deposit refund of " + refund + " recorded at checkout"
+                        + (request.refundNotes() == null || request.refundNotes().isBlank() ? "" : " — " + request.refundNotes()));
     }
 
     @Transactional(readOnly = true)
@@ -427,7 +525,8 @@ public class OccupancyService {
                 facilityParty.getThruDate(),
                 facilityParty.getMonthlyRent(),
                 facilityParty.getSecurityDeposit(),
-                facilityParty.getExpectedCheckoutDate()
+                facilityParty.getExpectedCheckoutDate(),
+                facilityParty.getAcCharges()
         );
     }
 

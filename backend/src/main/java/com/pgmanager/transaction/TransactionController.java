@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -49,7 +50,7 @@ public class TransactionController {
                 : new Object[]{org, start, end};
         List<Map<String, Object>> payments = jdbc.queryForList(
                 "SELECT p.payment_id id, COALESCE(per.full_name, 'Tenant') title, p.amount, " +
-                "p.payment_mode method, p.payment_date txnDate " +
+                "p.payment_mode method, p.payment_date txnDate, p.created_at createdAt " +
                 "FROM payment p LEFT JOIN person per ON per.party_id = p.party_id " +
                 "WHERE p.organization_id=? AND p.status='RECEIVED' AND p.payment_date BETWEEN ? AND ?" + inScope,
                 inArgs);
@@ -59,7 +60,7 @@ public class TransactionController {
                 ? new Object[]{org, start, end, propertyId}
                 : new Object[]{org, start, end};
         List<Map<String, Object>> expenses = jdbc.queryForList(
-                "SELECT expense_id id, title, category, amount, payment_method method, expense_date txnDate " +
+                "SELECT expense_id id, title, category, amount, payment_method method, expense_date txnDate, created_at createdAt " +
                 "FROM expense WHERE organization_id=? AND status IN ('APPROVED','PAID') AND expense_date BETWEEN ? AND ?" + outScope,
                 outArgs);
 
@@ -73,8 +74,12 @@ public class TransactionController {
             totalOut = totalOut.add(decimal(e.get("amount")));
             items.add(item("OUT", e, (String) e.get("category")));
         }
+        // Strictly newest-created first: order by the actual recorded timestamp so
+        // money-in and money-out interleave chronologically instead of grouping by
+        // type (payment/expense ids are independent sequences, so an id-based sort
+        // would clump all payments then all expenses).
         items.sort(Comparator
-                .comparing((Map<String, Object> i) -> (LocalDate) i.get("date")).reversed()
+                .comparing((Map<String, Object> i) -> (LocalDateTime) i.get("at"), Comparator.reverseOrder())
                 .thenComparing(i -> ((Number) i.get("id")).longValue(), Comparator.reverseOrder()));
 
         Map<String, Object> summary = new LinkedHashMap<>();
@@ -99,8 +104,33 @@ public class TransactionController {
         item.put("category", category);
         item.put("amount", row.get("amount"));
         item.put("method", row.get("method"));
-        item.put("date", ((java.sql.Date) row.get("txnDate")).toLocalDate());
+        LocalDate date = toLocalDate(row.get("txnDate"));
+        item.put("date", date);
+        // Full recorded timestamp — the sort key and the time shown in the UI.
+        // The MySQL driver may hand back created_at as a LocalDateTime (Connector/J 8),
+        // a java.sql.Timestamp, or a date-only value; handle each so the real time
+        // survives (a naive Timestamp-only cast silently collapsed everything to
+        // midnight, which is why every row read "12:00 AM").
+        item.put("at", toLocalDateTime(row.get("createdAt"), date));
         return item;
+    }
+
+    private static LocalDate toLocalDate(Object value) {
+        if (value instanceof java.sql.Date d) return d.toLocalDate();
+        if (value instanceof java.sql.Timestamp ts) return ts.toLocalDateTime().toLocalDate();
+        if (value instanceof LocalDateTime ldt) return ldt.toLocalDate();
+        if (value instanceof LocalDate ld) return ld;
+        return LocalDate.parse(value.toString().substring(0, 10));
+    }
+
+    private static LocalDateTime toLocalDateTime(Object value, LocalDate fallbackDate) {
+        if (value instanceof LocalDateTime ldt) return ldt;
+        if (value instanceof java.sql.Timestamp ts) return ts.toLocalDateTime();
+        if (value instanceof java.time.OffsetDateTime odt) return odt.toLocalDateTime();
+        if (value instanceof java.time.Instant inst) {
+            return LocalDateTime.ofInstant(inst, java.time.ZoneId.systemDefault());
+        }
+        return fallbackDate.atStartOfDay();
     }
 
     private static BigDecimal decimal(Object value) {

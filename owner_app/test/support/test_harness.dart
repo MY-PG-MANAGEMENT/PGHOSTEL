@@ -142,6 +142,7 @@ class FakeAppState extends AppState {
     required String username,
     required String password,
     required String organizationName,
+    required String organizationEmail,
   }) async {
     registerCalls.add({
       'fullName': fullName,
@@ -149,6 +150,7 @@ class FakeAppState extends AppState {
       'username': username,
       'password': password,
       'organizationName': organizationName,
+      'organizationEmail': organizationEmail,
     });
     if (registerError != null) throw registerError!;
     isLoggedIn = true;

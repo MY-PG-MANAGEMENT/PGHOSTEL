@@ -6,6 +6,7 @@ import '../app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/animations.dart';
 import '../widgets/error_retry_view.dart';
+import '../widgets/skeleton.dart';
 
 /// Unified money-in / money-out ledger for a month: tenant payments (in)
 /// merged with approved expenses (out). Backed by `GET /api/transactions`.
@@ -75,6 +76,13 @@ String _relative(dynamic v) {
   return DateFormat('d MMM').format(d);
 }
 
+/// Time-of-day the transaction was recorded (from the `at` timestamp), e.g.
+/// "2:47 PM". Empty when no timestamp is available.
+String _timeOfDay(dynamic at) {
+  final d = _parseDate(at);
+  return d == null ? '' : DateFormat('h:mm a').format(d);
+}
+
 // ─────────────────────────────────────────────────────────────────── screen ──
 
 class _TransactionsScreenState extends State<TransactionsScreen> {
@@ -141,7 +149,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
         future: _future,
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
+            return const SkeletonList(showLeading: false);
           }
           if (snap.hasError) {
             return ErrorRetryView(error: snap.error!, onRetry: _reload);
@@ -486,9 +494,18 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                       fontSize: 14.5,
                       fontWeight: FontWeight.w700)),
               const SizedBox(height: 4),
-              Text(_relative(t['date']),
+              // Day + time both come from the creation timestamp (`at`) so the
+              // label matches the created-at sort order; fall back to the plain
+              // date only when no timestamp is present.
+              Text(_relative(t['at'] ?? t['date']),
                   style: const TextStyle(
                       color: PgColors.textTertiary, fontSize: 11.5)),
+              if (_timeOfDay(t['at']).isNotEmpty) ...[
+                const SizedBox(height: 1),
+                Text(_timeOfDay(t['at']),
+                    style: const TextStyle(
+                        color: PgColors.textTertiary, fontSize: 10.5)),
+              ],
             ],
           ),
         ],

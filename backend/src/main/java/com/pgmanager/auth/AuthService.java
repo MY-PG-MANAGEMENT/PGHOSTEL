@@ -112,6 +112,7 @@ public class AuthService {
         Facility organization = new Facility();
         organization.setFacilityTypeId(FacilityType.ORGANIZATION);
         organization.setFacilityName(request.organizationName());
+        organization.setEmail(request.organizationEmail());
         organization = facilityRepository.save(organization);
         organization.setFacilityCode("ORG_" + organization.getFacilityId());
         organization = facilityRepository.save(organization);
@@ -191,6 +192,11 @@ public class AuthService {
                 .ifPresent(token -> token.setRevoked(true));
     }
 
+    /** Issues an access + refresh token pair for an already-authenticated principal. */
+    public AuthResponse issueTokensFor(AppUserPrincipal principal) {
+        return issueTokens(principal);
+    }
+
     private AuthResponse issueTokens(AppUserPrincipal principal) {
         String accessToken = jwtService.createAccessToken(principal);
         String refreshTokenValue = randomToken();
@@ -201,7 +207,8 @@ public class AuthService {
         refreshToken.setExpiresAt(LocalDateTime.now().plusDays(refreshTokenDays));
         refreshTokenRepository.save(refreshToken);
 
-        return new AuthResponse(accessToken, refreshTokenValue, principal.organizationId(), principal.roleTypeId(), principal.fullName());
+        return new AuthResponse(accessToken, refreshTokenValue, principal.organizationId(),
+                principal.roleTypeId(), principal.fullName(), false, principal.partyId());
     }
 
     private String randomToken() {

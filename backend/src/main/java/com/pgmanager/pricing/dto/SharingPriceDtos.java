@@ -16,13 +16,15 @@ public final class SharingPriceDtos {
             @NotBlank String sharingType,
             @NotNull @DecimalMin("0") BigDecimal monthlyRent,
             @DecimalMin("0") BigDecimal securityDeposit,
-            @DecimalMin("0") BigDecimal acCharges
+            @DecimalMin("0") BigDecimal acCharges,
+            @DecimalMin("0") BigDecimal perDayPrice
     ) {}
 
     public record SharingPriceResponse(
             String sharingType,
             BigDecimal monthlyRent,
             BigDecimal securityDeposit,
-            BigDecimal acCharges
+            BigDecimal acCharges,
+            BigDecimal perDayPrice
     ) {}
 }

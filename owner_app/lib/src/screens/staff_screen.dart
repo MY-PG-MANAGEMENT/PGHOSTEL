@@ -7,6 +7,8 @@ import '../app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/validators.dart';
 import '../widgets/animations.dart';
+import '../widgets/app_toast.dart';
+import '../widgets/skeleton.dart';
 import '../widgets/error_retry_view.dart';
 
 /// Staff management: employees with a profession and monthly salary, a
@@ -119,12 +121,14 @@ class _StaffScreenState extends State<StaffScreen> {
     _reload();
   }
 
-  void _toast(String msg) {
+  void _toastSuccess(String msg, {String? title}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-          SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating));
+    AppToast.success(context, msg, title: title);
+  }
+
+  void _toastError(String msg) {
+    if (!mounted) return;
+    AppToast.error(context, msg);
   }
 
   // ─────────────────────────────────────────────────────────────── build ──
@@ -153,7 +157,7 @@ class _StaffScreenState extends State<StaffScreen> {
         future: _future,
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
+            return const SkeletonList();
           }
           if (snap.hasError) {
             return ErrorRetryView(error: snap.error!, onRetry: _reload);
@@ -489,12 +493,14 @@ class _StaffScreenState extends State<StaffScreen> {
       });
       final paid = (result['paid'] as num? ?? 0).toInt();
       final skipped = (result['skipped'] as num? ?? 0).toInt();
-      _toast(skipped > 0
-          ? '$paid paid · $skipped skipped (already paid or inactive)'
-          : '$paid salaries paid · ${_inr(_num(result['totalAmount']))}');
+      _toastSuccess(
+          skipped > 0
+              ? '$paid paid · $skipped skipped (already paid or inactive)'
+              : '$paid salaries paid · ${_inr(_num(result['totalAmount']))}',
+          title: 'Salaries Paid');
       _reload();
     } catch (e) {
-      _toast(e.toString().replaceFirst('Exception: ', ''));
+      _toastError(e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
@@ -630,10 +636,11 @@ class _StaffScreenState extends State<StaffScreen> {
       ),
     );
     if (result == 'deleted') {
-      _toast('Staff deleted');
+      _toastSuccess('Staff deleted', title: 'Staff Deleted');
       _reload();
     } else if (result == true) {
-      _toast(staff == null ? 'Staff added' : 'Staff updated');
+      _toastSuccess(staff == null ? 'Staff added' : 'Staff updated',
+          title: staff == null ? 'Staff Added' : 'Staff Updated');
       _reload();
     }
   }
@@ -724,9 +731,7 @@ class _StaffSheetState extends State<_StaffSheet> {
     } catch (e) {
       setState(() => _saving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: PgColors.danger));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -761,9 +766,7 @@ class _StaffSheetState extends State<_StaffSheet> {
     } catch (e) {
       setState(() => _saving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: PgColors.danger));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }

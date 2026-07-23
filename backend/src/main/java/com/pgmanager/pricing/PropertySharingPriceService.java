@@ -1,11 +1,14 @@
 package com.pgmanager.pricing;
 
+import com.pgmanager.common.cache.CacheConfig;
 import com.pgmanager.common.exception.NotFoundException;
 import com.pgmanager.facility.FacilityRepository;
 import com.pgmanager.pricing.dto.SharingPriceDtos.SharingPriceItem;
 import com.pgmanager.pricing.dto.SharingPriceDtos.SharingPriceResponse;
 import com.pgmanager.pricing.dto.SharingPriceDtos.SharingPriceUpsertRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +23,13 @@ public class PropertySharingPriceService {
     private final PropertySharingPriceRepository repo;
     private final FacilityRepository facilityRepo;
 
+    /**
+     * Cached per {@code org:propertyId} (see {@link CacheConfig#SHARING_PRICES}); prices
+     * change rarely (Price Master edits) and are evicted by {@link #upsert}. Note the
+     * bed-assignment path ({@code OccupancyService.resolveRent}) reads the repository
+     * directly, so it is always fresh and unaffected by this cache.
+     */
+    @Cacheable(cacheNames = CacheConfig.SHARING_PRICES, key = "#orgId + ':' + #propertyId")
     @Transactional(readOnly = true)
     public List<SharingPriceResponse> list(Long orgId, Long propertyId) {
         validateProperty(orgId, propertyId);
@@ -29,6 +39,7 @@ public class PropertySharingPriceService {
                 .toList();
     }
 
+    @CacheEvict(cacheNames = CacheConfig.SHARING_PRICES, key = "#orgId + ':' + #propertyId")
     @Transactional
     public List<SharingPriceResponse> upsert(Long orgId, Long propertyId, SharingPriceUpsertRequest req) {
         validateProperty(orgId, propertyId);
@@ -42,6 +53,7 @@ public class PropertySharingPriceService {
             entity.setMonthlyRent(item.monthlyRent());
             entity.setSecurityDeposit(item.securityDeposit() != null ? item.securityDeposit() : BigDecimal.ZERO);
             entity.setAcCharges(item.acCharges() != null ? item.acCharges() : BigDecimal.ZERO);
+            entity.setPerDayPrice(item.perDayPrice() != null ? item.perDayPrice() : BigDecimal.ZERO);
             repo.save(entity);
         }
         return list(orgId, propertyId);
@@ -60,6 +72,7 @@ public class PropertySharingPriceService {
     }
 
     private SharingPriceResponse toResponse(PropertySharingPrice p) {
-        return new SharingPriceResponse(p.getSharingType(), p.getMonthlyRent(), p.getSecurityDeposit(), p.getAcCharges());
+        return new SharingPriceResponse(p.getSharingType(), p.getMonthlyRent(), p.getSecurityDeposit(),
+                p.getAcCharges(), p.getPerDayPrice());
     }
 }
