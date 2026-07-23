@@ -38,4 +38,7 @@ public class PropertySharingPrice {
 
     @Column(name = "ac_charges", nullable = false, precision = 10, scale = 2)
     private BigDecimal acCharges = BigDecimal.ZERO;
+
+    @Column(name = "per_day_price", nullable = false, precision = 10, scale = 2)
+    private BigDecimal perDayPrice = BigDecimal.ZERO;
 }

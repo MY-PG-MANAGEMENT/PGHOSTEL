@@ -40,9 +40,11 @@ class OccupancyControllerTest {
         CurrentUser currentUser = mock(CurrentUser.class);
         lenient().when(currentUser.organizationId()).thenReturn(1L);
         lenient().when(currentUser.userLoginId()).thenReturn(7L);
+        com.pgmanager.billing.MoveInBillingService moveInBillingService =
+                mock(com.pgmanager.billing.MoveInBillingService.class);
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
-        mvc = MockMvcBuilders.standaloneSetup(new OccupancyController(occupancyService, currentUser, jdbc))
+        mvc = MockMvcBuilders.standaloneSetup(new OccupancyController(occupancyService, currentUser, jdbc, moveInBillingService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setValidator(validator)
                 .build();
@@ -92,7 +94,7 @@ class OccupancyControllerTest {
     void checkoutDelegatesToService() throws Exception {
         when(occupancyService.checkout(anyLong(), anyLong(), any()))
                 .thenReturn(new OccupancyResponse(1L, 1L, 50L, "OCCUPANT",
-                        LocalDate.of(2026, 1, 1), LocalDate.of(2026, 6, 30), null, null, null));
+                        LocalDate.of(2026, 1, 1), LocalDate.of(2026, 6, 30), null, null, null, null));
 
         mvc.perform(post("/api/occupancy/checkout").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"partyId\":1}"))

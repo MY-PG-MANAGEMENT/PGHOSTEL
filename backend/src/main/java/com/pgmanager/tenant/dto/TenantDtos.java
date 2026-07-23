@@ -82,6 +82,14 @@ public final class TenantDtos {
             String currentSharingType,
             boolean inTemporaryStay,
             Long tempBedFacilityId,
-            String tempBedName
+            String tempBedName,
+            // true when the temp stay is a Temporary Bed allocation (no expected
+            // checkout) — the only case that may be shifted to a permanent bed.
+            // false for a day-wise Temporary Stay (which ends via checkout).
+            boolean tempIsAllocation,
+            // Temporary-stay dates (null when not in a temporary stay): check-in
+            // and the planned checkout used by the day-wise Temporary Stay card.
+            LocalDate tempFromDate,
+            LocalDate tempExpectedCheckoutDate
     ) {}
 }

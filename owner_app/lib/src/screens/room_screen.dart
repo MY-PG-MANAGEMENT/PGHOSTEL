@@ -4,7 +4,9 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../utils/money.dart';
 import '../widgets/animations.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/async_action_button.dart';
 import '../widgets/error_retry_view.dart';
 import 'checkout_sheet.dart' show CheckoutSheet;
@@ -12,7 +14,7 @@ import 'tenant_screen.dart' show AddTenantScreen;
 
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-String _rupees(dynamic v) => v != null ? '₹$v' : '—';
+String _rupees(dynamic v) => inr(v);
 
 // â”€â”€â”€ Room Screen (facility tree: property â†’ floor â†’ room â†’ bed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -571,7 +573,10 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                       child: _BedTile(
                           bed: beds[i],
                           onAssigned: _loadBeds,
-                          propertyId: widget.propertyId),
+                          propertyId: widget.propertyId,
+                          sharingType:
+                              widget.room['sharingType']?.toString(),
+                          isAc: widget.room['isAc'] == true),
                     ),
                 ],
               );
@@ -611,12 +616,16 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                   'facilityTypeId': 'BED',
                   'facilityName': ctrl.text.trim(),
                 });
-                if (ctx.mounted) Navigator.pop(ctx, true);
+                if (ctx.mounted) {
+                  final messenger = ScaffoldMessenger.of(ctx);
+                  Navigator.pop(ctx, true);
+                  AppToast.successOf(messenger, 'Bed "${ctrl.text.trim()}" added',
+                      title: 'Bed Added');
+                }
               } catch (e) {
                 if (ctx.mounted) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-                      content:
-                          Text(e.toString().replaceFirst('Exception: ', ''))));
+                  AppToast.error(
+                      ctx, e.toString().replaceFirst('Exception: ', ''));
                 }
               }
             },
@@ -646,11 +655,17 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
 
 class _BedTile extends StatelessWidget {
   const _BedTile(
-      {required this.bed, required this.onAssigned, this.propertyId});
+      {required this.bed,
+      required this.onAssigned,
+      this.propertyId,
+      this.sharingType,
+      this.isAc = false});
 
   final Map<String, dynamic> bed;
   final VoidCallback onAssigned;
   final dynamic propertyId;
+  final String? sharingType;
+  final bool isAc;
 
   Future<void> _confirmCheckout(BuildContext context) async {
     final partyId = bed['occupantPartyId'];
@@ -715,6 +730,8 @@ class _BedTile extends StatelessWidget {
                       propertyId: propertyId != null
                           ? (propertyId as num).toInt()
                           : null,
+                      sharingType: sharingType,
+                      isAc: isAc,
                     ),
                   );
                   if (done == true) onAssigned();
@@ -986,8 +1003,8 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
                 onPressed: () async {
                   if (!_formKey.currentState!.validate()) return;
                   if (_selectedFloorId == null) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Select a floor first')));
+                    AppToast.info(context, 'Select a floor first',
+                        title: 'Select Floor');
                     return;
                   }
                   try {
@@ -1008,12 +1025,16 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
                       if (_capacity.text.isNotEmpty)
                         'capacity': int.parse(_capacity.text),
                     });
-                    if (mounted) Navigator.pop(context, true);
+                    if (mounted) {
+                      final messenger = ScaffoldMessenger.of(context);
+                      Navigator.pop(context, true);
+                      AppToast.successOf(messenger, 'Room added successfully',
+                          title: 'Room Added');
+                    }
                   } catch (e) {
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text(
-                              e.toString().replaceFirst('Exception: ', ''))));
+                      AppToast.error(
+                          context, e.toString().replaceFirst('Exception: ', ''));
                     }
                   }
                 },
@@ -1058,6 +1079,32 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
     _bedFuture = context.read<AppState>().apiClient.get('/rooms/$id/beds');
     _rent.text = widget.room['monthlyRent']?.toString() ?? '';
     _deposit.text = widget.room['securityDeposit']?.toString() ?? '';
+    // Fall back to the Price Master (per sharing type) when the room itself has
+    // no rent/deposit configured.
+    _loadStandardPrice();
+  }
+
+  // Prefills rent/deposit from the property's Price Master for this room's
+  // sharing type, without overwriting anything the room already provided.
+  void _loadStandardPrice() async {
+    final pid = widget.propertyId;
+    final sharingType = widget.room['sharingType']?.toString();
+    if (pid == null || sharingType == null) return;
+    try {
+      final result = await context.read<AppState>().apiClient.get(
+          '/properties/$pid/sharing-prices/$sharingType');
+      if (!mounted) return;
+      final rent = (result['monthlyRent'] as num?)?.toDouble();
+      final deposit = (result['securityDeposit'] as num?)?.toDouble();
+      setState(() {
+        if (rent != null && _rent.text.isEmpty) {
+          _rent.text = rent.toStringAsFixed(0);
+        }
+        if (deposit != null && deposit > 0 && _deposit.text.isEmpty) {
+          _deposit.text = deposit.toStringAsFixed(0);
+        }
+      });
+    } catch (_) {}
   }
 
   @override
@@ -1069,12 +1116,14 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
 
   Future<void> _pickFromDate() async {
     final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
     final picked = await showDatePicker(
       context: context,
-      initialDate: _fromDate,
-      firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 1),
-      helpText: 'Select move-in date',
+      initialDate: _fromDate.isBefore(today) ? today : _fromDate,
+      firstDate: today,
+      lastDate: tomorrow,
+      helpText: 'Select move-in date (today or tomorrow)',
     );
     if (picked != null) setState(() => _fromDate = picked);
   }
@@ -1238,10 +1287,8 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
               label: 'Assign',
               onPressed: () async {
                 if (_selectedTenant == null || _selectedBed == null) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Select both a bed and a tenant')),
-                  );
+                  AppToast.info(context, 'Select both a bed and a tenant',
+                      title: 'Selection Needed');
                   return;
                 }
                 final d = _fromDate;
@@ -1256,12 +1303,18 @@ class _AssignTenantSheetState extends State<_AssignTenantSheet> {
                     'bedFacilityId': _selectedBed!['facilityId'],
                     'fromDate': fromIso,
                   });
-                  if (mounted) Navigator.pop(context, true);
+                  if (mounted) {
+                    final messenger = ScaffoldMessenger.of(context);
+                    Navigator.pop(context, true);
+                    AppToast.successOf(
+                        messenger,
+                        'Bed assigned to ${_selectedTenant!['fullName'] ?? 'tenant'}',
+                        title: 'Bed Assigned');
+                  }
                 } catch (e) {
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(
-                            e.toString().replaceFirst('Exception: ', ''))));
+                    AppToast.error(
+                        context, e.toString().replaceFirst('Exception: ', ''));
                   }
                 }
               },
@@ -1298,10 +1351,6 @@ class AssignBedSheet extends StatefulWidget {
 class _AssignBedSheetState extends State<AssignBedSheet> {
   late Future<Map<String, dynamic>> _tenantFuture;
   Map<String, dynamic>? _selectedTenant;
-  // 'PERMANENT' = normal bed assignment with billing. 'TEMPORARY' = a no-billing
-  // holding stay; billing starts only when it is later made permanent (anchored
-  // to this temporary start date).
-  String _mode = 'PERMANENT';
   DateTime _fromDate = DateTime.now();
   DateTime? _checkoutDate;
   final _rent = TextEditingController();
@@ -1326,12 +1375,14 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
 
   Future<void> _pickFromDate() async {
     final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
     final picked = await showDatePicker(
       context: context,
-      initialDate: _fromDate,
-      firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 1),
-      helpText: 'Select move-in date',
+      initialDate: _fromDate.isBefore(today) ? today : _fromDate,
+      firstDate: today,
+      lastDate: tomorrow,
+      helpText: 'Select move-in date (today or tomorrow)',
     );
     if (picked != null) {
       final maxCheckout = DateTime(picked.year, picked.month + 1, picked.day);
@@ -1374,20 +1425,42 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
   }
 
   void _loadStandardPrice() async {
-    if (widget.propertyId == null || widget.sharingType == null) return;
+    final pid = widget.propertyId;
+    if (pid == null) return;
+    final wanted = widget.sharingType?.trim();
     try {
-      final result = await context.read<AppState>().apiClient.get(
-          '/properties/${widget.propertyId}/sharing-prices/${widget.sharingType}');
+      // Read the whole Price Master list for the property and match locally.
+      // This is more forgiving than the single-type endpoint (which 404s when
+      // the type is missing) and lets us tell "no price set" apart from a bug.
+      final result = await context
+          .read<AppState>()
+          .apiClient
+          .get('/properties/$pid/sharing-prices');
       if (!mounted) return;
-      final rent = (result['monthlyRent'] as num?)?.toDouble();
-      final deposit = (result['securityDeposit'] as num?)?.toDouble();
-      final ac = (result['acCharges'] as num?)?.toDouble();
+      final items = (result['items'] is List ? result['items'] as List : [])
+          .cast<Map<String, dynamic>>();
+      Map<String, dynamic>? match;
+      if (wanted != null && wanted.isNotEmpty) {
+        for (final p in items) {
+          if ('${p['sharingType']}'.trim() == wanted) {
+            match = p;
+            break;
+          }
+        }
+      } else if (items.length == 1) {
+        // No sharing type known but only one price configured — use it.
+        match = items.first;
+      }
+      if (match == null) return;
+      final rent = (match['monthlyRent'] as num?)?.toDouble();
+      final deposit = (match['securityDeposit'] as num?)?.toDouble();
+      final ac = (match['acCharges'] as num?)?.toDouble();
       setState(() {
         _standardRent = rent;
         if (rent != null && _rent.text.isEmpty) {
           _rent.text = rent.toStringAsFixed(0);
         }
-        if (deposit != null && _deposit.text.isEmpty) {
+        if (deposit != null && deposit > 0 && _deposit.text.isEmpty) {
           _deposit.text = deposit.toStringAsFixed(0);
         }
         if (ac != null && ac > 0 && _acCharges.text.isEmpty) {
@@ -1677,178 +1750,146 @@ class _AssignBedSheetState extends State<AssignBedSheet> {
               },
             ),
             const SizedBox(height: 12),
-            Center(
-              child: SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'PERMANENT',
-                      label: Text('Permanent'), icon: Icon(Icons.event_seat_outlined, size: 16)),
-                  ButtonSegment(value: 'TEMPORARY',
-                      label: Text('Temporary'), icon: Icon(Icons.timelapse_outlined, size: 16)),
-                ],
-                selected: {_mode},
-                onSelectionChanged: (s) => setState(() => _mode = s.first),
-              ),
-            ),
-            const SizedBox(height: 12),
             InkWell(
               onTap: _pickFromDate,
               borderRadius: BorderRadius.circular(8),
               child: InputDecorator(
-                decoration: InputDecoration(
-                  labelText: _mode == 'TEMPORARY' ? 'Start Date' : 'Move-in Date',
-                  prefixIcon: const Icon(Icons.calendar_today_outlined),
-                  border: const OutlineInputBorder(),
+                decoration: const InputDecoration(
+                  labelText: 'Move-in Date',
+                  prefixIcon: Icon(Icons.calendar_today_outlined),
+                  border: OutlineInputBorder(),
                 ),
                 child: Text(
                   '${_fromDate.day.toString().padLeft(2, '0')}-${_fromDate.month.toString().padLeft(2, '0')}-${_fromDate.year}',
                 ),
               ),
             ),
-            if (_mode == 'TEMPORARY') ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: PgColors.primary.withValues(alpha: 0.07),
-                  borderRadius: BorderRadius.circular(10),
+            const SizedBox(height: 12),
+            InkWell(
+              onTap: _pickCheckoutDate,
+              borderRadius: BorderRadius.circular(8),
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  labelText: 'Expected Checkout Date — Optional',
+                  prefixIcon: const Icon(Icons.event_available_outlined),
+                  border: const OutlineInputBorder(),
+                  suffixIcon: _checkoutDate != null
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 18),
+                          onPressed: () => setState(() => _checkoutDate = null),
+                        )
+                      : null,
                 ),
-                child: const Row(children: [
-                  Icon(Icons.info_outline, color: PgColors.primary, size: 18),
-                  SizedBox(width: 8),
-                  Expanded(child: Text(
-                    'No rent is charged for a temporary stay. When you make it permanent, '
-                    'billing starts from this start date.',
-                    style: TextStyle(fontSize: 12.5, color: PgColors.primary),
-                  )),
-                ]),
-              ),
-            ],
-            if (_mode == 'PERMANENT') ...[
-              const SizedBox(height: 12),
-              InkWell(
-                onTap: _pickCheckoutDate,
-                borderRadius: BorderRadius.circular(8),
-                child: InputDecorator(
-                  decoration: InputDecoration(
-                    labelText: 'Expected Checkout Date — Optional',
-                    prefixIcon: const Icon(Icons.event_available_outlined),
-                    border: const OutlineInputBorder(),
-                    suffixIcon: _checkoutDate != null
-                        ? IconButton(
-                            icon: const Icon(Icons.clear, size: 18),
-                            onPressed: () => setState(() => _checkoutDate = null),
-                          )
-                        : null,
-                  ),
-                  child: Text(
-                    _checkoutDate != null
-                        ? '${_checkoutDate!.day.toString().padLeft(2, '0')}-${_checkoutDate!.month.toString().padLeft(2, '0')}-${_checkoutDate!.year}'
-                        : 'Tap to set (leave empty for open-ended stay)',
-                    style: _checkoutDate == null
-                        ? TextStyle(color: Colors.grey[500])
-                        : null,
-                  ),
+                child: Text(
+                  _checkoutDate != null
+                      ? '${_checkoutDate!.day.toString().padLeft(2, '0')}-${_checkoutDate!.month.toString().padLeft(2, '0')}-${_checkoutDate!.year}'
+                      : 'Tap to set (leave empty for open-ended stay)',
+                  style: _checkoutDate == null
+                      ? TextStyle(color: Colors.grey[500])
+                      : null,
                 ),
               ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _rent,
-                      decoration: InputDecoration(
-                        labelText: 'Monthly Rent (₹)',
-                        prefixIcon: const Icon(Icons.currency_rupee),
-                        helperText: _standardRent != null
-                            ? 'Standard: ₹${_standardRent!.toStringAsFixed(0)}/mo'
-                            : null,
-                        helperStyle: const TextStyle(
-                            color: Color(0xFF2563EB), fontSize: 11),
-                      ),
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
-                      ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _rent,
+                    decoration: InputDecoration(
+                      labelText: 'Monthly Rent (₹)',
+                      prefixIcon: const Icon(Icons.currency_rupee),
+                      helperText: _standardRent != null
+                          ? 'Standard: ₹${_standardRent!.toStringAsFixed(0)}/mo'
+                          : null,
+                      helperStyle: const TextStyle(
+                          color: Color(0xFF2563EB), fontSize: 11),
                     ),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _deposit,
-                      decoration:
-                          const InputDecoration(labelText: 'Deposit (₹)'),
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
-                      ],
-                    ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextFormField(
+                    controller: _deposit,
+                    decoration:
+                        const InputDecoration(labelText: 'Deposit (₹)'),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+                    ],
                   ),
-                ],
-              ),
-              if (widget.isAc) ...[
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _acCharges,
-                  decoration: const InputDecoration(
-                    labelText: 'AC Charges (₹/month)',
-                    prefixIcon: Icon(Icons.ac_unit, size: 18),
-                    helperText: 'Added to monthly rent total',
-                    helperStyle: TextStyle(fontSize: 11),
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
                 ),
               ],
+            ),
+            if (widget.isAc) ...[
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _acCharges,
+                decoration: const InputDecoration(
+                  labelText: 'AC Charges (₹/month)',
+                  prefixIcon: Icon(Icons.ac_unit, size: 18),
+                  helperText: 'Added to monthly rent total',
+                  helperStyle: TextStyle(fontSize: 11),
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+              ),
             ],
             const SizedBox(height: 20),
             AsyncActionButton(
-              label: _mode == 'TEMPORARY' ? 'Start Temporary Stay' : 'Assign',
+              label: 'Assign',
               onPressed: () async {
                 if (_selectedTenant == null) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Please select a tenant')));
+                  AppToast.info(context, 'Please select a tenant',
+                      title: 'Select Tenant');
                   return;
                 }
+                final tenantName = '${_selectedTenant!['fullName'] ?? 'tenant'}';
                 try {
                   final d = _fromDate;
                   final fromIso =
                       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-                  if (_mode == 'TEMPORARY') {
-                    await context.read<AppState>().apiClient.post('/occupancy/temp-stay', {
-                      'partyId': _selectedTenant!['tenantId'],
-                      'bedFacilityId': widget.bedId,
-                      'fromDate': fromIso,
-                    });
-                  } else {
-                    final co = _checkoutDate;
-                    final baseRent = double.tryParse(_rent.text.trim()) ?? 0;
-                    final acAmt = widget.isAc
-                        ? (double.tryParse(_acCharges.text.trim()) ?? 0)
-                        : 0.0;
-                    final totalRent = baseRent + acAmt;
-                    await context
-                        .read<AppState>()
-                        .apiClient
-                        .post('/occupancy/assign-bed', {
-                      'partyId': _selectedTenant!['tenantId'],
-                      'bedFacilityId': widget.bedId,
-                      'fromDate': fromIso,
-                      if (co != null)
-                        'expectedCheckoutDate':
-                            '${co.year}-${co.month.toString().padLeft(2, '0')}-${co.day.toString().padLeft(2, '0')}',
-                      if (totalRent > 0) 'monthlyRent': totalRent,
-                      if (_deposit.text.trim().isNotEmpty)
-                        'securityDeposit': double.tryParse(_deposit.text.trim()),
-                    });
+                  final co = _checkoutDate;
+                  final baseRent = double.tryParse(_rent.text.trim()) ?? 0;
+                  final acAmt = widget.isAc
+                      ? (double.tryParse(_acCharges.text.trim()) ?? 0)
+                      : 0.0;
+                  // monthlyRent is the all-in total; acCharges tells the backend
+                  // how much of it is AC so the invoice can itemize the breakdown.
+                  final totalRent = baseRent + acAmt;
+                  await context
+                      .read<AppState>()
+                      .apiClient
+                      .post('/occupancy/assign-bed', {
+                    'partyId': _selectedTenant!['tenantId'],
+                    'bedFacilityId': widget.bedId,
+                    'fromDate': fromIso,
+                    if (co != null)
+                      'expectedCheckoutDate':
+                          '${co.year}-${co.month.toString().padLeft(2, '0')}-${co.day.toString().padLeft(2, '0')}',
+                    if (totalRent > 0) 'monthlyRent': totalRent,
+                    if (acAmt > 0) 'acCharges': acAmt,
+                    if (_deposit.text.trim().isNotEmpty)
+                      'securityDeposit': double.tryParse(_deposit.text.trim()),
+                  });
+                  if (mounted) {
+                    final messenger = ScaffoldMessenger.of(context);
+                    Navigator.pop(context, true);
+                    AppToast.successOf(
+                        messenger,
+                        '${widget.bedName} assigned to $tenantName',
+                        title: 'Bed Assigned');
                   }
-                  if (mounted) Navigator.pop(context, true);
                 } catch (e) {
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(
-                            e.toString().replaceFirst('Exception: ', ''))));
+                    AppToast.error(
+                        context, e.toString().replaceFirst('Exception: ', ''));
                   }
                 }
               },

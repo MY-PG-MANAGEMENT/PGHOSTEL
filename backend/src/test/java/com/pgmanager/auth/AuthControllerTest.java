@@ -37,11 +37,12 @@ class AuthControllerTest {
     @Test
     void registerOwnerReturns200ForValidBody() throws Exception {
         when(authService.registerOwner(any()))
-                .thenReturn(new AuthResponse("access", "refresh", 1L, "OWNER", "Asha Rao"));
+                .thenReturn(new AuthResponse("access", "refresh", 1L, "OWNER", "Asha Rao", false, 100L));
 
         mvc.perform(post("/api/auth/register-owner").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"fullName\":\"Asha Rao\",\"mobileNumber\":\"9876543210\"," +
-                                "\"username\":\"asha_rao\",\"password\":\"secret123\",\"organizationName\":\"Asha PG\"}"))
+                                "\"username\":\"asha_rao\",\"password\":\"secret123\",\"organizationName\":\"Asha PG\"," +
+                                "\"organizationEmail\":\"owner@ashapg.com\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.roleTypeId").value("OWNER"));
@@ -51,7 +52,8 @@ class AuthControllerTest {
     void registerOwnerRejectsBadMobile() throws Exception {
         mvc.perform(post("/api/auth/register-owner").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"fullName\":\"Asha Rao\",\"mobileNumber\":\"12\"," +
-                                "\"username\":\"asha_rao\",\"password\":\"secret123\",\"organizationName\":\"Asha PG\"}"))
+                                "\"username\":\"asha_rao\",\"password\":\"secret123\",\"organizationName\":\"Asha PG\"," +
+                                "\"organizationEmail\":\"owner@ashapg.com\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false));
         verify(authService, never()).registerOwner(any());
@@ -61,7 +63,8 @@ class AuthControllerTest {
     void registerOwnerRejectsShortPassword() throws Exception {
         mvc.perform(post("/api/auth/register-owner").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"fullName\":\"Asha Rao\",\"mobileNumber\":\"9876543210\"," +
-                                "\"username\":\"asha_rao\",\"password\":\"short\",\"organizationName\":\"Asha PG\"}"))
+                                "\"username\":\"asha_rao\",\"password\":\"short\",\"organizationName\":\"Asha PG\"," +
+                                "\"organizationEmail\":\"owner@ashapg.com\"}"))
                 .andExpect(status().isBadRequest());
         verify(authService, never()).registerOwner(any());
     }

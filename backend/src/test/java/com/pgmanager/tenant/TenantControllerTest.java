@@ -40,7 +40,9 @@ class TenantControllerTest {
         validator.afterPropertiesSet();
 
         SelfCheckinTokenService selfCheckinTokenService = mock(SelfCheckinTokenService.class);
-        mvc = MockMvcBuilders.standaloneSetup(new TenantController(tenantService, currentUser, selfCheckinTokenService))
+        TenantLoginPolicy tenantLoginPolicy = mock(TenantLoginPolicy.class);
+        TenantLoginService tenantLoginService = mock(TenantLoginService.class);
+        mvc = MockMvcBuilders.standaloneSetup(new TenantController(tenantService, currentUser, selfCheckinTokenService, tenantLoginPolicy, tenantLoginService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setValidator(validator)
                 .build();

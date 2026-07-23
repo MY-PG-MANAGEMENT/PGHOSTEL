@@ -29,6 +29,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**", "/api/public/**", "/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/super-admin/**").hasRole(RoleType.SUPER_ADMIN)
+                        // Tenant portal — must precede the generic /api/** guard (which excludes TENANT).
+                        .requestMatchers("/api/tenant/**").hasRole(RoleType.TENANT)
                         .requestMatchers("/api/**").hasAnyRole(
                                 RoleType.OWNER, RoleType.PROPERTY_MANAGER, RoleType.MANAGER,
                                 RoleType.ACCOUNTANT, RoleType.SUPPORT, RoleType.VIEWER)

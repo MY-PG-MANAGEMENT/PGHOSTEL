@@ -1,0 +1,847 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PG Manager — Database Schema</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>html,body{margin:0}img{max-width:100%}</style>
+</head>
+<body>
+<button id="themeToggle" aria-label="Toggle theme"
+ style="position:fixed;top:14px;right:16px;z-index:50;font:600 13px ui-monospace,Menlo,Consolas,monospace;
+ padding:8px 12px;border-radius:999px;cursor:pointer;border:1px solid #c6cfdc;background:#fff;color:#161b26;box-shadow:0 4px 14px -6px rgba(0,0,0,.3)">◐ theme</button>
+<title>PG Manager — Database Schema</title>
+<style>
+  :root{
+    --ground:#eef1f5;
+    --surface:#ffffff;
+    --surface-2:#f6f8fb;
+    --ink:#161b26;
+    --muted:#5a6577;
+    --faint:#8b95a6;
+    --border:#dde3ec;
+    --border-strong:#c6cfdc;
+    --accent:#2b5bd7;
+    --accent-soft:#e7edfc;
+    --drafting:#fbfcfe;      /* fixed light ground for diagrams, both themes */
+    --drafting-ink:#161b26;
+    --drafting-border:#d3dbe8;
+    --code-bg:#eef2f8;
+    --code-ink:#243049;
+    --shadow:0 1px 2px rgba(20,27,38,.04), 0 8px 24px -12px rgba(20,27,38,.12);
+    /* module hues */
+    --m-access:#4a6bd6;
+    --m-facility:#0f9b8e;
+    --m-occupancy:#bd8410;
+    --m-billing:#2b8a4e;
+    --m-expense:#c92a63;
+    --m-staff:#6c48d0;
+    --m-complaint:#dd5a0b;
+    --m-notify:#0f8fa8;
+    --m-platform:#64708200;
+    --m-platform-solid:#647082;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --ground:#0e131b;
+      --surface:#161d28;
+      --surface-2:#1b2330;
+      --ink:#e7ecf3;
+      --muted:#9aa5b6;
+      --faint:#6b7789;
+      --border:#26303f;
+      --border-strong:#33404f;
+      --accent:#6f97ff;
+      --accent-soft:#1c2740;
+      --code-bg:#1d2735;
+      --code-ink:#c3d0e6;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 12px 30px -14px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="light"]{
+    --ground:#eef1f5;--surface:#ffffff;--surface-2:#f6f8fb;--ink:#161b26;--muted:#5a6577;--faint:#8b95a6;
+    --border:#dde3ec;--border-strong:#c6cfdc;--accent:#2b5bd7;--accent-soft:#e7edfc;--code-bg:#eef2f8;--code-ink:#243049;
+    --shadow:0 1px 2px rgba(20,27,38,.04), 0 8px 24px -12px rgba(20,27,38,.12);
+  }
+  :root[data-theme="dark"]{
+    --ground:#0e131b;--surface:#161d28;--surface-2:#1b2330;--ink:#e7ecf3;--muted:#9aa5b6;--faint:#6b7789;
+    --border:#26303f;--border-strong:#33404f;--accent:#6f97ff;--accent-soft:#1c2740;--code-bg:#1d2735;--code-ink:#c3d0e6;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 12px 30px -14px rgba(0,0,0,.6);
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.6;-webkit-font-smoothing:antialiased;}
+  .mono{font-family:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,"Liberation Mono",monospace;}
+  code{font-family:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+    background:var(--code-bg);color:var(--code-ink);padding:.08em .38em;border-radius:5px;font-size:.86em;
+    border:1px solid var(--border);white-space:nowrap;}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+
+  /* ---- masthead ---- */
+  header.top{border-bottom:1px solid var(--border);background:
+     linear-gradient(180deg,var(--surface),var(--surface-2));}
+  .masthead{padding:46px 24px 40px;max-width:1120px;margin:0 auto;}
+  .eyebrow{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--accent);font-weight:600;margin:0 0 14px}
+  h1{font-size:clamp(30px,5vw,46px);line-height:1.04;margin:0 0 16px;letter-spacing:-.02em;
+    text-wrap:balance;font-weight:700}
+  .lede{font-size:18px;color:var(--muted);max-width:60ch;margin:0}
+  .meta-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+  .pill{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;padding:6px 12px;border-radius:999px;
+    border:1px solid var(--border-strong);background:var(--surface);color:var(--muted);display:inline-flex;gap:7px;align-items:center}
+  .pill b{color:var(--ink);font-weight:600}
+  .dot{width:8px;height:8px;border-radius:50%}
+
+  /* ---- TOC ---- */
+  nav.toc{margin:34px auto 8px;}
+  .toc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+  .toc-item{display:flex;align-items:center;gap:11px;padding:12px 14px;background:var(--surface);
+    border:1px solid var(--border);border-radius:11px;font-size:14px;transition:border-color .15s,transform .15s;box-shadow:var(--shadow)}
+  .toc-item:hover{border-color:var(--accent);text-decoration:none;transform:translateY(-1px)}
+  .toc-item .num{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--faint);width:18px}
+  .toc-item span.lbl{color:var(--ink);font-weight:500}
+
+  /* ---- sections ---- */
+  section{margin:56px auto;scroll-margin-top:20px}
+  .sec-head{display:flex;align-items:baseline;gap:14px;border-left:4px solid var(--mh,var(--accent));
+    padding:2px 0 2px 16px;margin-bottom:8px}
+  .sec-head .idx{font-family:ui-monospace,Menlo,monospace;font-size:13px;color:var(--mh,var(--accent));font-weight:600;letter-spacing:.05em}
+  .sec-head h2{font-size:26px;margin:0;letter-spacing:-.015em;font-weight:700}
+  .sec-sub{color:var(--muted);margin:0 0 22px 20px;max-width:70ch}
+  .sec-sub code{white-space:normal}
+
+  /* ---- diagram canvas: fixed light drafting ground both themes ---- */
+  .diagram{background:var(--drafting);border:1px solid var(--drafting-border);border-radius:14px;
+    padding:20px;overflow-x:auto;box-shadow:var(--shadow);
+    background-image:radial-gradient(var(--drafting-border) .5px,transparent .5px);background-size:22px 22px;background-position:-1px -1px}
+  .diagram pre.mermaid{margin:0;background:transparent;min-width:min-content;text-align:center}
+  .cap{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;letter-spacing:.05em;color:var(--faint);
+    text-transform:uppercase;margin:14px 4px 0;display:flex;align-items:center;gap:8px}
+
+  /* ---- tables ---- */
+  .tbl-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px;margin-top:20px;box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;background:var(--surface);min-width:640px}
+  thead th{background:var(--surface-2);text-align:left;padding:11px 14px;font-size:11px;letter-spacing:.09em;
+    text-transform:uppercase;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border-strong);position:sticky;top:0}
+  tbody td{padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--surface-2)}
+  td.tname code{background:var(--accent-soft);color:var(--accent);border-color:transparent;font-weight:600}
+  .fk{color:var(--muted);font-size:12.5px}
+  .badge{font-family:ui-monospace,Menlo,monospace;font-size:10.5px;padding:1px 6px;border-radius:5px;border:1px solid var(--border-strong);
+    color:var(--muted);background:var(--surface-2);white-space:nowrap}
+
+  /* ---- callouts ---- */
+  .note{border:1px solid var(--border);border-left:4px solid var(--accent);background:var(--surface);
+    border-radius:10px;padding:16px 18px;margin-top:22px;box-shadow:var(--shadow)}
+  .note h4{margin:0 0 6px;font-size:14.5px}
+  .note p{margin:0;color:var(--muted);font-size:14px}
+  .note.warn{border-left-color:var(--m-complaint)}
+  .conv{background:var(--surface-2);border:1px dashed var(--border-strong);border-radius:10px;padding:14px 18px;margin-top:18px;font-size:14px;color:var(--muted)}
+  .conv b{color:var(--ink)}
+
+  footer{border-top:1px solid var(--border);margin-top:64px;background:var(--surface)}
+  .foot{max-width:1120px;margin:0 auto;padding:26px 24px;color:var(--faint);font-size:13px;
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+  hr.rule{border:none;border-top:1px solid var(--border);margin:0}
+  @media (max-width:640px){ .masthead{padding:34px 20px 30px} .wrap{padding:0 18px} }
+</style>
+
+<header class="top">
+  <div class="masthead">
+    <p class="eyebrow">Modular Monolith · MySQL · Flyway V1→V24</p>
+    <h1>PG Manager — Database Schema</h1>
+    <p class="lede">A module-by-module map of the live schema: every table, its keys, its relationships, and how data flows across the paying-guest management system. Reflects the current migration state after V24 pruned the unused data model.</p>
+    <div class="meta-row">
+      <span class="pill"><span class="dot" style="background:var(--m-billing)"></span><b>~40</b>&nbsp;live tables</span>
+      <span class="pill"><span class="dot" style="background:var(--accent)"></span><b>9</b>&nbsp;modules</span>
+      <span class="pill"><span class="dot" style="background:var(--m-facility)"></span>2 backbone tables:&nbsp;<b>facility</b> · <b>party</b></span>
+      <span class="pill">shared-DB multi-tenancy · <b>organization_id</b> everywhere</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="toc" aria-label="Modules">
+    <div class="toc-grid">
+      <a class="toc-item" href="#overview"><span class="num">00</span><span class="dot" style="background:var(--accent)"></span><span class="lbl">Backbone &amp; Overview</span></a>
+      <a class="toc-item" href="#access"><span class="num">01</span><span class="dot" style="background:var(--m-access)"></span><span class="lbl">Identity &amp; Access</span></a>
+      <a class="toc-item" href="#facility"><span class="num">02</span><span class="dot" style="background:var(--m-facility)"></span><span class="lbl">Facility Hierarchy</span></a>
+      <a class="toc-item" href="#occupancy"><span class="num">03</span><span class="dot" style="background:var(--m-occupancy)"></span><span class="lbl">Occupancy &amp; Tenant</span></a>
+      <a class="toc-item" href="#billing"><span class="num">04</span><span class="dot" style="background:var(--m-billing)"></span><span class="lbl">Billing &amp; Payments</span></a>
+      <a class="toc-item" href="#expense"><span class="num">05</span><span class="dot" style="background:var(--m-expense)"></span><span class="lbl">Expenses</span></a>
+      <a class="toc-item" href="#staff"><span class="num">06</span><span class="dot" style="background:var(--m-staff)"></span><span class="lbl">Staff / Employees</span></a>
+      <a class="toc-item" href="#complaint"><span class="num">07</span><span class="dot" style="background:var(--m-complaint)"></span><span class="lbl">Complaints &amp; Notices</span></a>
+      <a class="toc-item" href="#notify"><span class="num">08</span><span class="dot" style="background:var(--m-notify)"></span><span class="lbl">Notifications</span></a>
+      <a class="toc-item" href="#platform"><span class="num">09</span><span class="dot" style="background:var(--m-platform-solid)"></span><span class="lbl">Platform &amp; Settings</span></a>
+      <a class="toc-item" href="#flow"><span class="num">→</span><span class="dot" style="background:var(--ink)"></span><span class="lbl">End-to-end Data Flow</span></a>
+    </div>
+  </nav>
+
+  <!-- ================= OVERVIEW ================= -->
+  <section id="overview">
+    <div class="sec-head" style="--mh:var(--accent)"><span class="idx">00</span><h2>The two backbone tables</h2></div>
+    <p class="sec-sub">Everything hangs off two hubs. <code>facility</code> is a single polymorphic table for the entire hierarchy — ORGANIZATION → PROPERTY → FLOOR → ROOM → BED — distinguished by <code>facility_type_id</code>. The organization <em>is itself</em> a facility row, and its <code>facility_id</code> doubles as the <code>organization_id</code> used by every other table. <code>party</code> is a generic actor; <code>person</code> holds human detail 1:1. Tree edges live in <code>facility_group_member</code>; who-occupies-what lives in <code>facility_party</code>.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'primaryColor':'#eef2fb','primaryBorderColor':'#4a6bd6','primaryTextColor':'#161b26','lineColor':'#8791a3','tertiaryColor':'#fff','fontFamily':'ui-monospace, Menlo, Consolas, monospace','fontSize':'13px'}}}%%
+erDiagram
+  FACILITY  ||--o{ FACILITY_GROUP_MEMBER : "parent edge"
+  FACILITY  ||--o{ FACILITY_GROUP_MEMBER : "child edge"
+  FACILITY  ||--o{ FACILITY_PARTY : "org / property / bed scope"
+  PARTY     ||--|| PERSON : "1:1 human detail"
+  PARTY     ||--o{ FACILITY_PARTY : "membership + occupancy"
+  PARTY     ||--o{ USER_LOGIN : "credentials"
+  FACILITY  ||--o{ USER_LOGIN : "org of login"
+  FACILITY  {
+    bigint  facility_id PK
+    bigint  organization_id FK "self → facility"
+    varchar facility_type_id "ORG/PROPERTY/FLOOR/ROOM/BED"
+    varchar facility_code UK
+    varchar sharing_type
+    int     capacity
+    decimal monthly_rent
+    tinyint is_ac
+  }
+  PARTY {
+    bigint  party_id PK
+    varchar party_type_id
+    varchar status
+  }
+  PERSON {
+    bigint  party_id PK "FK → party"
+    varchar full_name
+    varchar mobile_number
+    tinyint has_vehicle
+  }
+  FACILITY_GROUP_MEMBER {
+    bigint parent_facility_id FK
+    bigint child_facility_id FK
+    date   from_date
+    date   thru_date
+  }
+  FACILITY_PARTY {
+    bigint  facility_party_id PK
+    bigint  facility_id FK
+    bigint  party_id FK
+    varchar role_type_id "TENANT/OCCUPANT/TEMP_OCCUPANT"
+    date    from_date
+    date    thru_date
+  }
+      </pre>
+    </div>
+    <p class="cap">Fig. 00 — Backbone. The whole physical tree and every membership resolve through these five tables.</p>
+    <div class="conv"><b>Reading the hierarchy:</b> to find a bed's room / floor / property, walk <code>facility_group_member</code> upward (BED → ROOM → FLOOR → PROPERTY). There are no parent columns on <code>facility</code> itself — the tree is entirely edge-driven and dated, so history is preserved.</div>
+  </section>
+
+  <!-- ================= 01 ACCESS ================= -->
+  <section id="access">
+    <div class="sec-head" style="--mh:var(--m-access)"><span class="idx">01</span><h2>Identity &amp; Access</h2></div>
+    <p class="sec-sub">Authentication, RBAC and the audit trail. A <code>party</code> gains a <code>person</code> profile (identity) and a <code>user_login</code> (access). Authority flows <code>user_login.role_type_id → role_type → role_permission → permission</code>. Tenant logins reuse this table with username scheme <code>{mobile}@{orgId}</code>.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'primaryColor':'#e9edfb','primaryBorderColor':'#4a6bd6','primaryTextColor':'#161b26','lineColor':'#8791a3','fontFamily':'ui-monospace, Menlo, Consolas, monospace','fontSize':'13px'}}}%%
+erDiagram
+  PARTY        ||--|| PERSON : "1:1"
+  PARTY        ||--o{ USER_LOGIN : has
+  USER_LOGIN   ||--o{ REFRESH_TOKEN : issues
+  USER_LOGIN   ||--o{ PASSWORD_RESET_TOKEN : requests
+  USER_LOGIN   ||--o{ USER_DEVICE : registers
+  USER_LOGIN   ||--o{ USER_PREFERENCE : keeps
+  USER_LOGIN   ||--o{ AUDIT_LOG : "acts in"
+  ROLE_TYPE    ||--o{ ROLE_PERMISSION : grants
+  PERMISSION   ||--o{ ROLE_PERMISSION : "granted via"
+  ROLE_TYPE    ||--o{ USER_LOGIN : "role of"
+  USER_LOGIN {
+    bigint  user_login_id PK
+    bigint  party_id FK
+    bigint  organization_id FK
+    varchar username UK
+    varchar role_type_id
+    tinyint must_change_password
+    varchar disabled_reason
+    datetime last_login_at
+  }
+  ROLE_TYPE {
+    varchar role_type_id PK
+    varchar parent_role_type_id FK
+  }
+  PERMISSION { varchar permission_id PK
+    varchar module_code }
+  ROLE_PERMISSION {
+    varchar role_type_id PK
+    varchar permission_id PK
+    datetime from_date PK
+  }
+  REFRESH_TOKEN { bigint refresh_token_id PK
+    varchar token_hash UK }
+  AUDIT_LOG { bigint audit_log_id PK
+    varchar action
+    varchar entity_type }
+      </pre>
+    </div>
+    <p class="cap">Fig. 01 — Auth &amp; RBAC.</p>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Table</th><th>PK</th><th>Key FKs</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="tname"><code>party</code></td><td class="mono">party_id</td><td class="fk">—</td><td>Generic actor (PERSON today). Root of every human record.</td></tr>
+        <tr><td class="tname"><code>person</code></td><td class="mono">party_id</td><td class="fk">→ party (1:1)</td><td>Human profile: name, mobile, email, aadhaar, guardian, employer, <code>has_vehicle</code> (V15).</td></tr>
+        <tr><td class="tname"><code>user_login</code></td><td class="mono">user_login_id</td><td class="fk">→ party, → facility (org)</td><td>Credentials + <code>role_type_id</code>, <code>status</code>. V22 tenant-login columns: <code>must_change_password</code>, <code>disabled_reason</code>, <code>last_login_at</code>.</td></tr>
+        <tr><td class="tname"><code>refresh_token</code></td><td class="mono">refresh_token_id</td><td class="fk">→ user_login</td><td>SHA-256 hashes of refresh tokens (raw never stored).</td></tr>
+        <tr><td class="tname"><code>password_reset_token</code></td><td class="mono">password_reset_token_id</td><td class="fk">→ user_login</td><td>Forgot / reset-password flow.</td></tr>
+        <tr><td class="tname"><code>user_device</code></td><td class="mono">user_device_id</td><td class="fk">→ user_login</td><td>Device + biometric + push-token registry.</td></tr>
+        <tr><td class="tname"><code>user_preference</code></td><td class="mono">user_login_id, preference_key</td><td class="fk">→ user_login</td><td>Per-user key/value preferences.</td></tr>
+        <tr><td class="tname"><code>role_type</code></td><td class="mono">role_type_id</td><td class="fk">self (parent role)</td><td>SUPER_ADMIN, OWNER, PROPERTY_MANAGER, MANAGER, ACCOUNTANT, SUPPORT, VIEWER, TENANT, OCCUPANT.</td></tr>
+        <tr><td class="tname"><code>permission</code></td><td class="mono">permission_id</td><td class="fk">—</td><td>Module-level permission catalog.</td></tr>
+        <tr><td class="tname"><code>role_permission</code></td><td class="mono">role+perm+from_date</td><td class="fk">→ role_type, → permission</td><td>Which role holds which permission (dated).</td></tr>
+        <tr><td class="tname"><code>audit_log</code></td><td class="mono">audit_log_id</td><td class="fk">→ facility (org), → user_login</td><td>Significant state-change trail (<code>AuditService.log</code>).</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ================= 02 FACILITY ================= -->
+  <section id="facility">
+    <div class="sec-head" style="--mh:var(--m-facility)"><span class="idx">02</span><h2>Property / Facility Hierarchy</h2></div>
+    <p class="sec-sub">Property, Floor, Room and Bed are all the same <code>facility</code> table — one polymorphic model. Edges live in <code>facility_group_member</code>; the rent card lives in <code>property_sharing_price</code>, which drives <code>OccupancyService.resolveRent</code>.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'primaryColor':'#e4f4f1','primaryBorderColor':'#0f9b8e','primaryTextColor':'#161b26','lineColor':'#8791a3','fontFamily':'ui-monospace, Menlo, Consolas, monospace','fontSize':'13px'}}}%%
+erDiagram
+  FACILITY ||--o{ FACILITY_GROUP_MEMBER : "parent"
+  FACILITY ||--o{ FACILITY_GROUP_MEMBER : "child"
+  FACILITY ||--o{ PROPERTY_SHARING_PRICE : "rent card"
+  FACILITY ||--o{ FACILITY_AMENITY : has
+  AMENITY_TYPE ||--o{ FACILITY_AMENITY : "typed by"
+  FACILITY {
+    bigint  facility_id PK
+    varchar facility_code UK
+    bigint  organization_id FK
+    varchar facility_type_id
+    varchar sharing_type "1-6"
+    int     capacity
+    decimal monthly_rent
+    decimal security_deposit
+    tinyint is_ac
+    varchar email
+    bigint  version "optimistic lock"
+  }
+  PROPERTY_SHARING_PRICE {
+    bigint  id PK
+    bigint  property_facility_id FK
+    varchar sharing_type
+    decimal monthly_rent
+    decimal security_deposit
+    decimal ac_charges
+  }
+  FACILITY_AMENITY {
+    bigint  facility_id PK
+    varchar amenity_type_id PK
+    tinyint available
+  }
+  AMENITY_TYPE { varchar amenity_type_id PK
+    varchar name }
+      </pre>
+    </div>
+    <p class="cap">Fig. 02 — Inventory. Self-referential tree plus pricing &amp; amenities.</p>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Table</th><th>PK</th><th>Key FKs</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="tname"><code>facility</code></td><td class="mono">facility_id</td><td class="fk">organization_id → facility (self)</td><td>Every node. <code>facility_code</code> (V6, unique), <code>sharing_type</code> ('1'–'6'), <code>capacity</code>, <code>monthly_rent</code>, <code>is_ac</code> (V14), <code>email</code> (V19), optimistic-lock <code>version</code>.</td></tr>
+        <tr><td class="tname"><code>facility_group_member</code></td><td class="mono">facility_group_member_id</td><td class="fk">parent &amp; child → facility</td><td>The tree edges (dated <code>from_date</code>/<code>thru_date</code>). Written by <code>FacilityService.link()</code>.</td></tr>
+        <tr><td class="tname"><code>property_sharing_price</code></td><td class="mono">id</td><td class="fk">property_facility_id → facility</td><td>Rent card: <code>(property, sharing_type) → rent, deposit, ac_charges</code> (V7/V14).</td></tr>
+        <tr><td class="tname"><code>amenity_type</code></td><td class="mono">amenity_type_id</td><td class="fk">—</td><td>WiFi, CCTV, AC, Food… catalog.</td></tr>
+        <tr><td class="tname"><code>facility_amenity</code></td><td class="mono">facility_id, amenity_type_id</td><td class="fk">→ facility, → amenity_type</td><td>Which amenities a facility offers.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ================= 03 OCCUPANCY ================= -->
+  <section id="occupancy">
+    <div class="sec-head" style="--mh:var(--m-occupancy)"><span class="idx">03</span><h2>Occupancy &amp; Tenant</h2></div>
+    <p class="sec-sub">Where a <em>person</em> becomes a <em>tenant in a bed</em>. <code>facility_party</code> is the membership/occupancy join, carrying a role and a date range. The formal admission flow (<code>admission → agreement / checkout</code>) sits alongside it.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'primaryColor':'#f6eed9','primaryBorderColor':'#bd8410','primaryTextColor':'#161b26','lineColor':'#8791a3','fontFamily':'ui-monospace, Menlo, Consolas, monospace','fontSize':'13px'}}}%%
+erDiagram
+  PARTY ||--o{ FACILITY_PARTY : "member / occupant"
+  FACILITY ||--o{ FACILITY_PARTY : "scope (org/prop/bed)"
+  PARTY ||--o{ SCHEDULED_BED_TRANSFER : "deferred move"
+  PARTY ||--o{ TENANT_EMPLOYMENT : "work history"
+  PARTY ||--o{ EMERGENCY_CONTACT : lists
+  PARTY ||--o{ IDENTITY_DOCUMENT : "ID docs"
+  PARTY ||--o{ ADMISSION : "admitted via"
+  FACILITY ||--o{ ADMISSION : "into bed"
+  ADMISSION ||--o{ AGREEMENT : "papered by"
+  ADMISSION ||--|| CHECKOUT : "closed by"
+  FACILITY_PARTY {
+    bigint  facility_party_id PK
+    bigint  organization_id FK
+    bigint  facility_id FK
+    bigint  party_id FK
+    varchar role_type_id "TENANT / OCCUPANT / TEMP_OCCUPANT"
+    date    from_date
+    date    thru_date "NULL = active"
+    decimal monthly_rent
+    decimal ac_charges
+    decimal security_deposit
+    date    expected_checkout_date
+  }
+  SCHEDULED_BED_TRANSFER {
+    bigint  scheduled_bed_transfer_id PK
+    bigint  party_id
+    bigint  to_bed_facility_id
+    date    effective_date
+    varchar status "PENDING"
+  }
+  ADMISSION { bigint admission_id PK
+    bigint bed_facility_id FK
+    date move_in_date
+    decimal monthly_rent }
+  CHECKOUT { bigint checkout_id PK
+    bigint admission_id FK,UK
+    decimal refundable_deposit }
+  AGREEMENT { bigint agreement_id PK
+    bigint admission_id FK
+    varchar agreement_number }
+      </pre>
+    </div>
+    <p class="cap">Fig. 03 — Occupancy. <code>facility_party</code> is the day-to-day truth; admission/agreement/checkout formalize it.</p>
+    <div class="conv">
+      <b>The critical occupancy convention.</b> Creating a tenant writes <b>two</b> <code>TENANT</code> rows — one at <code>facility_id = organizationId</code> (drives <code>TenantService.list()</code>) and one at <code>facility_id = propertyId</code> (property-scoped lists). The <b>bed</b> assignment is a separate <code>OCCUPANT</code> row (null <code>thru_date</code> = active). <code>TEMP_OCCUPANT</code> = temporary stay, deliberately excluded from billing. Role strings live in <code>OccupancyRole</code>.
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Table</th><th>PK</th><th>Key FKs</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="tname"><code>facility_party</code></td><td class="mono">facility_party_id</td><td class="fk">→ org, → facility, → party</td><td>Membership/occupancy join. Role + dates. Extra cols: <code>monthly_rent</code>, <code>security_deposit</code> (V7), <code>expected_checkout_date</code> (V8), <code>ac_charges</code> (V18 breakdown).</td></tr>
+        <tr><td class="tname"><code>scheduled_bed_transfer</code></td><td class="mono">scheduled_bed_transfer_id</td><td class="fk">party, beds <span class="badge">logical</span></td><td>Deferred sharing-change transfers (V13). PENDING until <code>effective_date</code>, applied by <code>BedTransferScheduler</code>.</td></tr>
+        <tr><td class="tname"><code>tenant_employment</code></td><td class="mono">tenant_employment_id</td><td class="fk">→ org, → party</td><td>Employment history (dated).</td></tr>
+        <tr><td class="tname"><code>emergency_contact</code></td><td class="mono">emergency_contact_id</td><td class="fk">→ org, → party</td><td>Emergency contacts.</td></tr>
+        <tr><td class="tname"><code>identity_document</code></td><td class="mono">identity_document_id</td><td class="fk">→ org, → party</td><td>ID docs + verification status. (V24 dropped its <code>content_reference_id</code>.)</td></tr>
+        <tr><td class="tname"><code>admission</code></td><td class="mono">admission_id</td><td class="fk">→ org, → party, → facility (bed)</td><td>Formal move-in record used by the admission <code>sign</code> flow.</td></tr>
+        <tr><td class="tname"><code>agreement</code></td><td class="mono">agreement_id</td><td class="fk">→ admission</td><td>Accommodation agreement, unique <code>agreement_number</code>.</td></tr>
+        <tr><td class="tname"><code>checkout</code></td><td class="mono">checkout_id</td><td class="fk">→ admission (unique)</td><td>Checkout settlement — one per admission.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ================= 04 BILLING ================= -->
+  <section id="billing">
+    <div class="sec-head" style="--mh:var(--m-billing)"><span class="idx">04</span><h2>Billing &amp; Payments</h2></div>
+    <p class="sec-sub">Two layers coexist: a legacy <code>rent</code>/<code>payment</code> layer and the normalized <code>billing_account</code>/<code>invoice</code> layer (V1 backfilled the latter from the former). The whole module runs on raw <code>JdbcTemplate</code> in <code>BillingController</code>.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'primaryColor':'#e2f1e8','primaryBorderColor':'#2b8a4e','primaryTextColor':'#161b26','lineColor':'#8791a3','fontFamily':'ui-monospace, Menlo, Consolas, monospace','fontSize':'13px'}}}%%
+erDiagram
+  BILLING_ACCOUNT ||--o{ INVOICE : issues
+  INVOICE ||--o{ INVOICE_ITEM : "line items"
+  INVOICE ||--o{ PAYMENT_ALLOCATION : "settled by"
+  PAYMENT ||--o{ PAYMENT_ALLOCATION : "applied via"
+  PAYMENT ||--o{ PAYMENT_REFUND : refunded
+  RENT ||--o{ INVOICE : "legacy link"
+  RENT ||--o{ PAYMENT : "legacy link"
+  PARTY ||--o{ BILLING_ACCOUNT : owns
+  BILLING_ACCOUNT {
+    bigint  billing_account_id PK
+    bigint  party_id FK
+    bigint  admission_id FK
+    decimal advance_balance
+  }
+  INVOICE {
+    bigint  invoice_id PK
+    bigint  billing_account_id FK
+    bigint  legacy_rent_id FK
+    varchar invoice_number UK
+    date    invoice_month
+    date    due_date
+    decimal total_amount
+    decimal paid_amount
+    varchar status
+  }
+  INVOICE_ITEM {
+    bigint  invoice_item_id PK
+    bigint  invoice_id FK
+    varchar item_type_id "MONTHLY_RENT / AC_CHARGES / SECURITY_DEPOSIT"
+    decimal amount
+  }
+  PAYMENT {
+    bigint  payment_id PK
+    bigint  party_id FK
+    bigint  rent_id FK
+    decimal amount
+    varchar payment_mode
+    varchar idempotency_key
+    varchar status "RECEIVED"
+  }
+  PAYMENT_ALLOCATION {
+    bigint  payment_allocation_id PK
+    bigint  payment_id FK
+    bigint  invoice_id FK
+    decimal amount
+  }
+  PAYMENT_REFUND { bigint payment_refund_id PK
+    bigint payment_id FK
+    decimal amount }
+  RENT { bigint rent_id PK
+    date rent_month
+    decimal monthly_rent }
+      </pre>
+    </div>
+    <p class="cap">Fig. 04 — Money in. Payments settle invoices through <code>payment_allocation</code>.</p>
+    <div class="note"><h4>Security deposit</h4><p>Collected <b>once</b> on the move-in invoice (via <code>MoveInBillingService</code>) as a <code>SECURITY_DEPOSIT</code> item; monthly generation never re-adds it. Checkout deposit refunds are recorded as a <code>DEPOSIT_REFUND</code> <b>expense</b>, not here.</p></div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Table</th><th>PK</th><th>Key FKs</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="tname"><code>billing_account</code></td><td class="mono">billing_account_id</td><td class="fk">→ org, → party, → admission</td><td>One ledger per tenant. <code>advance_balance</code>.</td></tr>
+        <tr><td class="tname"><code>invoice</code></td><td class="mono">invoice_id</td><td class="fk">→ billing_account, → rent (legacy)</td><td>Monthly invoice. <code>invoice_month</code>, <code>due_date</code>, <code>total_amount</code>, <code>paid_amount</code>, <code>status</code>. Unique <code>invoice_number</code>.</td></tr>
+        <tr><td class="tname"><code>invoice_item</code></td><td class="mono">invoice_item_id</td><td class="fk">→ invoice</td><td>Line items: <code>MONTHLY_RENT</code> (base), <code>AC_CHARGES</code>, <code>SECURITY_DEPOSIT</code> (first invoice only).</td></tr>
+        <tr><td class="tname"><code>payment</code></td><td class="mono">payment_id</td><td class="fk">→ org, → rent, → party</td><td>Money received. <code>idempotency_key</code>, <code>status='RECEIVED'</code>, <code>payment_mode</code>.</td></tr>
+        <tr><td class="tname"><code>payment_allocation</code></td><td class="mono">payment_allocation_id</td><td class="fk">→ payment, → invoice</td><td>Applies a payment to an invoice (unique per payment+invoice).</td></tr>
+        <tr><td class="tname"><code>payment_refund</code></td><td class="mono">payment_refund_id</td><td class="fk">→ payment</td><td>Recorded refunds.</td></tr>
+        <tr><td class="tname"><code>rent</code></td><td class="mono">rent_id</td><td class="fk">→ org, → party, → facility</td><td><b>Legacy</b> monthly charge (<code>totalDue()</code>), still FK'd from invoice/payment.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ================= 05 EXPENSE ================= -->
+  <section id="expense">
+    <div class="sec-head" style="--mh:var(--m-expense)"><span class="idx">05</span><h2>Expenses</h2></div>
+    <p class="sec-sub">Deliberately minimal (V16) — categories, vendors and approvals are columns, not tables. JdbcTemplate-based, so <code>property_facility_id</code> / <code>vendor_party_id</code> are <span class="badge">logical</span> references scoped in code.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'primaryColor':'#f8e3ec','primaryBorderColor':'#c92a63','primaryTextColor':'#161b26','lineColor':'#8791a3','fontFamily':'ui-monospace, Menlo, Consolas, monospace','fontSize':'13px'}}}%%
+erDiagram
+  EXPENSE ||--o{ PETTY_CASH_ENTRY : "auto OUT on cash approve"
+  EXPENSE {
+    bigint  expense_id PK
+    bigint  organization_id
+    bigint  property_facility_id "NULL = org"
+    varchar category "FOOD/SALARY/…/DEPOSIT_REFUND"
+    decimal amount
+    date    expense_date
+    varchar payment_method
+    varchar status "PENDING/APPROVED/REJECTED/PAID"
+    bigint  vendor_party_id
+  }
+  EXPENSE_BUDGET {
+    bigint  expense_budget_id PK
+    bigint  property_facility_id "0 = org-wide"
+    varchar category "ALL = overall"
+    char    budget_month "YYYY-MM"
+    decimal amount
+  }
+  PETTY_CASH_ENTRY {
+    bigint  petty_cash_entry_id PK
+    varchar entry_type "IN / OUT"
+    decimal amount
+    bigint  expense_id "set when auto-created"
+    date    entry_date
+  }
+      </pre>
+    </div>
+    <p class="cap">Fig. 05 — Expenses. Balances are computed from the ledger, never stored.</p>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Table</th><th>PK</th><th>Scope / link</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="tname"><code>expense</code></td><td class="mono">expense_id</td><td class="fk">org + property_facility_id (NULL=org)</td><td>One expense. <code>category</code>, <code>status</code> PENDING→APPROVED/REJECTED/PAID, <code>payment_method</code>, optional <code>vendor_party_id</code>/<code>vendor_name</code>.</td></tr>
+        <tr><td class="tname"><code>expense_budget</code></td><td class="mono">expense_budget_id</td><td class="fk">sentinels: prop=0 org-wide, cat='ALL' overall</td><td>Monthly budget per scope (<code>budget_month</code> 'YYYY-MM').</td></tr>
+        <tr><td class="tname"><code>petty_cash_entry</code></td><td class="mono">petty_cash_entry_id</td><td class="fk">expense_id (on cash approve)</td><td>IN/OUT ledger. OUT auto-inserted when a CASH expense is approved. Balances computed, never stored.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ================= 06 STAFF ================= -->
+  <section id="staff">
+    <div class="sec-head" style="--mh:var(--m-staff)"><span class="idx">06</span><h2>Staff / Employees</h2></div>
+    <p class="sec-sub">Deliberately <em>not</em> party/person-based (V17) — staff have no logins. Paying a salary also writes a <code>SALARY</code> expense, so payroll feeds the expenses dashboard and the transactions ledger.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'primaryColor':'#ece5fa','primaryBorderColor':'#6c48d0','primaryTextColor':'#161b26','lineColor':'#8791a3','fontFamily':'ui-monospace, Menlo, Consolas, monospace','fontSize':'13px'}}}%%
+erDiagram
+  STAFF ||--o{ STAFF_SALARY_PAYMENT : "paid monthly"
+  STAFF_SALARY_PAYMENT ||--o| EXPENSE : "writes SALARY"
+  STAFF {
+    bigint  staff_id PK
+    bigint  organization_id
+    bigint  property_facility_id "NULL = org"
+    varchar full_name
+    varchar profession
+    decimal monthly_salary
+    varchar status "ACTIVE / INACTIVE"
+  }
+  STAFF_SALARY_PAYMENT {
+    bigint  staff_salary_payment_id PK
+    bigint  staff_id FK
+    char    pay_month "YYYY-MM · UK guard"
+    decimal amount
+    varchar payment_method
+    bigint  expense_id "linked SALARY expense"
+  }
+      </pre>
+    </div>
+    <p class="cap">Fig. 06 — Staff. <code>uk_staff_pay_month (staff_id, pay_month)</code> is the double-payment guard.</p>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Table</th><th>PK</th><th>Key link</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="tname"><code>staff</code></td><td class="mono">staff_id</td><td class="fk">org + property_facility_id (NULL=org)</td><td>Cook/warden/security etc. <code>profession</code>, <code>monthly_salary</code>, <code>status</code> ACTIVE/INACTIVE.</td></tr>
+        <tr><td class="tname"><code>staff_salary_payment</code></td><td class="mono">staff_salary_payment_id</td><td class="fk">staff_id, expense_id</td><td>One row per staff per month. <code>uk_staff_pay_month</code> = double-pay guard. Each payment writes a <code>SALARY</code> expense.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ================= 07 COMPLAINTS ================= -->
+  <section id="complaint">
+    <div class="sec-head" style="--mh:var(--m-complaint)"><span class="idx">07</span><h2>Complaints &amp; Notices</h2></div>
+    <p class="sec-sub">The tenant-portal engagement tables (V22). Owner status changes and new notices fan out into the notification module.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'primaryColor':'#fae6d5','primaryBorderColor':'#dd5a0b','primaryTextColor':'#161b26','lineColor':'#8791a3','fontFamily':'ui-monospace, Menlo, Consolas, monospace','fontSize':'13px'}}}%%
+erDiagram
+  PARTY ||--o{ COMPLAINT : raises
+  COMPLAINT ||--o{ COMPLAINT_STATUS_HISTORY : "tracked by"
+  NOTICE ||--o{ NOTICE_READ : "read by"
+  PARTY ||--o{ NOTICE_READ : reads
+  COMPLAINT {
+    bigint  complaint_id PK
+    bigint  organization_id FK
+    bigint  party_id FK "tenant"
+    bigint  property_facility_id
+    varchar category
+    varchar priority
+    varchar status "OPEN/IN_PROGRESS/RESOLVED/CLOSED"
+  }
+  COMPLAINT_STATUS_HISTORY {
+    bigint  complaint_status_history_id PK
+    bigint  complaint_id FK
+    varchar from_status
+    varchar to_status
+    bigint  changed_by_user_login_id
+  }
+  NOTICE {
+    bigint  notice_id PK
+    bigint  organization_id FK
+    bigint  property_facility_id "NULL = org-wide"
+    varchar notice_type
+    tinyint active
+    datetime expires_at
+  }
+  NOTICE_READ {
+    bigint  notice_read_id PK
+    bigint  notice_id FK
+    bigint  party_id FK
+    datetime read_at
+  }
+      </pre>
+    </div>
+    <p class="cap">Fig. 07 — Complaints &amp; Notices.</p>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Table</th><th>PK</th><th>Key FKs</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="tname"><code>complaint</code></td><td class="mono">complaint_id</td><td class="fk">→ org, → party (tenant)</td><td>Tenant-raised complaint. <code>category</code>, <code>priority</code>, <code>status</code>. <code>property_facility_id</code> resolved from active bed.</td></tr>
+        <tr><td class="tname"><code>complaint_status_history</code></td><td class="mono">complaint_status_history_id</td><td class="fk">→ complaint</td><td>Every status transition (<code>from_status → to_status</code>, note, actor).</td></tr>
+        <tr><td class="tname"><code>notice</code></td><td class="mono">notice_id</td><td class="fk">→ org</td><td>Owner→tenant announcements. Org-wide when <code>property_facility_id</code> NULL. <code>notice_type</code>, <code>active</code>, <code>expires_at</code>.</td></tr>
+        <tr><td class="tname"><code>notice_read</code></td><td class="mono">notice_read_id</td><td class="fk">→ notice, → party</td><td>Read receipts, unique <code>(notice_id, party_id)</code>.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ================= 08 NOTIFICATIONS ================= -->
+  <section id="notify">
+    <div class="sec-head" style="--mh:var(--m-notify)"><span class="idx">08</span><h2>Notifications &amp; Messaging</h2></div>
+    <p class="sec-sub">In-app notifications plus the outbound EMAIL/WHATSAPP outbox. <code>RentReminderScheduler</code> (09:00 daily) is the main automated producer; channel toggles ride on the feature tables (§09) via <code>OrganizationChannelService</code>.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'primaryColor':'#dcf0f4','primaryBorderColor':'#0f8fa8','primaryTextColor':'#161b26','lineColor':'#8791a3','fontFamily':'ui-monospace, Menlo, Consolas, monospace','fontSize':'13px'}}}%%
+erDiagram
+  NOTIFICATION_CATEGORY ||--o{ NOTIFICATION : classifies
+  NOTIFICATION ||--o{ NOTIFICATION_RECIPIENT : "delivered to"
+  NOTIFICATION ||--o{ NOTIFICATION_OUTBOX : "queued to"
+  PARTY ||--o{ NOTIFICATION_RECIPIENT : receives
+  PARTY ||--o{ NOTIFICATION_OUTBOX : "targets"
+  PARTY ||--o{ NOTIFICATION_PREFERENCE : "opts"
+  NOTIFICATION_CATEGORY ||--o{ NOTIFICATION_PREFERENCE : "per category"
+  NOTIFICATION {
+    bigint  notification_id PK
+    bigint  organization_id FK
+    varchar category_id FK
+    varchar title
+    varchar priority
+    varchar entity_type
+  }
+  NOTIFICATION_RECIPIENT {
+    bigint  notification_recipient_id PK
+    bigint  notification_id FK
+    bigint  party_id FK
+    datetime read_at
+    datetime archived_at
+    tinyint important
+  }
+  NOTIFICATION_OUTBOX {
+    bigint  outbox_id PK
+    bigint  notification_id FK
+    varchar channel_type_id "EMAIL / WHATSAPP"
+    varchar status
+    int     attempt_count
+  }
+  NOTIFICATION_PREFERENCE {
+    bigint  party_id PK
+    varchar category_id PK
+    varchar channel_type_id PK
+    tinyint enabled
+  }
+  NOTIFICATION_CATEGORY { varchar category_id PK
+    varchar name }
+      </pre>
+    </div>
+    <p class="cap">Fig. 08 — Notifications: in-app (recipient) + outbound (outbox), gated by preferences.</p>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Table</th><th>PK</th><th>Key FKs</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="tname"><code>notification_category</code></td><td class="mono">category_id</td><td class="fk">—</td><td>RENT_REMINDER, PAYMENT_UPDATE, COMPLAINT, NOTICE, MAINTENANCE… (V11/V22 seeds).</td></tr>
+        <tr><td class="tname"><code>notification</code></td><td class="mono">notification_id</td><td class="fk">→ org, → notification_category</td><td>The message (title/body/priority/entity ref).</td></tr>
+        <tr><td class="tname"><code>notification_recipient</code></td><td class="mono">notification_recipient_id</td><td class="fk">→ notification, → party</td><td>Per-user delivery + <code>read_at</code>/<code>archived_at</code>/<code>important</code>. Unique per (notification, party).</td></tr>
+        <tr><td class="tname"><code>notification_preference</code></td><td class="mono">party+category+channel</td><td class="fk">→ party, → category</td><td>Per-user per-channel opt-out.</td></tr>
+        <tr><td class="tname"><code>notification_outbox</code></td><td class="mono">outbox_id</td><td class="fk">→ notification, → party</td><td>Outbound EMAIL/WHATSAPP queue (<code>OutboxDispatcher</code>), attempt tracking.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ================= 09 PLATFORM ================= -->
+  <section id="platform">
+    <div class="sec-head" style="--mh:var(--m-platform-solid)"><span class="idx">09</span><h2>Subscription, Platform &amp; Settings</h2></div>
+    <p class="sec-sub">The SaaS-admin layer. Features (incl. channel codes EMAIL/WHATSAPP and <code>TENANT_LOGIN</code>) are opt-in per org via <code>organization_feature</code>; plans and platform settings round it out.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'primaryColor':'#e7eaef','primaryBorderColor':'#647082','primaryTextColor':'#161b26','lineColor':'#8791a3','fontFamily':'ui-monospace, Menlo, Consolas, monospace','fontSize':'13px'}}}%%
+erDiagram
+  FACILITY ||--o{ ORGANIZATION_FEATURE : "enables"
+  FEATURE_MASTER ||--o{ ORGANIZATION_FEATURE : "toggled per org"
+  FACILITY ||--o{ SUBSCRIPTION : "subscribes"
+  USER_LOGIN ||--o{ SYSTEM_SETTING : "updated by"
+  FEATURE_MASTER {
+    bigint  feature_id PK
+    varchar feature_code UK "EMAIL/WHATSAPP/TENANT_LOGIN"
+    tinyint active
+  }
+  ORGANIZATION_FEATURE {
+    bigint  organization_feature_id PK
+    bigint  organization_id FK
+    bigint  feature_id FK
+    tinyint enabled
+  }
+  SUBSCRIPTION {
+    bigint  subscription_id PK
+    bigint  organization_id FK
+    varchar plan_code
+    date    start_date
+    date    end_date
+    varchar status
+  }
+  SUBSCRIPTION_PLAN {
+    bigint  plan_id PK
+    varchar plan_code UK
+    decimal price_monthly
+    int     property_limit
+  }
+  SYSTEM_SETTING {
+    varchar setting_key PK
+    varchar setting_value
+    tinyint encrypted
+  }
+      </pre>
+    </div>
+    <p class="cap">Fig. 09 — Platform. <code>subscription.plan_code</code> ↔ <code>subscription_plan.plan_code</code> is a logical link.</p>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Table</th><th>PK</th><th>Key FKs</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="tname"><code>feature_master</code></td><td class="mono">feature_id</td><td class="fk">—</td><td>Feature catalog incl. channel codes EMAIL/WHATSAPP and <code>TENANT_LOGIN</code>.</td></tr>
+        <tr><td class="tname"><code>organization_feature</code></td><td class="mono">organization_feature_id</td><td class="fk">→ org, → feature_master</td><td>Which features/channels an org has enabled (opt-in; unique per org+feature).</td></tr>
+        <tr><td class="tname"><code>subscription</code></td><td class="mono">subscription_id</td><td class="fk">→ org</td><td>Active plan window for an org.</td></tr>
+        <tr><td class="tname"><code>subscription_plan</code></td><td class="mono">plan_id</td><td class="fk">—</td><td>BASIC/STANDARD/PREMIUM/ENTERPRISE + <code>price_monthly</code>, <code>property_limit</code>.</td></tr>
+        <tr><td class="tname"><code>system_setting</code></td><td class="mono">setting_key</td><td class="fk">→ user_login</td><td>Platform-wide key/value; <code>encrypted</code> flag (masked as <code>****</code> in admin API).</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ================= FLOW ================= -->
+  <section id="flow">
+    <div class="sec-head" style="--mh:var(--ink)"><span class="idx">→</span><h2>End-to-end data flow</h2></div>
+    <p class="sec-sub">How the modules connect around a single organization. Every business table carries <code>organization_id</code> (a <code>facility_id</code>), derived from the JWT via <code>CurrentUser</code> — never from the request body. That one column is what makes shared-database multi-tenancy work.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'primaryColor':'#eef2fb','primaryBorderColor':'#2b5bd7','primaryTextColor':'#161b26','lineColor':'#7d8698','fontFamily':'ui-monospace, Menlo, Consolas, monospace','fontSize':'13px'}}}%%
+flowchart TB
+  ORG(["ORGANIZATION<br/>facility row = organization_id"])
+
+  subgraph ACC["① Access"]
+    UL[user_login] --> RT[role_type] --> RP[role_permission]
+    OF[organization_feature] --> FM[feature_master]
+  end
+  subgraph INV["② Inventory"]
+    FAC[facility tree] --- FGM[facility_group_member]
+    FAC --- PSP[property_sharing_price]
+  end
+  subgraph PPL["③ People + Occupancy"]
+    PN[party / person] --> FP[facility_party]
+    FP --> ADM[admission → agreement / checkout]
+    FP --> SBT[scheduled_bed_transfer]
+  end
+  subgraph MIN["④ Money IN"]
+    BA[billing_account] --> INVc[invoice] --> II[invoice_item]
+    PAY[payment] --> PA[payment_allocation] --> INVc
+  end
+  subgraph MOUT["⑤ Money OUT"]
+    EXP[expense] --> PC[petty_cash_entry]
+    STF[staff] --> SSP[staff_salary_payment] --> EXP
+  end
+  subgraph ENG["⑥ Engagement"]
+    CMP[complaint] --> CSH[complaint_status_history]
+    NOT[notice] --> NR[notice_read]
+    NTF[notification] --> NRC[notification_recipient]
+    NTF --> OBX[notification_outbox]
+  end
+
+  ORG --> ACC
+  ORG --> INV
+  ORG --> PPL
+  INV --> PPL
+  PPL --> MIN
+  PPL --> ENG
+  MIN --> LEDGER{{TransactionController<br/>in vs out ledger}}
+  MOUT --> LEDGER
+  ENG --> NTF
+  OF -. "gates EMAIL / WHATSAPP" .-> OBX
+      </pre>
+    </div>
+    <p class="cap">Fig. → — The organization anchors everything; billing &amp; expenses converge in the unified transactions ledger.</p>
+
+    <div class="note warn"><h4>Schema currency — what V24 removed</h4><p>This map reflects the <b>live</b> schema. Migration <b>V24</b> dropped 15 provisioned-but-unwired tables + 4 views: the <code>contact_mech</code> cluster, <code>room_photo</code>, <code>content_reference</code>, <code>recurring_charge</code>, <code>plan_feature</code>, <code>party_role</code>, <code>status_type</code>, <code>login_history</code>, <code>analytics_cache</code>, <code>activity_log</code>, <code>payment_receipt</code>, <code>payment_method_type</code>, and the four reporting views. They are intentionally absent above.</p></div>
+    <div class="note"><h4>FK vs. logical relationship</h4><p>Newer JdbcTemplate-based modules (expenses, staff, complaints/notices, scheduled transfers) enforce their cross-module links — <code>property_facility_id</code>, <code>vendor_party_id</code>, <code>expense_id</code> — <b>in application code</b>, not as declared FK constraints. Rows marked <span class="badge">logical</span> above are those.</p></div>
+  </section>
+</div>
+
+<footer>
+  <div class="foot">
+    <span>PG Manager · Spring Boot 3.3.5 / Java 21 · MySQL · Flyway migrations V1 → V24</span>
+    <span class="mono">generated from backend/src/main/resources/db/migration</span>
+  </div>
+</footer>
+<script>
+  mermaid.initialize({ startOnLoad: true, securityLevel: 'loose' });
+  (function(){
+    var root = document.documentElement, btn = document.getElementById('themeToggle');
+    function cur(){ return root.getAttribute('data-theme') ||
+      (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
+    btn.addEventListener('click', function(){
+      root.setAttribute('data-theme', cur() === 'dark' ? 'light' : 'dark');
+    });
+  })();
+</script>
+</body>
+</html>

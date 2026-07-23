@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../app_state.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/animations.dart';
+import '../../widgets/app_toast.dart';
 import '../../widgets/async_action_button.dart';
 import 'auth_brand_header.dart';
 
@@ -38,6 +39,59 @@ class _LoginScreenState extends State<LoginScreen> {
     _username.dispose();
     _password.dispose();
     super.dispose();
+  }
+
+  /// Single sign-in field. Tries the standard username login; if that fails and
+  /// the entry is a 10-digit mobile number, falls back to tenant login (so
+  /// tenants sign in with the same field — no mode selector).
+  Future<void> _signIn() async {
+    if (!_formKey.currentState!.validate()) return;
+    final id = _username.text.trim();
+    final state = context.read<AppState>();
+    try {
+      await state.login(id, _password.text);
+      if (mounted) context.go('/dashboard');
+    } catch (e) {
+      if (RegExp(r'^\d{10}$').hasMatch(id)) {
+        try {
+          var result = await state.tenantLogin(id, _password.text);
+          if (result['needsOrgSelection'] == true) {
+            final orgs = ((result['organizations'] as List?) ?? []).cast<Map<String, dynamic>>();
+            final chosen = await _pickOrganization(orgs);
+            if (chosen == null) return;
+            result = await state.tenantLogin(id, _password.text, organizationId: chosen);
+            if (result['needsOrgSelection'] == true) return;
+          }
+          if (mounted) context.go('/tenant');
+          return;
+        } catch (_) {/* fall through to the original error */}
+      }
+      if (mounted) AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<int?> _pickOrganization(List<Map<String, dynamic>> orgs) {
+    return showModalBottomSheet<int>(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Select your PG', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+            ),
+          ),
+          ...orgs.map((o) => ListTile(
+                leading: const Icon(Icons.home_work_outlined, color: PgColors.primary),
+                title: Text('${o['organizationName'] ?? 'Organization'}'),
+                onTap: () => Navigator.pop(ctx, (o['organizationId'] as num?)?.toInt()),
+              )),
+          const SizedBox(height: 12),
+        ]),
+      ),
+    );
   }
 
   @override
@@ -190,25 +244,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               height: 54,
                               child: AsyncActionButton(
                                 label: 'Sign in',
-                                onPressed: () async {
-                                  if (!_formKey.currentState!.validate()) return;
-                                  try {
-                                    await context.read<AppState>().login(
-                                          _username.text.trim(),
-                                          _password.text,
-                                        );
-                                    if (context.mounted) context.go('/dashboard');
-                                  } catch (e) {
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                              e.toString().replaceFirst('Exception: ', '')),
-                                        ),
-                                      );
-                                    }
-                                  }
-                                },
+                                onPressed: _signIn,
                               ),
                             ),
                             // Biometric unlock

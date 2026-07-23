@@ -7,8 +7,10 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../utils/money.dart';
 import '../utils/validators.dart';
 import '../widgets/animations.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/error_retry_view.dart';
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
@@ -31,6 +33,7 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
     (Icons.bar_chart_outlined,   Icons.bar_chart,    'Reports'),
     (Icons.history_outlined,     Icons.history,      'Audit Logs'),
     (Icons.settings_outlined,    Icons.settings,     'System Settings'),
+    (Icons.forum_outlined,       Icons.forum,        'Messaging'),
   ];
 
   Widget get _body => switch (_sel) {
@@ -42,6 +45,7 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
     5 => const _AdminReports(),
     6 => const _AdminAuditLogs(),
     7 => const _AdminSettings(),
+    8 => const _AdminMessaging(),
     _ => const SizedBox.shrink(),
   };
 
@@ -364,7 +368,7 @@ class _AdminDashboardState extends State<_AdminDashboard> {
                     const SizedBox(width: 14),
                     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       const Text('Monthly Revenue', style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
-                      Text('₹${d['monthlyRevenue'] ?? 0}',
+                      Text(inr(d['monthlyRevenue'] ?? 0),
                           style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: PgColors.success)),
                     ]),
                   ]),
@@ -441,18 +445,14 @@ class _BroadcastDialogState extends State<_BroadcastDialog> {
         'important': _important,
       });
       if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Announcement sent to ${res['sentToOrgs'] ?? 0} organization(s)'),
-          backgroundColor: PgColors.success,
-        ),
-      );
+      AppToast.successOf(messenger,
+          'Announcement sent to ${res['sentToOrgs'] ?? 0} organization(s)',
+          title: 'Broadcast Sent');
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: PgColors.danger),
-      );
+      AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -474,7 +474,8 @@ class _BroadcastDialogState extends State<_BroadcastDialog> {
         width: 420,
         child: Form(
           key: _form,
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text(
               'This message will appear in the notification bar of all PG owners.',
               style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
@@ -506,6 +507,7 @@ class _BroadcastDialogState extends State<_BroadcastDialog> {
               activeColor: PgColors.primary,
             ),
           ]),
+          ),
         ),
       ),
       actions: [
@@ -557,11 +559,14 @@ class _AdminOrgsState extends State<_AdminOrganizations> {
   void initState() { super.initState(); _load(); }
 
   Future<void> _load() async {
+    final api = context.read<AppState>().apiClient;
     setState(() { _loading = true; _error = null; });
     try {
-      final data = await context.read<AppState>().apiClient.get('/super-admin/organizations');
+      final data = await api.get('/super-admin/organizations');
+      if (!mounted) return;
       setState(() { _orgs = (data['items'] as List? ?? []).cast<Map<String, dynamic>>();  _loading = false; });
     } catch (e) {
+      if (!mounted) return;
       setState(() { _error = e; _loading = false; });
     }
   }
@@ -599,8 +604,8 @@ class _AdminOrgsState extends State<_AdminOrganizations> {
         Container(
           color: Colors.white,
           padding: const EdgeInsets.fromLTRB(24, 12, 24, 14),
-          child: Row(children: [
-            Expanded(child: TextField(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            TextField(
               decoration: InputDecoration(
                 prefixIcon: const Icon(Icons.search, size: 18),
                 hintText: 'Search organizations…',
@@ -612,20 +617,25 @@ class _AdminOrgsState extends State<_AdminOrganizations> {
                 focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: PgColors.primary)),
               ),
               onChanged: (v) => setState(() => _query = v),
-            )),
-            const SizedBox(width: 12),
-            for (final f in ['ALL', 'ACTIVE', 'INACTIVE'])
-              Padding(
-                padding: const EdgeInsets.only(left: 6),
-                child: ChoiceChip(
-                  label: Text(f, style: TextStyle(fontSize: 12, color: _filter == f ? Colors.white : PgColors.ink)),
-                  selected: _filter == f,
-                  selectedColor: PgColors.primary,
-                  backgroundColor: Colors.white,
-                  side: const BorderSide(color: PgColors.border),
-                  onSelected: (_) => setState(() => _filter = f),
-                ),
-              ),
+            ),
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                for (final f in ['ALL', 'ACTIVE', 'INACTIVE', 'SUSPENDED'])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      label: Text(f, style: TextStyle(fontSize: 12, color: _filter == f ? Colors.white : PgColors.ink)),
+                      selected: _filter == f,
+                      selectedColor: PgColors.primary,
+                      backgroundColor: Colors.white,
+                      side: const BorderSide(color: PgColors.border),
+                      onSelected: (_) => setState(() => _filter = f),
+                    ),
+                  ),
+              ]),
+            ),
           ]),
         ),
         const Divider(height: 1),
@@ -661,6 +671,238 @@ class _AdminOrgsState extends State<_AdminOrganizations> {
   }
 }
 
+// ─── Messaging Channels ───────────────────────────────────────────────────────
+
+/// Per-organization on/off control for outbound messaging channels
+/// (EMAIL / WHATSAPP). Channels are opt-in — off until enabled here.
+/// Backed by `GET/PATCH /super-admin/organizations/{id}/channels`.
+class _AdminMessaging extends StatefulWidget {
+  const _AdminMessaging();
+  @override
+  State<_AdminMessaging> createState() => _AdminMessagingState();
+}
+
+class _AdminMessagingState extends State<_AdminMessaging> {
+  List<Map<String, dynamic>> _orgs = [];
+  bool _loading = true;
+  Object? _error;
+  String _query = '';
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    final api = context.read<AppState>().apiClient;
+    setState(() { _loading = true; _error = null; });
+    try {
+      final data = await api.get('/super-admin/organizations');
+      if (!mounted) return;
+      setState(() { _orgs = (data['items'] as List? ?? []).cast<Map<String, dynamic>>(); _loading = false; });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _error = e; _loading = false; });
+    }
+  }
+
+  List<Map<String, dynamic>> get _filtered => _orgs.where((o) =>
+      _query.isEmpty || '${o['facility_name']}'.toLowerCase().contains(_query.toLowerCase())).toList();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      _PageHeader(
+        title: 'Messaging',
+        subtitle: 'Email / WhatsApp per organization',
+        action: IconButton(icon: const Icon(Icons.refresh, size: 20), tooltip: 'Refresh', onPressed: _load),
+      ),
+      const Divider(height: 1),
+      if (_loading) const Expanded(child: Center(child: CircularProgressIndicator()))
+      else if (_error != null) Expanded(child: ErrorRetryView(error: _error!, onRetry: _load))
+      else ...[
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 14),
+          child: TextField(
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search, size: 18),
+              hintText: 'Search organizations…',
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              filled: true, fillColor: const Color(0xFFF9F9FD),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: PgColors.border)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: PgColors.border)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: PgColors.primary)),
+            ),
+            onChanged: (v) => setState(() => _query = v),
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(child: _filtered.isEmpty
+            ? _EmptyState(icon: Icons.forum_outlined, message: 'No organizations match your search')
+            : ListView.builder(
+                padding: const EdgeInsets.all(20),
+                itemCount: _filtered.length,
+                itemBuilder: (_, i) => FadeSlideIn(
+                  delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+                  child: _OrgCard(org: _filtered[i], onTap: () => _openChannels(_filtered[i])),
+                ),
+              )),
+      ],
+    ]);
+  }
+
+  void _openChannels(Map<String, dynamic> org) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _OrgChannelsSheet(org: org),
+    );
+  }
+}
+
+/// Bottom sheet with EMAIL / WHATSAPP switches for one organization.
+class _OrgChannelsSheet extends StatefulWidget {
+  const _OrgChannelsSheet({required this.org});
+  final Map<String, dynamic> org;
+  @override
+  State<_OrgChannelsSheet> createState() => _OrgChannelsSheetState();
+}
+
+class _OrgChannelsSheetState extends State<_OrgChannelsSheet> {
+  static const _channels = [
+    ('EMAIL', 'Email', 'Tenant emails via the platform relay', Icons.mail_outline_rounded),
+    ('WHATSAPP', 'WhatsApp', 'WhatsApp messages (coming soon)', Icons.chat_outlined),
+  ];
+
+  Map<String, bool> _state = {};
+  bool _tenantLogin = false;
+  bool _loading = true;
+  Object? _error;
+  String? _busy; // channel currently being toggled
+
+  int get _orgId => (widget.org['organization_id'] as num).toInt();
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    final api = context.read<AppState>().apiClient;
+    setState(() { _loading = true; _error = null; });
+    try {
+      final data = await api.get('/super-admin/organizations/$_orgId/channels');
+      final tl = await api.get('/super-admin/organizations/$_orgId/tenant-login');
+      if (!mounted) return;
+      setState(() { _state = _asBoolMap(data); _tenantLogin = tl['enabled'] == true; _loading = false; });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _error = e; _loading = false; });
+    }
+  }
+
+  Future<void> _toggleTenantLogin(bool enabled) async {
+    final api = context.read<AppState>().apiClient;
+    setState(() => _busy = 'TENANT_LOGIN');
+    try {
+      final data = await api.patch('/super-admin/organizations/$_orgId/tenant-login', {'enabled': enabled});
+      if (!mounted) return;
+      setState(() { _tenantLogin = data['enabled'] == true; _busy = null; });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = null);
+      AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Map<String, bool> _asBoolMap(dynamic data) {
+    final map = <String, bool>{};
+    if (data is Map) data.forEach((k, v) => map['$k'] = v == true);
+    return map;
+  }
+
+  Future<void> _toggle(String channel, bool enabled) async {
+    final api = context.read<AppState>().apiClient;
+    setState(() => _busy = channel);
+    try {
+      final data = await api
+          .patch('/super-admin/organizations/$_orgId/channels', {'channel': channel, 'enabled': enabled});
+      if (!mounted) return;
+      setState(() { _state = _asBoolMap(data); _busy = null; });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = null);
+      AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 8, 4),
+            child: Row(children: [
+              Expanded(child: Text('${widget.org['facility_name'] ?? 'Organization'}',
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: PgColors.ink))),
+              IconButton(
+                icon: const Icon(Icons.close, size: 20),
+                tooltip: 'Close',
+                onPressed: () => Navigator.pop(context),
+              ),
+            ]),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Text('Enable the channels this organization can use.',
+                style: TextStyle(color: PgColors.textSecondary, fontSize: 13)),
+          ),
+          const Divider(height: 1),
+          if (_loading)
+            const Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator()))
+          else if (_error != null)
+            Padding(padding: const EdgeInsets.all(24), child: ErrorRetryView(error: _error!, onRetry: _load))
+          else
+            ...[
+              ..._channels.map((c) {
+                final code = c.$1;
+                final on = _state[code] ?? false;
+                return SwitchListTile(
+                  value: on,
+                  onChanged: _busy != null ? null : (v) => _toggle(code, v),
+                  activeThumbColor: PgColors.primary,
+                  secondary: Icon(c.$4, color: on ? PgColors.primary : PgColors.textSecondary),
+                  title: Text(c.$2, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text(c.$3, style: const TextStyle(fontSize: 12.5)),
+                );
+              }),
+              const Divider(height: 1),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 12, 20, 2),
+                child: Text('TENANT ACCESS',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PgColors.textTertiary, letterSpacing: 0.5)),
+              ),
+              SwitchListTile(
+                value: _tenantLogin,
+                onChanged: _busy != null ? null : _toggleTenantLogin,
+                activeThumbColor: PgColors.primary,
+                secondary: Icon(Icons.person_pin_circle_outlined,
+                    color: _tenantLogin ? PgColors.primary : PgColors.textSecondary),
+                title: const Text('Tenant Login', style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text('Let this org’s tenants log in to the mobile app', style: TextStyle(fontSize: 12.5)),
+              ),
+            ],
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
+  }
+}
+
 // ─── Create Organization Dialog ───────────────────────────────────────────────
 
 class _CreateOrgDialog extends StatefulWidget {
@@ -675,6 +917,7 @@ class _CreateOrgDialog extends StatefulWidget {
 class _CreateOrgDialogState extends State<_CreateOrgDialog> {
   final _form = GlobalKey<FormState>();
   final _orgName = TextEditingController();
+  final _orgEmail = TextEditingController();
   final _fullName = TextEditingController();
   final _mobile = TextEditingController();
   final _username = TextEditingController();
@@ -685,6 +928,7 @@ class _CreateOrgDialogState extends State<_CreateOrgDialog> {
   @override
   void dispose() {
     _orgName.dispose();
+    _orgEmail.dispose();
     _fullName.dispose();
     _mobile.dispose();
     _username.dispose();
@@ -698,25 +942,22 @@ class _CreateOrgDialogState extends State<_CreateOrgDialog> {
     try {
       final res = await widget.apiClient.post('/super-admin/organizations', {
         'organizationName': _orgName.text.trim(),
+        'organizationEmail': _orgEmail.text.trim(),
         'fullName': _fullName.text.trim(),
         'mobileNumber': _mobile.text.trim(),
         'username': _username.text.trim(),
         'password': _password.text,
       });
       if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
       Navigator.pop(context);
       widget.onCreated();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Organization "${res['organizationName']}" created with owner @${res['ownerUsername']}'),
-          backgroundColor: PgColors.success,
-        ),
-      );
+      AppToast.successOf(messenger,
+          'Organization "${res['organizationName']}" created with owner @${res['ownerUsername']}',
+          title: 'Organization Created');
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', '')), backgroundColor: PgColors.danger),
-      );
+      AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -750,6 +991,14 @@ class _CreateOrgDialogState extends State<_CreateOrgDialog> {
                 decoration: _deco('Organization Name', Icons.business_outlined),
                 textInputAction: TextInputAction.next,
                 validator: (v) => Validators.minLength(v, 2, label: 'Organization name'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _orgEmail,
+                decoration: _deco('Organization Email', Icons.email_outlined),
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
+                validator: Validators.email,
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -882,16 +1131,21 @@ class _OrgDetailSheetState extends State<_OrgDetailSheet> with SingleTickerProvi
 
   Future<void> _load() async {
     final orgId = widget.org['organization_id'];
+    // Capture the client before any await so we never touch a defunct context
+    // if the sheet is dismissed mid-load.
+    final api = context.read<AppState>().apiClient;
     setState(() { _loading = true; _error = null; });
     try {
-      final detail = await context.read<AppState>().apiClient.get('/super-admin/organizations/$orgId');
-      final tenants = await context.read<AppState>().apiClient.get('/super-admin/organizations/$orgId/tenants');
+      final detail = await api.get('/super-admin/organizations/$orgId');
+      final tenants = await api.get('/super-admin/organizations/$orgId/tenants');
+      if (!mounted) return;
       setState(() {
         _detail = detail;
         _tenants = (tenants['items'] as List? ?? []).cast<Map<String, dynamic>>();
         _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() { _error = e; _loading = false; });
     }
   }
@@ -900,12 +1154,15 @@ class _OrgDetailSheetState extends State<_OrgDetailSheet> with SingleTickerProvi
     final orgId = widget.org['organization_id'];
     final current = '${_detail?['status'] ?? widget.org['status'] ?? 'ACTIVE'}';
     final next = current == 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    final api = context.read<AppState>().apiClient;
     try {
-      await context.read<AppState>().apiClient.patch('/super-admin/organizations/$orgId/status', {'status': next});
+      await api.patch('/super-admin/organizations/$orgId/status', {'status': next});
       widget.onStatusChanged();
       await _load();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) {
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
+      }
     }
   }
 
@@ -933,6 +1190,11 @@ class _OrgDetailSheetState extends State<_OrgDetailSheet> with SingleTickerProvi
             const SizedBox(width: 12),
             Expanded(child: Text(name, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: PgColors.ink))),
             if (_detail != null) _StatusBadge('${_detail!['status'] ?? 'ACTIVE'}'),
+            IconButton(
+              icon: const Icon(Icons.close, size: 20),
+              tooltip: 'Close',
+              onPressed: () => Navigator.pop(context),
+            ),
           ]),
         ),
         const SizedBox(height: 16),
@@ -1047,14 +1309,21 @@ class _AdminDataUploadState extends State<_AdminDataUpload> {
 
   // Column → human description. Keys match the backend BulkUploadController parser.
   static const _facilityColDesc = {
-    'property_name': 'Existing property name — required',
+    'property_name': 'Property name — created if it does not exist',
+    'property_code': 'Property code — match or set on create — optional',
     'floor_name': 'Floor label, e.g. Ground Floor',
     'floor_number': 'Numeric floor, e.g. 0, 1, 2',
+    'floor_code': 'Custom code for the floor — optional',
     'room_name': 'Room label, e.g. Room 101',
     'room_number': 'Short room code, e.g. 101',
+    'room_code': 'Custom code for the room — optional',
     'sharing_type': 'SINGLE, DOUBLE, TRIPLE, …',
     'monthly_rent': 'Rent per bed for the room',
+    'security_deposit': 'Default deposit for the room — optional',
+    'is_ac': 'AC room? true / false — optional',
+    'capacity': 'Beds the room holds — optional',
     'bed_name': 'Bed label, e.g. Bed A',
+    'bed_code': 'Custom unique code for the bed — optional',
   };
   static const _tenantColDesc = {
     'full_name': 'Tenant full name — required',
@@ -1065,31 +1334,49 @@ class _AdminDataUploadState extends State<_AdminDataUpload> {
     'aadhaar_number': '12-digit Aadhaar — optional',
     'occupation': 'Job / occupation',
     'permanent_address': 'Home address',
+    'employer_name': 'Employer / company — optional',
+    'designation': 'Job title — optional',
+    'work_address': 'Office address — optional',
+    'has_vehicle': 'Owns a vehicle? true / false — optional',
     'emergency_contact_name': 'Emergency contact name',
     'emergency_contact_mobile': 'Emergency contact mobile',
     'emergency_contact_relation': 'e.g. Father, Mother',
     'property_name': 'Property to assign a bed in — optional',
+    'property_code': 'Property by code instead of name — optional',
     'floor_name': 'Floor of the bed — optional',
+    'floor_code': 'Floor by code instead of name — optional',
     'room_name': 'Room of the bed — optional',
+    'room_code': 'Room by code instead of name — optional',
     'bed_name': 'Bed to assign — optional',
+    'bed_code': 'Assign by bed code (resolves directly) — optional',
     'move_in_date': 'Format YYYY-MM-DD',
-    'monthly_rent': 'Override rent — optional',
+    'monthly_rent': 'Override all-in rent — optional',
+    'ac_charges': 'AC part of the rent (breakdown) — optional',
     'security_deposit': 'Security deposit — optional',
+    'expected_checkout_date': 'Planned checkout YYYY-MM-DD — optional',
+    'paid_up_to_month': 'Backfill paid rent up to YYYY-MM — optional',
+    'payment_method': 'CASH / UPI / BANK for backfill — optional',
   };
 
   // Ready-made example CSV — mirrors the backend template endpoints exactly.
   static const _facilitiesExample =
-      'property_name,floor_name,floor_number,room_name,room_number,sharing_type,monthly_rent,bed_name\n'
-      'My PG Property,Ground Floor,0,Room G01,G01,DOUBLE,5000,Bed A\n'
-      'My PG Property,Ground Floor,0,Room G01,G01,DOUBLE,5000,Bed B\n'
-      'My PG Property,First Floor,1,Room 101,101,SINGLE,7000,Bed 1\n';
+      'property_name,property_code,floor_name,floor_number,floor_code,room_name,room_number,room_code,'
+      'sharing_type,monthly_rent,security_deposit,is_ac,capacity,bed_name,bed_code\n'
+      'My PG Property,PROP-A,Ground Floor,0,FL-G,Room G01,G01,RM-G01,DOUBLE,5000,10000,false,2,Bed A,BED-G01-A\n'
+      'My PG Property,PROP-A,Ground Floor,0,FL-G,Room G01,G01,RM-G01,DOUBLE,5000,10000,false,2,Bed B,BED-G01-B\n'
+      'My PG Property,PROP-A,First Floor,1,FL-1,Room 101,101,RM-101,SINGLE,7000,14000,true,1,Bed 1,BED-101-1\n';
   static const _tenantsExample =
-      'full_name,mobile_number,email,gender,date_of_birth,aadhaar_number,occupation,'
-      'permanent_address,emergency_contact_name,emergency_contact_mobile,emergency_contact_relation,'
-      'property_name,floor_name,room_name,bed_name,move_in_date,monthly_rent,security_deposit\n'
-      'Ravi Kumar,9876543210,ravi@example.com,MALE,1998-05-20,123456789012,Software Engineer,'
-      'Hyderabad,Suresh Kumar,9876543211,Father,My PG Property,Ground Floor,Room G01,Bed A,2024-01-15,5000,10000\n'
-      'Priya Sharma,9887654321,,,,,,Chennai,,,,,,,,2024-02-01,,\n';
+      'full_name,mobile_number,email,gender,date_of_birth,aadhaar_number,occupation,permanent_address,'
+      'employer_name,designation,work_address,has_vehicle,'
+      'emergency_contact_name,emergency_contact_mobile,emergency_contact_relation,'
+      'property_name,property_code,floor_name,floor_code,room_name,room_code,bed_name,bed_code,'
+      'move_in_date,monthly_rent,ac_charges,security_deposit,expected_checkout_date,paid_up_to_month,payment_method\n'
+      'Ravi Kumar,9876543210,ravi@example.com,MALE,1998-05-20,123456789012,Software Engineer,Hyderabad,'
+      'Infosys,Senior Engineer,Hitech City,true,Suresh Kumar,9876543211,Father,'
+      'My PG Property,,Ground Floor,,Room G01,,Bed A,,2024-01-15,5000,0,10000,,2024-04,CASH\n'
+      'Bharat Rao,9876543299,,MALE,,,,Hyderabad,,,,false,,,,,,,,,,,BED-101-1,2024-03-01,7000,,14000,,2024-05,UPI\n'
+      'Cathy Iyer,9876543288,,FEMALE,,,,Pune,,,,false,,,,,PROP-A,,,,RM-101,Bed 1,,2024-04-01,7000,,14000,,2024-06,BANK\n'
+      'Priya Sharma,9887654321,,,,,,,,,,,,,,,,,,,,,,,,,,,,\n';
 
   Map<String, String> get _colDesc =>
       _uploadType == 'FACILITIES' ? _facilityColDesc : _tenantColDesc;
@@ -1104,8 +1391,10 @@ class _AdminDataUploadState extends State<_AdminDataUpload> {
   void dispose() { _pasteCtrl.dispose(); super.dispose(); }
 
   Future<void> _loadOrgs() async {
+    final api = context.read<AppState>().apiClient;
     try {
-      final data = await context.read<AppState>().apiClient.get('/super-admin/organizations');
+      final data = await api.get('/super-admin/organizations');
+      if (!mounted) return;
       setState(() { _orgs = (data['items'] as List? ?? []).cast<Map<String, dynamic>>(); });
     } catch (_) {}
   }
@@ -1191,9 +1480,8 @@ class _AdminDataUploadState extends State<_AdminDataUpload> {
               label: const Text('Copy Header', style: TextStyle(fontSize: 12)),
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: _cols.join(',')));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Header copied to clipboard'), duration: Duration(seconds: 2)),
-                );
+                AppToast.success(context, 'Header copied to clipboard',
+                    title: 'Header Copied');
               },
             ),
           ]),
@@ -1251,10 +1539,9 @@ class _AdminDataUploadState extends State<_AdminDataUpload> {
             ),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: _exampleCsv));
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Template copied — paste it into a spreadsheet, fill it, and save as .csv'),
-                duration: Duration(seconds: 3),
-              ));
+              AppToast.success(context,
+                  'Template copied — paste it into a spreadsheet, fill it, and save as .csv',
+                  title: 'Template Copied');
             },
           ),
         ),
@@ -1418,6 +1705,7 @@ class _AdminDataUploadState extends State<_AdminDataUpload> {
 
   Future<void> _upload() async {
     if (_selectedOrg == null || !_canUpload) return;
+    final api = context.read<AppState>().apiClient;
     setState(() { _uploading = true; _uploadError = null; });
     try {
       final Uint8List bytes;
@@ -1431,10 +1719,11 @@ class _AdminDataUploadState extends State<_AdminDataUpload> {
       }
       final orgId = _selectedOrg!['organization_id'];
       final type = _uploadType.toLowerCase();
-      final data = await context.read<AppState>().apiClient.postFile(
-        '/super-admin/upload/$type/$orgId', bytes, filename);
+      final data = await api.postFile('/super-admin/upload/$type/$orgId', bytes, filename);
+      if (!mounted) return;
       setState(() { _result = data; _uploading = false; });
     } catch (e) {
+      if (!mounted) return;
       setState(() { _uploadError = e; _uploading = false; });
     }
   }
@@ -1722,6 +2011,66 @@ class _AdminUsersState extends State<_AdminUsers> {
     _future = context.read<AppState>().apiClient.get('/super-admin/users');
   });
 
+  void _resetPassword(Map<String, dynamic> user) {
+    final pwdCtrl = TextEditingController();
+    final confirmCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    bool busy = false;
+    showDialog(context: context, builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setDialog) => AlertDialog(
+        title: const Text('Reset Password', style: TextStyle(fontWeight: FontWeight.w700)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        content: Form(
+          key: formKey,
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${user['full_name'] ?? user['username']} • @${user['username']}',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: pwdCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'New password', isDense: true),
+              validator: (v) => (v == null || v.length < 8) ? 'At least 8 characters' : null,
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: confirmCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Confirm password', isDense: true),
+              validator: (v) => v != pwdCtrl.text ? 'Passwords do not match' : null,
+            ),
+            const SizedBox(height: 8),
+            const Text('The user will be signed out of all active sessions.',
+                style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: busy ? null : () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: busy ? null : () async {
+              if (!formKey.currentState!.validate()) return;
+              setDialog(() => busy = true);
+              try {
+                await context.read<AppState>().apiClient.post(
+                  '/super-admin/users/${user['user_login_id']}/reset-password',
+                  {'newPassword': pwdCtrl.text},
+                );
+                if (ctx.mounted) Navigator.pop(ctx);
+                if (mounted) AppToast.success(context, 'Password reset for @${user['username']}');
+              } catch (e) {
+                setDialog(() => busy = false);
+                if (ctx.mounted) AppToast.error(ctx, e.toString().replaceFirst('Exception: ', ''));
+              }
+            },
+            child: busy
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('Reset'),
+          ),
+        ],
+      ),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(children: [
@@ -1785,15 +2134,29 @@ class _AdminUsersState extends State<_AdminUsers> {
                               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                           subtitle: Text('@${u['username']}  •  ${u['mobile_number'] ?? '—'}',
                               style: const TextStyle(fontSize: 12)),
-                          trailing: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: roleColor.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: roleColor.withValues(alpha: 0.2)),
+                          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: roleColor.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: roleColor.withValues(alpha: 0.2)),
+                              ),
+                              child: Text(role, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: roleColor)),
                             ),
-                            child: Text(role, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: roleColor)),
-                          ),
+                            if (role != 'SUPER_ADMIN')
+                              PopupMenuButton<String>(
+                                icon: const Icon(Icons.more_vert, size: 18, color: Color(0xFF9CA3AF)),
+                                tooltip: 'User actions',
+                                padding: EdgeInsets.zero,
+                                onSelected: (v) {
+                                  if (v == 'reset') _resetPassword(u);
+                                },
+                                itemBuilder: (_) => [
+                                  const PopupMenuItem(value: 'reset', child: Text('Reset password')),
+                                ],
+                              ),
+                          ]),
                         ),
                       ));
                     },
@@ -1850,12 +2213,27 @@ class _AdminPlansState extends State<_AdminPlans> {
             itemCount: plans.length,
             itemBuilder: (_, i) => FadeSlideIn(
               delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
-              child: _PlanCard(plan: plans[i]),
+              child: _PlanCard(plan: plans[i], onToggle: () => _togglePlan(plans[i])),
             ),
           );
         },
       )),
     ]);
+  }
+
+  Future<void> _togglePlan(Map<String, dynamic> plan) async {
+    final id = plan['plan_id'];
+    final next = !(plan['active'] == true);
+    final api = context.read<AppState>().apiClient;
+    try {
+      await api.patch('/super-admin/plans/$id', {'active': next});
+      if (!mounted) return;
+      _fetch();
+    } catch (e) {
+      if (mounted) {
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
+      }
+    }
   }
 
   void _showCreateDialog() {
@@ -1866,7 +2244,8 @@ class _AdminPlansState extends State<_AdminPlans> {
     showDialog(context: context, builder: (ctx) => AlertDialog(
       title: const Text('New Plan', style: TextStyle(fontWeight: FontWeight.w700)),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
+      content: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
         TextField(controller: codeCtrl, decoration: const InputDecoration(labelText: 'Plan Code', isDense: true)),
         const SizedBox(height: 12),
         TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Plan Name', isDense: true)),
@@ -1875,6 +2254,7 @@ class _AdminPlansState extends State<_AdminPlans> {
         const SizedBox(height: 12),
         TextField(controller: limitCtrl, decoration: const InputDecoration(labelText: 'Property Limit (optional)', isDense: true), keyboardType: TextInputType.number),
       ]),
+      ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
         FilledButton(
@@ -1889,7 +2269,9 @@ class _AdminPlansState extends State<_AdminPlans> {
               if (ctx.mounted) Navigator.pop(ctx);
               _fetch();
             } catch (e) {
-              if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('$e')));
+              if (ctx.mounted) {
+                AppToast.error(ctx, e.toString().replaceFirst('Exception: ', ''));
+              }
             }
           },
           child: const Text('Create'),
@@ -1900,8 +2282,9 @@ class _AdminPlansState extends State<_AdminPlans> {
 }
 
 class _PlanCard extends StatelessWidget {
-  const _PlanCard({required this.plan});
+  const _PlanCard({required this.plan, this.onToggle});
   final Map<String, dynamic> plan;
+  final VoidCallback? onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -1916,11 +2299,21 @@ class _PlanCard extends StatelessWidget {
           ),
           const Spacer(),
           _StatusBadge(active ? 'ACTIVE' : 'INACTIVE'),
+          if (onToggle != null)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, size: 18, color: Color(0xFF9CA3AF)),
+              tooltip: 'Plan actions',
+              padding: EdgeInsets.zero,
+              onSelected: (_) => onToggle!(),
+              itemBuilder: (_) => [
+                PopupMenuItem(value: 'toggle', child: Text(active ? 'Deactivate plan' : 'Activate plan')),
+              ],
+            ),
         ]),
         const SizedBox(height: 12),
         Text('${plan['name']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: PgColors.ink)),
         const SizedBox(height: 4),
-        Text('₹${plan['price_monthly'] ?? 0}/month',
+        Text('${inr(plan['price_monthly'] ?? 0)}/month',
             style: const TextStyle(color: PgColors.success, fontWeight: FontWeight.w800, fontSize: 18)),
         const Spacer(),
         Text(
@@ -1970,13 +2363,13 @@ class _AdminReportsState extends State<_AdminReports> {
                   headingRowColor: WidgetStateProperty.all(const Color(0xFFF9F9FD)),
                   columns: const [
                     DataColumn(label: Text('Period', style: TextStyle(fontWeight: FontWeight.w600))),
-                    DataColumn(label: Text('Org ID', style: TextStyle(fontWeight: FontWeight.w600))),
-                    DataColumn(label: Text('Amount (₹)', style: TextStyle(fontWeight: FontWeight.w600))),
+                    DataColumn(label: Text('Organization', style: TextStyle(fontWeight: FontWeight.w600))),
+                    DataColumn(label: Text('Amount', style: TextStyle(fontWeight: FontWeight.w600))),
                   ],
                   rows: rows.map((r) => DataRow(cells: [
                     DataCell(Text('${r['period'] ?? '—'}')),
-                    DataCell(Text('${r['organization_id'] ?? '—'}')),
-                    DataCell(Text('${r['amount'] ?? 0}',
+                    DataCell(Text('${r['organization_name'] ?? 'Org #${r['organization_id'] ?? '—'}'}')),
+                    DataCell(Text(inr(r['amount'] ?? 0),
                         style: const TextStyle(fontWeight: FontWeight.w600, color: PgColors.success))),
                   ])).toList(),
                 ),
@@ -2118,9 +2511,11 @@ class _AdminSettingsState extends State<_AdminSettings> {
   void dispose() { for (final c in _ctrls.values) c.dispose(); super.dispose(); }
 
   Future<void> _load() async {
+    final api = context.read<AppState>().apiClient;
     setState(() { _loading = true; _error = null; });
     try {
-      final data = await context.read<AppState>().apiClient.get('/super-admin/system-settings');
+      final data = await api.get('/super-admin/system-settings');
+      if (!mounted) return;
       final items = (data['items'] as List? ?? []).cast<Map<String, dynamic>>();
       for (final c in _ctrls.values) c.dispose();
       _ctrls.clear();
@@ -2129,6 +2524,7 @@ class _AdminSettingsState extends State<_AdminSettings> {
       }
       setState(() { _settings = items; _loading = false; });
     } catch (e) {
+      if (!mounted) return;
       setState(() { _error = e; _loading = false; });
     }
   }
@@ -2136,12 +2532,25 @@ class _AdminSettingsState extends State<_AdminSettings> {
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
-      await context.read<AppState>().apiClient.patch('/super-admin/system-settings',
-          {for (final e in _ctrls.entries) e.key: e.value.text});
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Settings saved successfully')));
+      // Never send back encrypted settings — the GET returns them masked as
+      // '********', so including them would overwrite the real secret (and the
+      // backend upsert would clear the encrypted flag). Only save editable values.
+      final encryptedKeys = <String>{
+        for (final s in _settings) if (s['encrypted'] == true) s['setting_key'] as String,
+      };
+      final payload = {
+        for (final e in _ctrls.entries)
+          if (!encryptedKeys.contains(e.key)) e.key: e.value.text,
+      };
+      await context.read<AppState>().apiClient.patch('/super-admin/system-settings', payload);
+      if (mounted) {
+        AppToast.success(context, 'Settings saved successfully',
+            title: 'Settings Saved');
+      }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) {
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }

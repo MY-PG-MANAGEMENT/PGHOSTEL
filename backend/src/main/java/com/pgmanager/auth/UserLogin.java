@@ -37,4 +37,15 @@ public class UserLogin extends BaseEntity {
 
     @Column(nullable = false)
     private String status = "ACTIVE";
+
+    /** Why the login is INACTIVE (e.g. {@code CHECKED_OUT}); null while ACTIVE. */
+    @Column(name = "disabled_reason")
+    private String disabledReason;
+
+    /** Forces a password change on next login (temp password abc@123 for auto-provisioned tenants). */
+    @Column(name = "must_change_password", nullable = false)
+    private boolean mustChangePassword = false;
+
+    @Column(name = "last_login_at")
+    private java.time.LocalDateTime lastLoginAt;
 }

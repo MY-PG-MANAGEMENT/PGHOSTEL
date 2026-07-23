@@ -4,14 +4,18 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../utils/money.dart';
 import 'tenant_screen.dart';
 import 'billing_screen.dart';
 import 'expenses_screen.dart';
 import 'staff_screen.dart';
 import 'transactions_screen.dart';
+import 'complaints_screen.dart';
+import 'temporary_stay_screen.dart';
 import 'room_screen.dart' show AssignBedSheet;
-import '../widgets/error_retry_view.dart';
 import '../widgets/animations.dart';
+import '../widgets/app_toast.dart';
+import '../widgets/error_retry_view.dart';
 
 class PropertyWorkspaceScreen extends StatefulWidget {
   final Map<String, dynamic> property;
@@ -482,12 +486,38 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
                         ),
                       ),
                       _QuickActionCard(
-                        icon: Icons.bar_chart_outlined,
+                        icon: Icons.support_agent_outlined,
                         iconBg: const Color(0xFFEDE9FE),
                         iconColor: const Color(0xFF6D28D9),
-                        title: 'Reports',
-                        subtitle: 'Analytics',
-                        onTap: () => widget.onNavigate(3),
+                        title: 'Complaints',
+                        subtitle: 'Tenant issues',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ComplaintsScreen(
+                              propertyId: widget.propertyId,
+                              propertyName:
+                                  '${widget.property['facilityName'] ?? 'Property'}',
+                            ),
+                          ),
+                        ),
+                      ),
+                      _QuickActionCard(
+                        icon: Icons.hotel_outlined,
+                        iconBg: const Color(0xFFFFF7ED),
+                        iconColor: const Color(0xFFF97316),
+                        title: 'Temporary Stay',
+                        subtitle: 'Short-term guests',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => TemporaryStayScreen(
+                              propertyId: widget.propertyId,
+                              propertyName:
+                                  '${widget.property['facilityName'] ?? 'Property'}',
+                            ),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -562,9 +592,7 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
 }
 
 void _comingSoon(BuildContext context, String feature) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('$feature is coming soon'), duration: const Duration(seconds: 2)),
-  );
+  AppToast.info(context, '$feature is coming soon', title: 'Coming Soon');
 }
 
 class _QuickActionCard extends StatelessWidget {
@@ -1605,6 +1633,18 @@ class _LocationTag extends StatelessWidget {
   }
 }
 
+/// Formats an ISO date (yyyy-mm-dd, optionally with time) as dd-mm-yyyy.
+String _fmtDateDmy(dynamic raw) {
+  if (raw == null) return '';
+  final s = raw.toString();
+  final datePart = s.length >= 10 ? s.substring(0, 10) : s;
+  final parts = datePart.split('-');
+  if (parts.length == 3 && parts[0].length == 4) {
+    return '${parts[2]}-${parts[1]}-${parts[0]}';
+  }
+  return s;
+}
+
 class _VacantBedCard extends StatelessWidget {
   final Map<String, dynamic> bed;
   final int propertyId;
@@ -1671,36 +1711,38 @@ class _VacantBedCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Room + Floor — primary, big ──
-                    Row(children: [
-                      Flexible(
-                        child: Text(
-                          roomName.isNotEmpty ? roomName : bedName,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 18,
-                              color: Color(0xFF111827)),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (floorName.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        _LocationTag(
-                            icon: Icons.apartment_outlined, label: floorName),
-                      ],
-                    ]),
+                    // ── Room number — primary, big, full width ──
+                    Text(
+                      roomName.isNotEmpty ? roomName : bedName,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 18,
+                          color: Color(0xFF111827)),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     const SizedBox(height: 6),
-                    // ── Bed name — secondary, light ──
-                    Row(children: [
-                      const Icon(Icons.bed_outlined,
-                          size: 14, color: Color(0xFF9CA3AF)),
-                      const SizedBox(width: 5),
-                      Text(bedName,
-                          style: const TextStyle(
-                              fontSize: 13,
-                              color: Color(0xFF9CA3AF),
-                              fontWeight: FontWeight.w500)),
-                    ]),
+                    // ── Floor + bed name — secondary (wraps if narrow) ──
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        if (floorName.isNotEmpty)
+                          _LocationTag(
+                              icon: Icons.apartment_outlined, label: floorName),
+                        Row(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.bed_outlined,
+                              size: 14, color: Color(0xFF9CA3AF)),
+                          const SizedBox(width: 5),
+                          Text(bedName,
+                              style: const TextStyle(
+                                  fontSize: 13,
+                                  color: Color(0xFF9CA3AF),
+                                  fontWeight: FontWeight.w500)),
+                        ]),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -1736,7 +1778,7 @@ class _VacantBedCard extends StatelessWidget {
                       size: 14, color: Color(0xFFEA580C)),
                   const SizedBox(width: 7),
                   Expanded(
-                    child: Text('Checking out on  $expectedCheckout',
+                    child: Text('Checking out on  ${_fmtDateDmy(expectedCheckout)}',
                         style: const TextStyle(
                             fontSize: 12,
                             color: Color(0xFF9A3412),
@@ -2656,9 +2698,7 @@ class _RoomTileState extends State<_RoomTile> {
       if (mounted) setState(_loadBeds);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(
-                e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -3016,10 +3056,9 @@ class _BedGridTile extends StatelessWidget {
       }
     } catch (e) {
       if (context.mounted) {
+        final messenger = ScaffoldMessenger.of(context);
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content:
-                Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.errorOf(messenger, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -3187,7 +3226,7 @@ class _PropertyReportsTabState extends State<_PropertyReportsTab> {
               leading: Icons.person_outlined,
               title: '${r['full_name']}',
               trailing: _fmtDate(r['from_date']?.toString()),
-              sub: r['monthly_rent'] != null ? '₹${r['monthly_rent']}/mo' : null,
+              sub: r['monthly_rent'] != null ? '${inr(r['monthly_rent'])}/mo' : null,
             )).toList(),
           ),
           const SizedBox(height: 12),
@@ -3206,7 +3245,7 @@ class _PropertyReportsTabState extends State<_PropertyReportsTab> {
                 leading: Icons.receipt_long_outlined,
                 leadingColor: color,
                 title: '${r['full_name']}',
-                trailing: '₹${_fmt(r['balance'])} due',
+                trailing: '${inr(r['balance'])} due',
                 trailingColor: color,
                 sub: status,
                 subColor: color,
@@ -3228,13 +3267,6 @@ class _PropertyReportsTabState extends State<_PropertyReportsTab> {
       const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       return '${d.day} ${m[d.month - 1]} ${d.year}';
     } catch (_) { return iso; }
-  }
-
-  String _fmt(dynamic v) {
-    if (v == null) return '0';
-    final n = double.tryParse('$v') ?? 0;
-    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}k';
-    return n.toStringAsFixed(0);
   }
 }
 
@@ -3490,8 +3522,8 @@ class _EditPropertySheetState extends State<_EditPropertySheet> {
 
   Future<void> _save() async {
     if (_name.text.trim().length < 2) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Property name must be at least 2 characters')));
+      AppToast.info(context, 'Property name must be at least 2 characters',
+          title: 'Invalid Name');
       return;
     }
     setState(() => _saving = true);
@@ -3510,8 +3542,7 @@ class _EditPropertySheetState extends State<_EditPropertySheet> {
     } catch (e) {
       setState(() => _saving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -3604,8 +3635,7 @@ class _AddFloorSheetState extends State<_AddFloorSheet> {
 
   Future<void> _save() async {
     if (_nameCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Floor name is required')));
+      AppToast.info(context, 'Floor name is required', title: 'Name Required');
       return;
     }
     setState(() => _saving = true);
@@ -3621,8 +3651,7 @@ class _AddFloorSheetState extends State<_AddFloorSheet> {
     } catch (e) {
       setState(() => _saving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -3708,8 +3737,7 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
 
   Future<void> _save() async {
     if (_nameCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Room name is required')));
+      AppToast.info(context, 'Room name is required', title: 'Name Required');
       return;
     }
     setState(() => _saving = true);
@@ -3739,8 +3767,7 @@ class _AddRoomSheetState extends State<_AddRoomSheet> {
     } catch (e) {
       setState(() => _saving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -3837,8 +3864,7 @@ class _AddBedSheetState extends State<_AddBedSheet> {
 
   Future<void> _save() async {
     if (_nameCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Bed name is required')));
+      AppToast.info(context, 'Bed name is required', title: 'Name Required');
       return;
     }
     setState(() => _saving = true);
@@ -3853,8 +3879,7 @@ class _AddBedSheetState extends State<_AddBedSheet> {
     } catch (e) {
       setState(() => _saving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -3934,8 +3959,7 @@ class _EditFloorSheetState extends State<_EditFloorSheet> {
 
   Future<void> _save() async {
     if (_name.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Floor name is required')));
+      AppToast.info(context, 'Floor name is required', title: 'Name Required');
       return;
     }
     setState(() => _saving = true);
@@ -3950,9 +3974,7 @@ class _EditFloorSheetState extends State<_EditFloorSheet> {
     } catch (e) {
       setState(() => _saving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -4055,8 +4077,7 @@ class _EditRoomSheetState extends State<_EditRoomSheet> {
 
   Future<void> _save() async {
     if (_name.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Room name is required')));
+      AppToast.info(context, 'Room name is required', title: 'Name Required');
       return;
     }
     setState(() => _saving = true);
@@ -4117,8 +4138,7 @@ class _EditRoomSheetState extends State<_EditRoomSheet> {
     } catch (e) {
       setState(() => _saving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -4224,8 +4244,7 @@ class _EditBedSheetState extends State<_EditBedSheet> {
 
   Future<void> _save() async {
     if (_name.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Bed name is required')));
+      AppToast.info(context, 'Bed name is required', title: 'Name Required');
       return;
     }
     setState(() => _saving = true);
@@ -4239,8 +4258,7 @@ class _EditBedSheetState extends State<_EditBedSheet> {
     } catch (e) {
       setState(() => _saving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -4322,6 +4340,7 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
   final Map<String, TextEditingController> _rentCtrl = {};
   final Map<String, TextEditingController> _depositCtrl = {};
   final Map<String, TextEditingController> _acCtrl = {};
+  final Map<String, TextEditingController> _perDayCtrl = {};
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -4333,6 +4352,7 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
       _rentCtrl[o.$1] = TextEditingController();
       _depositCtrl[o.$1] = TextEditingController();
       _acCtrl[o.$1] = TextEditingController();
+      _perDayCtrl[o.$1] = TextEditingController();
     }
     _load();
   }
@@ -4342,6 +4362,7 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
     for (final c in _rentCtrl.values) { c.dispose(); }
     for (final c in _depositCtrl.values) { c.dispose(); }
     for (final c in _acCtrl.values) { c.dispose(); }
+    for (final c in _perDayCtrl.values) { c.dispose(); }
     super.dispose();
   }
 
@@ -4356,10 +4377,12 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
         final rent = item['monthlyRent'];
         final deposit = item['securityDeposit'];
         final ac = item['acCharges'];
+        final perDay = item['perDayPrice'];
         if (_rentCtrl.containsKey(type)) {
           _rentCtrl[type]!.text = rent != null ? '$rent' : '';
           _depositCtrl[type]!.text = (deposit != null && deposit != 0) ? '$deposit' : '';
           _acCtrl[type]!.text = (ac != null && ac != 0) ? '$ac' : '';
+          _perDayCtrl[type]!.text = (perDay != null && perDay != 0) ? '$perDay' : '';
         }
       }
       setState(() => _loading = false);
@@ -4380,16 +4403,18 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
       if (rent == null) continue;
       final depositText = _depositCtrl[o.$1]!.text.trim();
       final acText = _acCtrl[o.$1]!.text.trim();
+      final perDayText = _perDayCtrl[o.$1]!.text.trim();
       prices.add({
         'sharingType': o.$1,
         'monthlyRent': rent,
         if (depositText.isNotEmpty) 'securityDeposit': double.tryParse(depositText) ?? 0,
         if (acText.isNotEmpty) 'acCharges': double.tryParse(acText) ?? 0,
+        if (perDayText.isNotEmpty) 'perDayPrice': double.tryParse(perDayText) ?? 0,
       });
     }
     if (prices.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Enter at least one sharing type price')));
+      AppToast.info(context, 'Enter at least one sharing type price',
+          title: 'Price Required');
       return;
     }
     setState(() => _saving = true);
@@ -4397,13 +4422,11 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
       await context.read<AppState>().apiClient.put(
           '/properties/${widget.propertyId}/sharing-prices', {'prices': prices});
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Prices saved')));
+        AppToast.success(context, 'Prices saved', title: 'Prices Saved');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -4467,6 +4490,7 @@ class _SharingPricesScreenState extends State<_SharingPricesScreen> {
                           rentCtrl: _rentCtrl[o.$1]!,
                           depositCtrl: _depositCtrl[o.$1]!,
                           acCtrl: _acCtrl[o.$1]!,
+                          perDayCtrl: _perDayCtrl[o.$1]!,
                         )),
                     const SizedBox(height: 24),
                     FilledButton(
@@ -4491,11 +4515,13 @@ class _PriceRow extends StatelessWidget {
   final TextEditingController rentCtrl;
   final TextEditingController depositCtrl;
   final TextEditingController acCtrl;
+  final TextEditingController perDayCtrl;
   const _PriceRow({
     required this.label,
     required this.rentCtrl,
     required this.depositCtrl,
     required this.acCtrl,
+    required this.perDayCtrl,
   });
 
   @override
@@ -4550,6 +4576,19 @@ class _PriceRow extends StatelessWidget {
               prefixIcon: Icon(Icons.ac_unit, size: 18),
               isDense: true,
               helperText: 'Default AC surcharge for AC rooms',
+              helperStyle: TextStyle(fontSize: 10),
+            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: perDayCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Per Day (₹) — temporary stay',
+              prefixIcon: Icon(Icons.calendar_today_outlined, size: 18),
+              isDense: true,
+              helperText: 'Daily rate used to price temporary stays',
               helperStyle: TextStyle(fontSize: 10),
             ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),

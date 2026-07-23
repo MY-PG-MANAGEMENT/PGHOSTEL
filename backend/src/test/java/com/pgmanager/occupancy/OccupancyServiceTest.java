@@ -50,6 +50,9 @@ class OccupancyServiceTest {
     @Mock ScheduledBedTransferRepository scheduledTransferRepository;
     @Mock AuditService auditService;
     @Mock NotificationService notificationService;
+    @Mock com.pgmanager.expense.ExpenseWriter expenseWriter;
+    @Mock com.pgmanager.party.PersonRepository personRepository;
+    @Mock com.pgmanager.tenant.TenantLoginService tenantLoginService;
 
     @InjectMocks OccupancyService service;
 
@@ -302,5 +305,39 @@ class OccupancyServiceTest {
 
         assertThat(res.thruDate()).isEqualTo(when);
         assertThat(active.getThruDate()).isEqualTo(when);
+        verify(expenseWriter, never()).insertApproved(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void checkoutRecordsDepositRefundAsExpense() {
+        FacilityParty active = new FacilityParty();
+        active.setFacilityPartyId(900L);
+        active.setFacilityId(BED);
+        active.setSecurityDeposit(new BigDecimal("6000"));
+        when(facilityPartyRepository.findByOrganizationIdAndPartyIdAndRoleTypeIdAndThruDateIsNull(
+                ORG, PARTY, OccupancyRole.OCCUPANT)).thenReturn(Optional.of(active));
+        when(expenseWriter.insertApproved(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(55L);
+
+        LocalDate when = LocalDate.of(2026, 6, 30);
+        service.checkout(ORG, USER, new CheckoutRequest(PARTY, when, new BigDecimal("5000"), "upi", null));
+
+        verify(expenseWriter).insertApproved(eq(ORG), any(), eq("DEPOSIT_REFUND"), any(),
+                eq(new BigDecimal("5000")), eq("UPI"), eq(when), eq(USER));
+        verify(auditService).log(eq(ORG), eq(USER), eq("DEPOSIT_REFUNDED"), eq("EXPENSE"), eq(55L), any());
+    }
+
+    @Test
+    void checkoutRejectsRefundAboveDeposit() {
+        FacilityParty active = new FacilityParty();
+        active.setFacilityId(BED);
+        active.setSecurityDeposit(new BigDecimal("6000"));
+        when(facilityPartyRepository.findByOrganizationIdAndPartyIdAndRoleTypeIdAndThruDateIsNull(
+                ORG, PARTY, OccupancyRole.OCCUPANT)).thenReturn(Optional.of(active));
+
+        assertThatThrownBy(() -> service.checkout(ORG, USER,
+                new CheckoutRequest(PARTY, LocalDate.of(2026, 6, 30), new BigDecimal("7000"), null, null)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("exceeds the security deposit");
+        verify(expenseWriter, never()).insertApproved(any(), any(), any(), any(), any(), any(), any(), any());
     }
 }

@@ -4,7 +4,9 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../utils/money.dart';
 import '../widgets/animations.dart';
+import '../widgets/app_toast.dart';
 
 // ─── Checkout Sheet ───────────────────────────────────────────────────────────
 
@@ -33,10 +35,16 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
   DateTime _checkoutDate = DateTime.now();
   bool _checkingOut = false;
 
+  // Security-deposit refund (optional, owner-provided at checkout).
+  double? _depositHeld;
+  final _refundCtrl = TextEditingController();
+  String _refundMode = 'CASH';
+
   @override
   void initState() {
     super.initState();
     _load();
+    _loadDeposit();
   }
 
   @override
@@ -44,7 +52,28 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
     for (final c in _amountCtrl.values) {
       c.dispose();
     }
+    _refundCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadDeposit() async {
+    try {
+      final tenant = await context
+          .read<AppState>()
+          .apiClient
+          .get('/tenants/${widget.partyId}');
+      final deposit = (tenant['securityDeposit'] as num?)?.toDouble();
+      if (mounted) {
+        setState(() {
+          _depositHeld = deposit;
+          if (deposit != null && deposit > 0 && _refundCtrl.text.isEmpty) {
+            _refundCtrl.text = deposit.toStringAsFixed(0);
+          }
+        });
+      }
+    } catch (_) {
+      // Deposit info is optional — checkout still works without it.
+    }
   }
 
   Future<void> _pickCheckoutDate() async {
@@ -121,7 +150,7 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Write Off?',
             style: TextStyle(fontWeight: FontWeight.w800)),
-        content: Text('Mark ₹$balance due for $month as written off?'),
+        content: Text('Mark ${inr(balance)} due for $month as written off?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -148,8 +177,7 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -160,8 +188,7 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
     if (ctrl == null) return;
     final amount = double.tryParse(ctrl.text.trim());
     if (amount == null || amount <= 0) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
+      AppToast.info(context, 'Enter a valid amount', title: 'Invalid Amount');
       return;
     }
     final mode = _payMode[id] ?? 'CASH';
@@ -175,15 +202,26 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
         'idempotencyKey': key,
       });
       await _load();
+      if (mounted) {
+        AppToast.success(context, 'Payment recorded',
+            title: 'Payment Collected');
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
 
   Future<void> _checkout() async {
+    final refund = double.tryParse(_refundCtrl.text.trim());
+    if (refund != null && refund > 0 && _depositHeld != null && refund > _depositHeld!) {
+      AppToast.info(
+          context,
+          'Refund exceeds the deposit held (${inr(_depositHeld)})',
+          title: 'Check Refund');
+      return;
+    }
     setState(() => _checkingOut = true);
     final d = _checkoutDate;
     final iso =
@@ -192,16 +230,23 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
       await context.read<AppState>().apiClient.post('/occupancy/checkout', {
         'partyId': widget.partyId,
         'checkoutDate': iso,
+        if (refund != null && refund > 0) ...{
+          'refundAmount': refund,
+          'refundMethod': _refundMode,
+        },
       });
       if (mounted) {
+        final messenger = ScaffoldMessenger.of(context);
         Navigator.pop(context, true);
         widget.onCheckedOut();
+        AppToast.successOf(
+            messenger, 'Checkout completed for ${widget.tenantName}',
+            title: 'Checked Out');
       }
     } catch (e) {
       if (mounted) {
         setState(() => _checkingOut = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -304,6 +349,77 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
                       ),
                     ),
                     const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.savings_outlined,
+                                  color: PgColors.primary, size: 18),
+                              SizedBox(width: 8),
+                              Text('Deposit Refund (optional)',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14)),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _depositHeld != null && _depositHeld! > 0
+                                ? 'Security deposit held: ${inr(_depositHeld)}. '
+                                    'Leave the amount empty to skip the refund.'
+                                : 'No security deposit on record. Enter an amount only if you are refunding one.',
+                            style: const TextStyle(
+                                fontSize: 12, color: Colors.grey),
+                          ),
+                          const SizedBox(height: 10),
+                          TextFormField(
+                            controller: _refundCtrl,
+                            enabled: !_checkingOut,
+                            decoration: const InputDecoration(
+                              labelText: 'Refund Amount (₹)',
+                              prefixIcon: Icon(Icons.currency_rupee_outlined),
+                              isDense: true,
+                              border: OutlineInputBorder(),
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(
+                                decimal: true),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                  RegExp(r'[0-9.]'))
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            value: _refundMode,
+                            decoration: const InputDecoration(
+                              labelText: 'Refund Mode',
+                              isDense: true,
+                              border: OutlineInputBorder(),
+                            ),
+                            items: const ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER']
+                                .map((m) =>
+                                    DropdownMenuItem(value: m, child: Text(m)))
+                                .toList(),
+                            onChanged: _checkingOut
+                                ? null
+                                : (v) {
+                                    if (v != null) {
+                                      setState(() => _refundMode = v);
+                                    }
+                                  },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     InkWell(
                       onTap: _checkingOut ? null : _pickCheckoutDate,
                       borderRadius: BorderRadius.circular(8),
@@ -354,6 +470,7 @@ class _InvoicePendingCard extends StatelessWidget {
     required this.onPayModeChange,
     required this.onPay,
     required this.onWriteOff,
+    this.showWriteOff = true,
   });
 
   final Map<String, dynamic> invoice;
@@ -364,6 +481,7 @@ class _InvoicePendingCard extends StatelessWidget {
   final ValueChanged<String> onPayModeChange;
   final VoidCallback onPay;
   final VoidCallback onWriteOff;
+  final bool showWriteOff;
 
   static const _months = [
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -443,12 +561,12 @@ class _InvoicePendingCard extends StatelessWidget {
             const SizedBox(height: 8),
             Row(
               children: [
-                _stat('Total', '₹${invoice['total_amount']}'),
+                _stat('Total', inr(invoice['total_amount'])),
                 const SizedBox(width: 16),
-                _stat('Paid', '₹${invoice['paid_amount']}',
+                _stat('Paid', inr(invoice['paid_amount']),
                     color: PgColors.success),
                 const SizedBox(width: 16),
-                _stat('Balance', '₹${invoice['balance']}',
+                _stat('Balance', inr(invoice['balance']),
                     color: PgColors.danger),
               ],
             ),
@@ -474,20 +592,22 @@ class _InvoicePendingCard extends StatelessWidget {
                       onPressed: onTogglePay,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.remove_circle_outline,
-                          size: 16),
-                      label: const Text('Write Off'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.orange,
-                        side: const BorderSide(color: Colors.orange),
-                        visualDensity: VisualDensity.compact,
+                  if (showWriteOff) ...[
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.remove_circle_outline,
+                            size: 16),
+                        label: const Text('Write Off'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.orange,
+                          side: const BorderSide(color: Colors.orange),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed: onWriteOff,
                       ),
-                      onPressed: onWriteOff,
                     ),
-                  ),
+                  ],
                 ],
               ),
             if (payOpen) ...[
@@ -551,8 +671,8 @@ class _InvoicePendingCard extends StatelessWidget {
 
 // ─── Transfer Bed Sheet ───────────────────────────────────────────────────────
 
-class TransferBedSheet extends StatefulWidget {
-  const TransferBedSheet({
+class TransferBedScreen extends StatefulWidget {
+  const TransferBedScreen({
     required this.partyId,
     required this.tenantName,
     required this.currentPropertyId,
@@ -576,10 +696,10 @@ class TransferBedSheet extends StatefulWidget {
   final String? currentSharingType;
 
   @override
-  State<TransferBedSheet> createState() => _TransferBedSheetState();
+  State<TransferBedScreen> createState() => _TransferBedScreenState();
 }
 
-class _TransferBedSheetState extends State<TransferBedSheet> {
+class _TransferBedScreenState extends State<TransferBedScreen> {
   // ── invoice settlement (same as checkout) ──
   List<Map<String, dynamic>>? _invoices;
   String? _loadError;
@@ -599,7 +719,12 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
   DateTime _transferDate = DateTime.now();
   bool _transferring = false;
   final _rentCtrl = TextEditingController();
+  final _tempAmountCtrl = TextEditingController(); // one-time temporary-stay charge
   double? _standardRent;
+  // Bed-list filter (by bed / room / floor name + sharing type).
+  final _bedSearchCtrl = TextEditingController();
+  String _bedQuery = '';
+  String? _bedSharing; // selected sharing-type filter (null = all)
 
   /// True when the selected bed's sharing type differs from the tenant's current
   /// one — such a move is deferred to the next billing date.
@@ -646,6 +771,8 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
   void dispose() {
     for (final c in _amountCtrl.values) c.dispose();
     _rentCtrl.dispose();
+    _tempAmountCtrl.dispose();
+    _bedSearchCtrl.dispose();
     super.dispose();
   }
 
@@ -735,7 +862,7 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Write Off?', style: TextStyle(fontWeight: FontWeight.w800)),
-        content: Text('Mark ₹$balance due for $month as written off?'),
+        content: Text('Mark ${inr(balance)} due for $month as written off?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton(
@@ -757,8 +884,7 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
       });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -769,7 +895,7 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
     if (ctrl == null) return;
     final amount = double.tryParse(ctrl.text.trim());
     if (amount == null || amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
+      AppToast.info(context, 'Enter a valid amount', title: 'Invalid Amount');
       return;
     }
     final mode = _payMode[id] ?? 'CASH';
@@ -779,22 +905,26 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
         'invoiceId': id, 'amount': amount, 'paymentMode': mode, 'idempotencyKey': key,
       });
       await _loadInvoices();
+      if (mounted) {
+        AppToast.success(context, 'Payment recorded',
+            title: 'Payment Collected');
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
 
   Future<void> _pickTransferDate() async {
     final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
     final picked = await showDatePicker(
       context: context,
-      initialDate: _transferDate,
-      firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 1),
-      helpText: 'Select transfer date',
+      initialDate: today,
+      firstDate: today,
+      lastDate: today,
+      helpText: 'Transfer date (today only)',
     );
     if (picked != null) setState(() => _transferDate = picked);
   }
@@ -809,43 +939,77 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       String message;
+      String title;
       if (_mode == 'TEMPORARY') {
+        final amt = double.tryParse(_tempAmountCtrl.text.trim()) ?? 0;
         await context.read<AppState>().apiClient.post('/occupancy/temp-stay', {
           'partyId': widget.partyId,
           'bedFacilityId': bedId,
           'fromDate': _iso(_transferDate),
+          if (amt > 0) 'amount': amt,
         });
-        message = 'Temporary stay started — no billing';
+        message = 'Temporary stay started';
+        title = 'Temporary Stay Started';
       } else {
         final rent = double.tryParse(_rentCtrl.text.trim());
         final body = <String, dynamic>{
           'partyId': widget.partyId,
           'newBedFacilityId': bedId,
-          if (rent != null && rent > 0) 'monthlyRent': rent,
         };
-        // Same-sharing → immediate on the chosen date. Different-sharing → omit the
-        // date and let the backend schedule it at the next billing cycle.
-        if (!_isSharingChange) body['transferDate'] = _iso(_transferDate);
+        // Same-sharing → immediate on the chosen date, rent unchanged (no override sent).
+        // Different-sharing → send the new rent; omit the date so the backend schedules
+        // it at the next billing cycle.
+        if (_isSharingChange) {
+          if (rent != null && rent > 0) body['monthlyRent'] = rent;
+        } else {
+          body['transferDate'] = _iso(_transferDate);
+        }
         final res = await context.read<AppState>().apiClient.post('/occupancy/transfer-bed', body);
         if ('${res['mode']}' == 'SCHEDULED') {
           final eff = res['scheduled']?['effectiveDate'];
           message = 'Transfer scheduled for ${eff ?? 'the next billing date'}';
+          title = 'Transfer Scheduled';
         } else {
           message = 'Bed transferred';
+          title = 'Bed Transferred';
         }
       }
       if (mounted) {
         Navigator.pop(context, true);
         widget.onTransferred();
-        messenger.showSnackBar(SnackBar(content: Text(message), backgroundColor: PgColors.success));
+        AppToast.successOf(messenger, message, title: title);
       }
     } catch (e) {
       if (mounted) {
         setState(() => _transferring = false);
-        messenger.showSnackBar(
-            SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        AppToast.errorOf(
+            messenger, e.toString().replaceFirst('Exception: ', ''));
       }
     }
+  }
+
+  Widget _sharingChip(String label, bool selected, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        label: Text(label, style: const TextStyle(fontSize: 12)),
+        selected: selected,
+        onSelected: (_) => onTap(),
+        selectedColor: PgColors.primary.withValues(alpha: 0.15),
+        labelStyle: TextStyle(
+            color: selected ? PgColors.primary : const Color(0xFF4B5563),
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(
+              color: selected ? PgColors.primary : Colors.grey.shade300),
+        ),
+        backgroundColor: Colors.white,
+        showCheckmark: false,
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
   }
 
   Widget _bedSelector() {
@@ -871,7 +1035,100 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
             style: TextStyle(color: Colors.grey), textAlign: TextAlign.center),
       );
     }
-    return _BedPicker(beds: _vacantBeds!, selected: _selectedBed, onSelect: _onBedSelected);
+
+    final q = _bedQuery;
+    // Distinct sharing types available among vacant beds (sorted numerically).
+    final sharingTypes = _vacantBeds!
+        .map((b) => '${b['sharing_type'] ?? ''}')
+        .where((s) => s.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort((a, b) =>
+          (int.tryParse(a) ?? 0).compareTo(int.tryParse(b) ?? 0));
+
+    final beds = _vacantBeds!.where((b) {
+      if (_bedSharing != null && '${b['sharing_type'] ?? ''}' != _bedSharing) {
+        return false;
+      }
+      if (q.isEmpty) return true;
+      final hay = [
+        b['bed_name'],
+        b['room_name'],
+        b['floor_name'],
+        b['sharing_type'],
+      ].map((e) => '${e ?? ''}'.toLowerCase()).join(' ');
+      return hay.contains(q);
+    }).toList();
+
+    final showFilters = _vacantBeds!.length > 4;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Filter — only worth showing when there are enough beds to warrant it.
+        if (showFilters) ...[
+          TextField(
+            controller: _bedSearchCtrl,
+            onChanged: (v) => setState(() => _bedQuery = v.toLowerCase().trim()),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: 'Filter by bed, room, floor…',
+              prefixIcon: const Icon(Icons.search, size: 20),
+              suffixIcon: _bedQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, size: 18),
+                      onPressed: () {
+                        _bedSearchCtrl.clear();
+                        setState(() => _bedQuery = '');
+                      },
+                    )
+                  : null,
+              border: const OutlineInputBorder(),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+          ),
+          if (sharingTypes.length > 1) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 34,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  _sharingChip('All', _bedSharing == null,
+                      () => setState(() => _bedSharing = null)),
+                  for (final s in sharingTypes)
+                    _sharingChip('$s-Sharing', _bedSharing == s,
+                        () => setState(() => _bedSharing = s)),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+        ],
+        if (beds.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: const Text('No beds match your filter.',
+                style: TextStyle(color: Colors.grey), textAlign: TextAlign.center),
+          )
+        else
+          // Bounded so a long list scrolls internally instead of pushing the
+          // rent/amount fields and the confirm button off-screen.
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 260),
+            child: SingleChildScrollView(
+              child: _BedPicker(
+                  beds: beds, selected: _selectedBed, onSelect: _onBedSelected),
+            ),
+          ),
+      ],
+    );
   }
 
   Widget _sharingChangeCard() {
@@ -933,14 +1190,30 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
       _bedSelector(),
       const SizedBox(height: 16),
       if (_selectedBed != null) ...[
-        if (!isTemp) ...[
+        // Temporary → one-time charge. Sharing change → new rent (editable).
+        // Same-sharing transfer → rent is unchanged, so no amount field is shown.
+        if (isTemp) ...[
+          TextField(
+            controller: _tempAmountCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Amount (₹)',
+              prefixIcon: Icon(Icons.currency_rupee),
+              helperText: 'One-time charge for this temporary stay',
+              helperStyle: TextStyle(fontSize: 11),
+              border: OutlineInputBorder(),
+            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+          ),
+          const SizedBox(height: 16),
+        ] else if (sharingChange) ...[
           TextField(
             controller: _rentCtrl,
             decoration: InputDecoration(
-              labelText: 'Monthly Rent (₹)',
+              labelText: 'New Monthly Rent (₹)',
               prefixIcon: const Icon(Icons.currency_rupee),
               helperText: _standardRent != null
-                  ? 'Standard: ₹${_standardRent!.toStringAsFixed(0)}/mo'
+                  ? 'Standard: ${inr(_standardRent)}/mo'
                   : null,
               helperStyle: const TextStyle(color: Color(0xFF2563EB), fontSize: 11),
               border: const OutlineInputBorder(),
@@ -975,66 +1248,41 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
   Widget build(BuildContext context) {
     final invoices = _invoices;
     final allSettled = invoices != null && invoices.isEmpty;
-    final padding = MediaQuery.viewInsetsOf(context).bottom;
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: padding),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 40, height: 4,
-            margin: const EdgeInsets.symmetric(vertical: 10),
-            decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 8, 8),
-            child: Row(
-              children: [
-                const Icon(Icons.swap_horiz_rounded, color: PgColors.primary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Transfer: ${widget.tenantName}',
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
-                  ),
-                ),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
-              ],
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1A1A2E),
+        elevation: 0,
+        title: Row(
+          children: [
+            const Icon(Icons.swap_horiz_rounded, color: PgColors.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Transfer: ${widget.tenantName}',
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
-          const Divider(height: 1),
-          ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.78),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: FadeSlideIn(
-                offset: 8,
-                child: Column(
+          ],
+        ),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1),
+        ),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: FadeSlideIn(
+            offset: 8,
+            child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // ── Mode toggle ────────────────────────────────────────
-                  Center(
-                    child: SegmentedButton<String>(
-                      segments: const [
-                        ButtonSegment(value: 'PERMANENT',
-                            label: Text('Permanent'), icon: Icon(Icons.swap_horiz_rounded, size: 16)),
-                        ButtonSegment(value: 'TEMPORARY',
-                            label: Text('Temporary'), icon: Icon(Icons.timelapse_outlined, size: 16)),
-                      ],
-                      selected: {_mode},
-                      onSelectionChanged: _transferring
-                          ? null
-                          : (s) => setState(() {
-                                _mode = s.first;
-                                _selectedBed = null;
-                                _standardRent = null;
-                                _rentCtrl.clear();
-                              }),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
+                  // Shift is a permanent bed transfer only — temporary stays are
+                  // started from the Assign Bed flow, not here.
                   if (_mode == 'TEMPORARY') ...[
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -1046,7 +1294,7 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
                         Icon(Icons.info_outline, color: PgColors.primary, size: 18),
                         SizedBox(width: 8),
                         Expanded(child: Text(
-                          'Temporary stay — no rent is charged. Make it permanent or move them back later.',
+                          'A single invoice is raised for the amount above. Make it permanent or move them back later.',
                           style: TextStyle(fontSize: 12.5, color: PgColors.primary),
                         )),
                       ]),
@@ -1073,6 +1321,7 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
                           onPayModeChange: (m) => setState(() => _payMode[(inv['invoice_id'] as num).toInt()] = m),
                           onPay: () => _pay(inv),
                           onWriteOff: () => _writeOff(inv),
+                          showWriteOff: false, // Shift: only Pay is allowed
                         ),
                     ],
                     if (allSettled) ...[
@@ -1094,12 +1343,10 @@ class _TransferBedSheetState extends State<TransferBedSheet> {
                   ],
                 ],
               ),
-              ),
             ),
           ),
-        ],
-      ),
-    );
+        ),
+      );
   }
 }
 

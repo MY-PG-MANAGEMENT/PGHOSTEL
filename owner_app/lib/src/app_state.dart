@@ -23,7 +23,11 @@ class AppState extends ChangeNotifier {
   bool isLoggedIn = false;
   String? roleTypeId;
   String? ownerName;
+  /// True while a tenant still holds the temporary password and must set a new one.
+  bool mustChangePassword = false;
   final LocalAuthentication localAuthentication = LocalAuthentication();
+
+  bool get isTenant => roleTypeId == 'TENANT';
 
   Future<void> restoreSession() async {
     final hasToken = await storage.read(key: 'accessToken') != null;
@@ -31,8 +35,35 @@ class AppState extends ChangeNotifier {
     isLoggedIn = hasToken && !biometricEnabled;
     roleTypeId = await storage.read(key: 'roleTypeId');
     ownerName = await storage.read(key: 'fullName');
-    if (isLoggedIn) await _fetchOwnerName();
+    mustChangePassword = await storage.read(key: 'mustChangePassword') == 'true';
+    if (isLoggedIn && !isTenant) await _fetchOwnerName();
     initialized = true;
+    notifyListeners();
+  }
+
+  /// Tenant login by mobile + password. Returns the raw result so the UI can
+  /// branch on `needsOrgSelection`. On success, session state is updated.
+  Future<Map<String, dynamic>> tenantLogin(String mobile, String password, {int? organizationId}) async {
+    try {
+      final data = await authRepository.tenantLogin(mobile, password, organizationId: organizationId);
+      if (data['needsOrgSelection'] == true) return data;
+      isLoggedIn = true;
+      roleTypeId = await storage.read(key: 'roleTypeId');
+      ownerName = await storage.read(key: 'fullName');
+      mustChangePassword = await storage.read(key: 'mustChangePassword') == 'true';
+      notifyListeners();
+      return data;
+    } catch (e) {
+      isLoggedIn = false;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// Called after a tenant completes the forced first-login password change.
+  Future<void> clearMustChangePassword() async {
+    mustChangePassword = false;
+    await storage.write(key: 'mustChangePassword', value: 'false');
     notifyListeners();
   }
 
@@ -149,6 +180,7 @@ class AppState extends ChangeNotifier {
     required String username,
     required String password,
     required String organizationName,
+    required String organizationEmail,
   }) async {
     await authRepository.registerOwner(
       fullName: fullName,
@@ -156,6 +188,7 @@ class AppState extends ChangeNotifier {
       username: username,
       password: password,
       organizationName: organizationName,
+      organizationEmail: organizationEmail,
     );
     isLoggedIn = true;
     roleTypeId = await storage.read(key: 'roleTypeId');

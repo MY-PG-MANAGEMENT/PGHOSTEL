@@ -1,0 +1,12 @@
+package com.pgmanager.notice;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+import java.util.Optional;
+
+public interface NoticeRepository extends JpaRepository<Notice, Long> {
+    List<Notice> findByOrganizationIdOrderByPublishedAtDesc(Long organizationId);
+
+    Optional<Notice> findByNoticeIdAndOrganizationId(Long noticeId, Long organizationId);
+}

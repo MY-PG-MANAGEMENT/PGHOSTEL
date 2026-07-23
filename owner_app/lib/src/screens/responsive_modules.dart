@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/animations.dart';
+import '../widgets/app_toast.dart';
 import 'property_workspace_screen.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -867,9 +868,7 @@ class _DashAddPropertySheetState extends State<_DashAddPropertySheet> {
     } catch (e) {
       setState(() => _saving = false);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
-      );
+      AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
     }
   }
 

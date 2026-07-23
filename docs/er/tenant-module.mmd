@@ -1,0 +1,76 @@
+%% Tenant Module ER — new tables (V22) + the existing join paths they rely on.
+erDiagram
+    party ||--|| person : "1:1"
+    party ||--o{ user_login : "has logins"
+    party ||--o{ facility_party : "memberships"
+    facility ||--o{ facility_party : "occupancy/membership"
+    facility ||--o{ organization_feature : "features"
+    feature_master ||--o{ organization_feature : "code"
+
+    user_login ||--o{ refresh_token : "sessions"
+    party ||--o{ complaint : "raises"
+    complaint ||--o{ complaint_status_history : "timeline"
+    facility ||--o{ notice : "org/property"
+    notice ||--o{ notice_read : "read receipts"
+    party ||--o{ notice_read : "reads"
+    party ||--o{ notification_recipient : "receives"
+
+    user_login {
+        bigint user_login_id PK
+        bigint party_id FK
+        string username "mobile@orgId (tenant)"
+        string password_hash "BCrypt"
+        string role_type_id "TENANT"
+        bigint organization_id FK
+        string status "ACTIVE / INACTIVE"
+        string disabled_reason "CHECKED_OUT (V22)"
+        boolean must_change_password "V22"
+        datetime last_login_at "V22"
+    }
+
+    organization_feature {
+        bigint organization_feature_id PK
+        bigint organization_id FK
+        bigint feature_id FK "TENANT_LOGIN"
+        boolean enabled
+    }
+
+    complaint {
+        bigint complaint_id PK
+        bigint organization_id FK
+        bigint party_id FK "tenant"
+        bigint property_facility_id
+        string category
+        string title
+        string description
+        string priority "LOW/MEDIUM/HIGH"
+        string status "OPEN/IN_PROGRESS/RESOLVED/CLOSED"
+    }
+
+    complaint_status_history {
+        bigint complaint_status_history_id PK
+        bigint complaint_id FK
+        string from_status
+        string to_status
+        string note
+        bigint changed_by_user_login_id
+    }
+
+    notice {
+        bigint notice_id PK
+        bigint organization_id FK
+        bigint property_facility_id "NULL = org-wide"
+        string notice_type
+        string title
+        string body
+        datetime published_at
+        datetime expires_at
+        boolean active
+    }
+
+    notice_read {
+        bigint notice_read_id PK
+        bigint notice_id FK
+        bigint party_id FK
+        datetime read_at
+    }

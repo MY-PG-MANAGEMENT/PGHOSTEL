@@ -31,6 +31,10 @@ public class Facility extends BaseEntity {
     @Column(name = "facility_name", nullable = false)
     private String facilityName;
 
+    /** Contact email. For ORGANIZATION rows this is the sender address for tenant emails. */
+    @Column(name = "email", length = 160)
+    private String email;
+
     @Column(nullable = false)
     private String status = "ACTIVE";
 

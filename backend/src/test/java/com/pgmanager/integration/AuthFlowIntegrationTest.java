@@ -48,7 +48,8 @@ class AuthFlowIntegrationTest {
     @Test
     void ownerCanRegisterThenLogin() throws Exception {
         String register = "{\"fullName\":\"Asha Rao\",\"mobileNumber\":\"9811122233\"," +
-                "\"username\":\"asha_owner\",\"password\":\"secret123\",\"organizationName\":\"Asha PG\"}";
+                "\"username\":\"asha_owner\",\"password\":\"secret123\",\"organizationName\":\"Asha PG\"," +
+                "\"organizationEmail\":\"owner@ashapg.com\"}";
 
         String body = mvc.perform(post("/api/auth/register-owner")
                         .contentType(MediaType.APPLICATION_JSON).content(register))
@@ -70,7 +71,8 @@ class AuthFlowIntegrationTest {
     void loginWithWrongPasswordFails() throws Exception {
         mvc.perform(post("/api/auth/register-owner").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"fullName\":\"Ben Roy\",\"mobileNumber\":\"9811199999\"," +
-                                "\"username\":\"ben_owner\",\"password\":\"secret123\",\"organizationName\":\"Ben PG\"}"))
+                                "\"username\":\"ben_owner\",\"password\":\"secret123\",\"organizationName\":\"Ben PG\"," +
+                                "\"organizationEmail\":\"owner@benpg.com\"}"))
                 .andExpect(status().isOk());
 
         mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)

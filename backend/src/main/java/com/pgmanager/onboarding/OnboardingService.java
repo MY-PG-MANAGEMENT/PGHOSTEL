@@ -8,9 +8,11 @@ import com.pgmanager.facility.FacilityType;
 import com.pgmanager.feature.FeatureMasterRepository;
 import com.pgmanager.feature.OrganizationFeature;
 import com.pgmanager.feature.OrganizationFeatureRepository;
+import com.pgmanager.common.cache.CacheConfig;
 import com.pgmanager.onboarding.dto.OnboardingDtos.OnboardingWizardRequest;
 import com.pgmanager.onboarding.dto.OnboardingDtos.OnboardingWizardResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +27,10 @@ public class OnboardingService {
     private final OrganizationFeatureRepository organizationFeatureRepository;
     private final AuditService auditService;
 
+    // Onboarding activates organization_feature rows (enableFeatures). It runs once per
+    // org and is rare, so clear the small feature-flag cache wholesale to stay correct
+    // rather than track individual codes.
+    @CacheEvict(cacheNames = CacheConfig.ORG_FEATURES, allEntries = true)
     @Transactional
     public OnboardingWizardResponse run(Long organizationId, Long userLoginId, OnboardingWizardRequest request) {
         int floors = 0;

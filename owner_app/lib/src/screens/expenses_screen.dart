@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/animations.dart';
+import '../widgets/app_toast.dart';
+import '../widgets/skeleton.dart';
 import '../widgets/error_retry_view.dart';
 
 /// Expenses dashboard, light-themed like the rest of the app and fully backed
@@ -46,6 +48,8 @@ const Map<String, _CategoryMeta> _categoryMeta = {
   'TRANSPORT': _CategoryMeta('Transport', Color(0xFFE07B2A), Icons.local_shipping_rounded),
   'LAUNDRY': _CategoryMeta('Laundry', Color(0xFF0E9AAB), Icons.local_laundry_service_rounded),
   'RENT': _CategoryMeta('Rent', Color(0xFFDB4A6B), Icons.home_rounded),
+  'DEPOSIT_REFUND':
+      _CategoryMeta('Deposit Refund', Color(0xFF3B7DD8), Icons.currency_exchange_rounded),
   'OTHERS': _CategoryMeta('Others', Color(0xFF6B7280), Icons.category_rounded),
 };
 
@@ -197,7 +201,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         future: _future,
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
+            return const SkeletonList(showLeading: false);
           }
           if (snap.hasError) {
             return ErrorRetryView(error: snap.error!, onRetry: _reload);
@@ -291,12 +295,19 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           Map<String, dynamic>.from(e as Map),
       ];
 
-  void _toast(String msg) {
+  void _toastSuccess(String msg, {String? title}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-          content: Text(msg), behavior: SnackBarBehavior.floating));
+    AppToast.success(context, msg, title: title);
+  }
+
+  void _toastError(String msg) {
+    if (!mounted) return;
+    AppToast.error(context, msg);
+  }
+
+  void _toastInfo(String msg, {String? title}) {
+    if (!mounted) return;
+    AppToast.info(context, msg, title: title);
   }
 
   // ─────────────────────────────────────────────────── property selector ──
@@ -576,7 +587,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             label: 'Reports',
             icon: Icons.insert_chart_outlined_rounded,
             color: PgColors.primary,
-            onTap: () => _toast('Detailed reports coming soon'),
+            onTap: () =>
+                _toastInfo('Detailed reports coming soon', title: 'Coming Soon'),
           ),
         ),
       ],
@@ -794,12 +806,14 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       await context.read<AppState>().apiClient.patch(
           '/expenses/${a['expenseId']}/status',
           {'status': approved ? 'APPROVED' : 'REJECTED'});
-      _toast(approved
-          ? '${a['title']} approved · ${_inr(_num(a['amount']))}'
-          : '${a['title']} rejected');
+      _toastSuccess(
+          approved
+              ? '${a['title']} approved · ${_inr(_num(a['amount']))}'
+              : '${a['title']} rejected',
+          title: approved ? 'Expense Approved' : 'Expense Rejected');
       _reload();
     } catch (e) {
-      _toast(e.toString().replaceFirst('Exception: ', ''));
+      _toastError(e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
@@ -1034,9 +1048,11 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           _AddExpenseSheet(propertyId: _propertyId, scopeLabel: _scopeLabel),
     );
     if (saved != null) {
-      _toast(saved == 'pending'
-          ? 'Expense recorded — awaiting approval'
-          : 'Expense recorded');
+      _toastSuccess(
+          saved == 'pending'
+              ? 'Expense recorded — awaiting approval'
+              : 'Expense recorded',
+          title: 'Expense Added');
       _reload();
     }
   }
@@ -1052,7 +1068,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           _SetBudgetSheet(propertyId: _propertyId, scopeLabel: _scopeLabel),
     );
     if (saved == true) {
-      _toast('Budget saved');
+      _toastSuccess('Budget saved', title: 'Budget Saved');
       _reload();
     }
   }
@@ -1156,9 +1172,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet> {
     } catch (e) {
       setState(() => _saving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: PgColors.danger));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -1330,9 +1344,7 @@ class _SetBudgetSheetState extends State<_SetBudgetSheet> {
     } catch (e) {
       setState(() => _saving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: PgColors.danger));
+        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
