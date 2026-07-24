@@ -51,7 +51,7 @@ class TenantControllerTest {
     private TenantResponse sampleResponse() {
         return new TenantResponse(100L, "Asha Rao", "9876543210", null, null, null, null, null,
                 null, null, null, null, null, null, false, null, null, null, null, false, null, null, null,
-                null, null, false, null, null);
+                null, null, false, null, null, false, null, null);
     }
 
     @Test

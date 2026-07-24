@@ -37,9 +37,12 @@ class BillingControllerTest {
         CurrentUser currentUser = mock(CurrentUser.class);
         lenient().when(currentUser.organizationId()).thenReturn(1L);
         NotificationService notificationService = mock(NotificationService.class);
+        InvoiceGenerationService invoiceGenerationService = mock(InvoiceGenerationService.class);
+        BillingConfigService billingConfigService = mock(BillingConfigService.class);
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
-        mvc = MockMvcBuilders.standaloneSetup(new BillingController(currentUser, jdbc, notificationService))
+        mvc = MockMvcBuilders.standaloneSetup(new BillingController(currentUser, jdbc, notificationService,
+                        invoiceGenerationService, billingConfigService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setValidator(validator)
                 .build();

@@ -1005,11 +1005,206 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
   // invoice detail endpoint so the sheet can explain how the total is made up.
   List<Map<String, dynamic>>? _items;
   bool _itemsLoading = true;
+  bool _deleting = false;
 
   @override
   void initState() {
     super.initState();
     _loadItems();
+  }
+
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Invoice'),
+        content: Text(
+            'Are you sure you want to delete the ${_fmtMonth(invoice['invoice_month'])} invoice for ${invoice['full_name'] ?? 'this tenant'}? This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: PgColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _deleting = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context
+          .read<AppState>()
+          .apiClient
+          .delete('/billing/invoices/${invoice['invoice_id']}');
+      if (!mounted) return;
+      Navigator.pop(context);
+      widget.onRefresh();
+      AppToast.successOf(messenger, 'Invoice deleted');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _deleting = false);
+      AppToast.error(context, '$e'.replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<void> _editAmount() async {
+    // Every charge line (PG rent / AC charges / security deposit / …) is
+    // edited individually; the invoice total is their live sum.
+    var items = _items;
+    if (items == null) {
+      try {
+        final res = await context
+            .read<AppState>()
+            .apiClient
+            .get('/billing/invoices/${invoice['invoice_id']}');
+        items = (res['items'] is List ? res['items'] as List : [])
+            .cast<Map<String, dynamic>>();
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    if (items == null || items.isEmpty) {
+      AppToast.error(context, 'Charge details are not available to edit');
+      return;
+    }
+    final lineItems = items;
+    final controllers = [
+      for (final it in lineItems)
+        TextEditingController(text: '${it['amount'] ?? 0}'),
+    ];
+    final formKey = GlobalKey<FormState>();
+
+    num currentTotal() {
+      num t = 0;
+      for (final c in controllers) {
+        t += num.tryParse(c.text.trim()) ?? 0;
+      }
+      return t;
+    }
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Edit Invoice Amount'),
+          content: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (int i = 0; i < lineItems.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: TextFormField(
+                        controller: controllers[i],
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        decoration: InputDecoration(
+                          labelText: _itemLabel(lineItems[i]),
+                          prefixText: '₹ ',
+                          isDense: true,
+                        ),
+                        onChanged: (_) => setDialogState(() {}),
+                        validator: (v) {
+                          final n = num.tryParse((v ?? '').trim());
+                          if (n == null || n < 0) return 'Invalid amount';
+                          return null;
+                        },
+                      ),
+                    ),
+                  const Divider(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text('Total',
+                              style: TextStyle(fontWeight: FontWeight.w800)),
+                        ),
+                        Text(_rupees(currentTotal()),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                color: PgColors.primary)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: PgColors.primary.withValues(alpha: 0.07),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: PgColors.primary.withValues(alpha: 0.2)),
+                    ),
+                    child: const Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.info_outline,
+                            size: 18, color: PgColors.primary),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'This changes only this month\'s invoice — not the tenant\'s master rent. '
+                            'No partial payment can be created; this is the final amount for this month\'s rent.',
+                            style: TextStyle(
+                                fontSize: 12,
+                                height: 1.3,
+                                color: PgColors.textSecondary),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (formKey.currentState?.validate() != true) return;
+                if (currentTotal() <= 0) return;
+                Navigator.pop(ctx, true);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (saved != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final payloadItems = [
+      for (int i = 0; i < lineItems.length; i++)
+        {
+          'invoiceItemId': lineItems[i]['invoice_item_id'],
+          'amount': num.parse(controllers[i].text.trim()),
+        },
+    ];
+    try {
+      await context.read<AppState>().apiClient.patch(
+        '/billing/invoices/${invoice['invoice_id']}/amount',
+        {'items': payloadItems},
+      );
+      if (!mounted) return;
+      Navigator.pop(context);
+      widget.onRefresh();
+      AppToast.successOf(messenger, 'Invoice amount updated');
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.error(context, '$e'.replaceFirst('Exception: ', ''));
+    }
   }
 
   Future<void> _loadItems() async {
@@ -1121,6 +1316,9 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
     final status = '${invoice['status'] ?? 'PENDING'}';
     final color = _statusColor(status);
     final canPay = status == 'PENDING' || status == 'PARTIAL' || status == 'OVERDUE';
+    // Only a fresh, unpaid invoice can be re-priced — anything already paid or
+    // cancelled keeps its amount.
+    final canEdit = status == 'PENDING' && (paid is num ? paid == 0 : true);
 
     return Padding(
       padding: const EdgeInsets.all(24),
@@ -1131,15 +1329,27 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
           Row(children: [
             Text('Invoice', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
             const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: color.withValues(alpha: 0.3)),
+            if (canEdit)
+              IconButton(
+                icon: const Icon(Icons.edit_outlined),
+                color: PgColors.primary,
+                tooltip: 'Edit Amount',
+                style: IconButton.styleFrom(
+                  backgroundColor: PgColors.primary.withValues(alpha: 0.1),
+                ),
+                onPressed: _deleting ? null : _editAmount,
               ),
-              child: Text(status, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12)),
-            ),
+            if (canEdit) const SizedBox(width: 8),
+            if (status != 'CANCELLED')
+              IconButton(
+                icon: const Icon(Icons.delete_outline),
+                color: PgColors.danger,
+                tooltip: 'Delete Invoice',
+                style: IconButton.styleFrom(
+                  backgroundColor: PgColors.danger.withValues(alpha: 0.1),
+                ),
+                onPressed: _deleting ? null : _confirmDelete,
+              ),
             const SizedBox(width: 8),
             IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
           ]),
@@ -1147,6 +1357,7 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
           _DetailRow('Tenant', name),
           _DetailRow('Month', _fmtMonth(invoice['invoice_month'])),
           _DetailRow('Due Date', _fmtDate(invoice['due_date'])),
+          _StatusRow('Status', status, color),
           _chargesBreakdown(total),
           _DetailRow('Paid', _rupees(paid)),
           _DetailRow('Balance', _rupees(balance), color: (balance is num && balance > 0) ? PgColors.danger : PgColors.success),
@@ -1189,6 +1400,34 @@ class _DetailRow extends StatelessWidget {
           SizedBox(width: 100, child: Text(label, style: const TextStyle(color: Colors.grey))),
           Expanded(
             child: Text(value, style: TextStyle(fontWeight: FontWeight.w600, color: color)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusRow extends StatelessWidget {
+  const _StatusRow(this.label, this.status, this.color);
+  final String label;
+  final String status;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          SizedBox(width: 100, child: Text(label, style: const TextStyle(color: Colors.grey))),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: color.withValues(alpha: 0.3)),
+            ),
+            child: Text(status, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12)),
           ),
         ],
       ),

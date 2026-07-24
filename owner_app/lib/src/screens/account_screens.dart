@@ -468,6 +468,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const _SettingTile(
                 icon: Icons.language, title: 'Language', subtitle: 'English'),
           ]),
+          _SettingsGroup(title: 'Billing', children: [
+            _SettingTile(
+                icon: Icons.receipt_long_outlined,
+                title: 'Invoice Automation',
+                subtitle: 'Auto-generate monthly invoices',
+                onTap: () => showModalBottomSheet<void>(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.white,
+                      shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                      builder: (_) => const _InvoiceAutomationSheet(),
+                    )),
+          ]),
           _SettingsGroup(title: 'Data & Storage', children: [
             _SettingTile(
               icon: Icons.delete_outline,
@@ -790,4 +804,153 @@ class _SettingTile extends StatelessWidget {
   const _SettingTile({required this.icon, required this.title, this.subtitle, this.onTap}); final IconData icon; final String title; final String? subtitle; final VoidCallback? onTap;
   @override
   Widget build(BuildContext context) => ListTile(leading: Icon(icon), title: Text(title), subtitle: subtitle == null ? null : Text(subtitle!), trailing: onTap == null ? null : const Icon(Icons.chevron_right), onTap: onTap);
+}
+
+/// Per-organization invoice automation config (backed by GET/PUT /billing/config).
+/// Controls whether invoices auto-generate daily and how many days before the tenant's
+/// billing anniversary (their move-in day-of-month) each invoice is raised.
+class _InvoiceAutomationSheet extends StatefulWidget {
+  const _InvoiceAutomationSheet();
+  @override
+  State<_InvoiceAutomationSheet> createState() => _InvoiceAutomationSheetState();
+}
+
+class _InvoiceAutomationSheetState extends State<_InvoiceAutomationSheet> {
+  bool _loading = true;
+  bool _saving = false;
+  Object? _error;
+  bool _autoEnabled = true;
+  int _leadDays = 1;
+  int _minLeadDays = 0;
+  int _maxLeadDays = 28;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final data = await context.read<AppState>().apiClient.get('/billing/config');
+      if (!mounted) return;
+      setState(() {
+        _autoEnabled = data['autoGenerateEnabled'] == true;
+        _leadDays = (data['invoiceLeadDays'] as num?)?.toInt() ?? 1;
+        _minLeadDays = (data['minLeadDays'] as num?)?.toInt() ?? 0;
+        _maxLeadDays = (data['maxLeadDays'] as num?)?.toInt() ?? 28;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    setState(() => _saving = true);
+    try {
+      await context.read<AppState>().apiClient.put('/billing/config', {
+        'invoiceLeadDays': _leadDays,
+        'autoGenerateEnabled': _autoEnabled,
+      });
+      if (!mounted) return;
+      navigator.pop();
+      AppToast.successOf(messenger, 'Invoice automation settings saved',
+          title: 'Billing Updated');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      AppToast.errorOf(messenger, e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+          left: 20, right: 20, top: 20,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 20),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.receipt_long, color: PgColors.primary),
+          const SizedBox(width: 10),
+          const Expanded(
+              child: Text('Invoice Automation',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18))),
+          IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+        ]),
+        const SizedBox(height: 8),
+        if (_loading)
+          const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
+        else if (_error != null)
+          Padding(padding: const EdgeInsets.symmetric(vertical: 24),
+              child: ErrorState(error: _error, retry: _load))
+        else ...[
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _autoEnabled,
+            onChanged: _saving ? null : (v) => setState(() => _autoEnabled = v),
+            title: const Text('Auto-generate invoices',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: const Text(
+                'Runs daily at 1:00 AM. Each tenant is invoiced ahead of their billing date. '
+                'You can still generate invoices manually anytime.'),
+          ),
+          const Divider(height: 24),
+          Opacity(
+            opacity: _autoEnabled ? 1 : 0.4,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Generate invoices in advance',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              Text('How many days before the due date to raise the invoice ($_minLeadDays–$_maxLeadDays).',
+                  style: const TextStyle(color: Colors.black54, fontSize: 13)),
+              const SizedBox(height: 12),
+              Row(children: [
+                IconButton.filledTonal(
+                  onPressed: (!_autoEnabled || _saving || _leadDays <= _minLeadDays)
+                      ? null : () => setState(() => _leadDays--),
+                  icon: const Icon(Icons.remove),
+                ),
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      _leadDays == 0
+                          ? 'On the due date'
+                          : '$_leadDays day${_leadDays == 1 ? '' : 's'} before',
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                  ),
+                ),
+                IconButton.filledTonal(
+                  onPressed: (!_autoEnabled || _saving || _leadDays >= _maxLeadDays)
+                      ? null : () => setState(() => _leadDays++),
+                  icon: const Icon(Icons.add),
+                ),
+              ]),
+            ]),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _saving ? null : _save,
+              child: _saving
+                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('Save'),
+            ),
+          ),
+        ],
+      ]),
+    );
+  }
 }

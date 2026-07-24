@@ -28,7 +28,7 @@ Swagger UI is at `http://localhost:8080/swagger-ui.html`.
 
 `src/main/resources/application.yml` — expects local MySQL on port 3306, database `pg_manager`, user `root`/`root`. JWT secret and token lifetimes (`access-token-minutes: 30`, `refresh-token-days: 14`) live under `app.security`. `app.public-base-url` (env `APP_PUBLIC_BASE_URL`, default a LAN IP) is the origin the tenant self check-in QR points to — it must be reachable from the tenant's phone.
 
-`@EnableScheduling` is active on `PgManagerApplication` — `RentReminderScheduler` fires daily at 09:00 (cron `0 0 9 * * *`) to dispatch rent-due, checkout, payment-receipt, and check-in notifications.
+`@EnableScheduling` is active on `PgManagerApplication` — `RentReminderScheduler` fires daily at 09:00 (cron `0 0 9 * * *`) to dispatch rent-due, checkout, payment-receipt, and check-in notifications; `BedTransferScheduler` at 00:05 applies due sharing-change transfers; `InvoiceAutoGenerationScheduler` (billing) at 01:00 (cron `0 0 1 * * *`) auto-creates each tenant's recurring monthly invoice a configurable number of days before their billing anniversary (see the billing "Automated invoice generation" note).
 
 ### Caching (Redis)
 
@@ -36,7 +36,7 @@ Opt-in, fail-open Redis cache via Spring's cache abstraction. Config: `common/ca
 
 ### Database Migrations
 
-Flyway migrations in `src/main/resources/db/migration/`. Always add new migrations as `V<n>__description.sql` — never edit existing ones. `ddl-auto` is `validate`, so Hibernate rejects schema drift (adding an entity field requires a matching migration or startup fails). Current latest is V25 (`V25__sharing_price_per_day.sql`).
+Flyway migrations in `src/main/resources/db/migration/`. Always add new migrations as `V<n>__description.sql` — never edit existing ones. `ddl-auto` is `validate`, so Hibernate rejects schema drift (adding an entity field requires a matching migration or startup fails). Current latest is V26 (`V26__billing_auto_generation_config.sql`).
 
 Notable migration changes:
 - V10 — adds `UNIQUE KEY uk_person_mobile` on `person.mobile_number` (global, not org-scoped) and creates `bulk_upload_job` tracking table
@@ -55,6 +55,7 @@ Notable migration changes:
 - V23 — adds two composite indexes on `facility_party` (`idx_fp_org_facility_role_thru` = `(organization_id, facility_id, role_type_id, thru_date)`, `idx_fp_org_party_role_thru` = `(organization_id, party_id, role_type_id, thru_date)`) covering the tenant-list hot paths; V1 only had single-column indexes so the planner filtered most predicates in memory.
 - V24 — drops 15 dead tables + 4 views (over-provisioned V3/V4 schema never wired to any `@Entity` or JdbcTemplate SQL): the `contact_mech` cluster, `room_photo`, `recurring_charge`, `plan_feature`, `party_role`, `status_type`, `login_history`, `analytics_cache`, `activity_log`, `payment_receipt`, plus FK-entangled `content_reference` (drops `identity_document.content_reference_id`) and `payment_method_type` (drops the unmapped `payment.payment_method_type` column — `Payment` maps `payment_mode`, not this). If reintroducing any of these features, add a fresh migration.
 - V25 — adds `property_sharing_price.per_day_price` (`DECIMAL(10,2) NOT NULL DEFAULT 0`): the per-day rate, set per property + sharing type in Price Master, used to price temporary stays (`days × per_day_price`, editable before invoicing). See the Temporary Stay module below.
+- V26 — creates `organization_billing_config` (`organization_id` UNIQUE, `invoice_lead_days INT DEFAULT 1`, `auto_generate_enabled TINYINT(1) DEFAULT 1`): per-org invoice-automation settings backing `InvoiceAutoGenerationScheduler`. A missing row = defaults (lead days 1, auto ON), so existing orgs are automated with no backfill. Read/written via `BillingConfigService` (JdbcTemplate, **not** a JPA entity — so `validate` does not track it).
 
 ### Package Structure
 
@@ -102,6 +103,7 @@ Each feature is a self-contained package under `com.pgmanager`. Cross-cutting co
 
 - `BillingController` is intentionally implemented with raw `JdbcTemplate` (not JPA entities). Invoice generation, payment collection, payment allocation, and the billing dashboard all run as direct SQL to keep aggregate queries simple. Other packages should continue using JPA.
 - Payments support an `idempotency_key` column — pass a client-generated UUID to make payment collection safe to retry.
+- **Automated invoice generation.** Recurring monthly invoices are created automatically by `InvoiceAutoGenerationScheduler` (daily 01:00). The shared recurring-invoice primitive lives in `InvoiceGenerationService.createRecurringInvoice` (`@Transactional` so its INSERT + `LAST_INSERT_ID()` share one connection when the scheduler calls it) — it builds `MONTHLY_RENT`(=rent−AC)+optional `AC_CHARGES`, total = rent (no deposit; the deposit is move-in-only, still in `MoveInBillingService`), due on the tenant's anniversary day clamped to month length, invoice number `INV-{org}-{baId}-{YYYYMM}`, idempotent per `(billing_account_id, invoice_month)`, and notifies the tenant. `BillingController.POST /generate-invoices` now delegates to `InvoiceGenerationService.generateForMonth` and remains the **manual fallback** (whole month, all active occupants, ignores per-org automation settings). The scheduler runs one global sweep of active-occupant billing accounts in ACTIVE orgs, joins per-org config, and for each account generates when `today + leadDays == this month's due date` (month-length-clamped so a 31st anniversary fires in Feb and lead days crossing a month boundary land in the right billing month). Per-org settings (`invoice_lead_days` 0–28, default 1; `auto_generate_enabled`, default ON) come from `BillingConfigService`/`organization_billing_config` (V26) and are owner-managed via `GET/PUT /api/billing/config` (Flutter: Settings → Billing → **Invoice Automation** sheet in `account_screens.dart`).
 
 **`rent`**
 

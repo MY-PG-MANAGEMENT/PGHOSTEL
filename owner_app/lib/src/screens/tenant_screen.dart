@@ -971,6 +971,98 @@ class _ProfileTabState extends State<_ProfileTab> {
     if (saved == true) widget.onCheckoutDateSet();
   }
 
+  Future<void> _changeRent() async {
+    final tenantId = widget.tenant['tenantId'];
+    final controller =
+        TextEditingController(text: '${widget.tenant['monthlyRent'] ?? ''}');
+    final formKey = GlobalKey<FormState>();
+    final newRent = await showDialog<num>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Change Monthly Rent'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextFormField(
+                controller: controller,
+                autofocus: true,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Monthly Rent',
+                  prefixText: '₹ ',
+                ),
+                validator: (v) {
+                  final n = num.tryParse((v ?? '').trim());
+                  if (n == null || n <= 0) return 'Enter a valid amount';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: PgColors.primary.withValues(alpha: 0.07),
+                  borderRadius: BorderRadius.circular(10),
+                  border:
+                      Border.all(color: PgColors.primary.withValues(alpha: 0.2)),
+                ),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, size: 18, color: PgColors.primary),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'This is the tenant\'s master rent. It applies from the next billing cycle — '
+                        'the current month\'s invoice stays unchanged.',
+                        style: TextStyle(
+                            fontSize: 12,
+                            height: 1.3,
+                            color: PgColors.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() != true) return;
+              Navigator.pop(ctx, num.parse(controller.text.trim()));
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (newRent == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<AppState>().apiClient.put(
+        '/occupancy/monthly-rent',
+        {'partyId': tenantId, 'monthlyRent': newRent},
+      );
+      if (!mounted) return;
+      widget.onCheckoutDateSet();
+      AppToast.successOf(
+          messenger, 'Monthly rent updated — applies from next billing');
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.error(context, '$e'.replaceFirst('Exception: ', ''));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final tenant = widget.tenant;
@@ -997,15 +1089,34 @@ class _ProfileTabState extends State<_ProfileTab> {
           _TenancyBanner(moveInDate: moveIn, monthlyRent: rent, securityDeposit: deposit, expectedCheckoutDate: expectedCheckout),
         if (!inTemp && (moveIn != null || rent != null)) const SizedBox(height: 8),
         if (hasAdmission)
-          OutlinedButton.icon(
-            icon: const Icon(Icons.event_available_outlined, size: 16),
-            label: Text(expectedCheckout != null ? 'Update Checkout Date' : 'Set Checkout Date'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: PgColors.primary,
-              side: const BorderSide(color: PgColors.primary),
-              textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-            ),
-            onPressed: _setCheckoutDate,
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.event_available_outlined, size: 16),
+                  label: Text(expectedCheckout != null ? 'Update Checkout Date' : 'Set Checkout Date'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: PgColors.primary,
+                    side: const BorderSide(color: PgColors.primary),
+                    textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                  ),
+                  onPressed: _setCheckoutDate,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.currency_rupee, size: 16),
+                  label: const Text('Change Rent'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: PgColors.warning,
+                    side: const BorderSide(color: PgColors.warning),
+                    textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                  ),
+                  onPressed: _changeRent,
+                ),
+              ),
+            ],
           ),
         if (hasAdmission) const SizedBox(height: 8),
         if (hasAdmission)
