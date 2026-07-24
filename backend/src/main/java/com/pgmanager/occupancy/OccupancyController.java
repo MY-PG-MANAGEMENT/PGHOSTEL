@@ -16,6 +16,7 @@ import com.pgmanager.common.cache.EvictOccupancyCaches;
 import com.pgmanager.security.CurrentUser;
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -190,6 +192,23 @@ public class OccupancyController {
         return ApiResponse.ok("Expected checkout date updated", null);
     }
 
+    // Change the tenant's master monthly rent. This updates the recurring rent
+    // on the active occupancy row only — the current month's invoice (already
+    // generated) is untouched, so the new rent takes effect from the next
+    // billing cycle when /generate-invoices reads facility_party.monthly_rent.
+    @PutMapping("/monthly-rent")
+    @Transactional
+    @EvictOccupancyCaches
+    ApiResponse<Void> changeRent(@Valid @RequestBody ChangeRentRequest request) {
+        Long org = currentUser.organizationId();
+        int updated = jdbc.update(
+                "UPDATE facility_party SET monthly_rent=?,updated_at=NOW() " +
+                "WHERE organization_id=? AND party_id=? AND role_type_id='OCCUPANT' AND thru_date IS NULL",
+                request.monthlyRent(), org, request.partyId());
+        if (updated == 0) throw new NotFoundException("Active bed assignment not found for this tenant");
+        return ApiResponse.ok("Monthly rent updated — applies from the next billing cycle", null);
+    }
+
     @GetMapping("/history/{partyId}")
     ApiResponse<List<OccupancyResponse>> history(@PathVariable Long partyId) {
         return ApiResponse.ok(occupancyService.history(currentUser.organizationId(), partyId));
@@ -206,4 +225,5 @@ public class OccupancyController {
     }
 
     public record ExpectedCheckoutRequest(@NotNull Long partyId, String expectedCheckoutDate) {}
+    public record ChangeRentRequest(@NotNull Long partyId, @NotNull @DecimalMin("0") BigDecimal monthlyRent) {}
 }

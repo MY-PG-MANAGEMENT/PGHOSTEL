@@ -8,13 +8,19 @@ import com.pgmanager.security.CurrentUser;
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -34,6 +40,8 @@ public class BillingController {
     private final CurrentUser currentUser;
     private final JdbcTemplate jdbc;
     private final NotificationService notificationService;
+    private final InvoiceGenerationService invoiceGenerationService;
+    private final BillingConfigService billingConfigService;
 
     @GetMapping("/dashboard")
     ApiResponse<Map<String, Object>> dashboard(@RequestParam(required = false) Long propertyId) {
@@ -198,62 +206,49 @@ public class BillingController {
                 request.paymentDate(), request.referenceNumber(), request.notes(), request.idempotencyKey()));
     }
 
+    /**
+     * Manual/fallback batch generation for a whole month. The daily
+     * {@link InvoiceAutoGenerationScheduler} normally raises invoices per-tenant ahead of their
+     * anniversary; this endpoint remains for on-demand generation (e.g. a first run, catch-up, or
+     * an org that has automation switched off). Delegates to {@link InvoiceGenerationService} so
+     * numbering / due-date / line-item logic stays in one place. Idempotent per account+month.
+     */
     @PostMapping("/generate-invoices")
-    @Transactional
     ApiResponse<Map<String, Object>> generateInvoices(@RequestParam(required = false) String month,
                                                        @RequestParam(required = false) Long propertyId) {
         Long org = currentUser.organizationId();
-        LocalDate invoiceMonth;
+        java.time.YearMonth invoiceMonth;
         try {
-            invoiceMonth = month != null ? LocalDate.parse(month + "-01") : LocalDate.now().withDayOfMonth(1);
+            invoiceMonth = month != null ? java.time.YearMonth.parse(month) : java.time.YearMonth.now();
         } catch (Exception e) {
             throw new BadRequestException("Invalid month format; use YYYY-MM");
         }
-        String propFilter = partyPropFilter("ba", propertyId);
-        java.util.List<Object> argList = new java.util.ArrayList<>();
-        argList.add(org);
-        if (propertyId != null) { argList.add(org); argList.add(propertyId); }
-        List<Map<String, Object>> accounts = jdbc.queryForList(
-                "SELECT ba.billing_account_id,ba.party_id,fp.monthly_rent,fp.ac_charges,fp.from_date " +
-                "FROM billing_account ba JOIN facility_party fp ON fp.party_id=ba.party_id " +
-                "  AND fp.organization_id=ba.organization_id AND fp.role_type_id='OCCUPANT' AND fp.thru_date IS NULL " +
-                "WHERE ba.organization_id=?" + propFilter + " AND ba.status='ACTIVE'", argList.toArray());
-        // Pre-load which accounts already have an invoice for this month (one query) instead
-        // of a COUNT(*) existence check per account inside the loop.
-        java.util.Set<Long> alreadyInvoiced = new java.util.HashSet<>(jdbc.queryForList(
-                "SELECT billing_account_id FROM invoice WHERE organization_id=? AND invoice_month=?",
-                Long.class, org, invoiceMonth));
-        int generated = 0;
-        for (Map<String, Object> account : accounts) {
-            Long baId = ((Number) account.get("billing_account_id")).longValue();
-            Long partyId = ((Number) account.get("party_id")).longValue();
-            BigDecimal rent = account.get("monthly_rent") != null ? decimal(account.get("monthly_rent")) : BigDecimal.ZERO;
-            // ac_charges is a breakdown of monthly_rent (already included in it) — it
-            // only splits the invoice items, never changes the total.
-            BigDecimal ac = account.get("ac_charges") != null ? decimal(account.get("ac_charges")) : BigDecimal.ZERO;
-            if (ac.compareTo(BigDecimal.ZERO) < 0 || ac.compareTo(rent) > 0) ac = BigDecimal.ZERO;
-            if (alreadyInvoiced.contains(baId)) continue;
-            int dayOfMonth = 1;
-            if (account.get("from_date") != null) {
-                dayOfMonth = ((java.sql.Date) account.get("from_date")).toLocalDate().getDayOfMonth();
-            }
-            LocalDate dueDate = invoiceMonth.withDayOfMonth(Math.min(dayOfMonth, invoiceMonth.lengthOfMonth()));
-            String invNum = "INV-" + org + "-" + baId + "-" + invoiceMonth.toString().substring(0, 7).replace("-", "");
-            jdbc.update("INSERT INTO invoice(organization_id,billing_account_id,invoice_number,invoice_month,issue_date,due_date," +
-                            "total_amount,paid_amount,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,0,'PENDING',?,?)",
-                    org, baId, invNum, invoiceMonth, invoiceMonth, dueDate, rent, LocalDateTime.now(), LocalDateTime.now());
-            Long invoiceId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
-            jdbc.update("INSERT INTO invoice_item(invoice_id,item_type_id,description,amount,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-                    invoiceId, "MONTHLY_RENT", "Monthly Rent", rent.subtract(ac), LocalDateTime.now(), LocalDateTime.now());
-            if (ac.compareTo(BigDecimal.ZERO) > 0) {
-                jdbc.update("INSERT INTO invoice_item(invoice_id,item_type_id,description,amount,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-                        invoiceId, "AC_CHARGES", "AC Charges", ac, LocalDateTime.now(), LocalDateTime.now());
-            }
-            notificationService.notifyTenantInvoice(org, partyId, invoiceId, invNum, rent, dueDate, invoiceMonth);
-            generated++;
-        }
-        return ApiResponse.ok(Map.of("generated", generated, "skipped", accounts.size() - generated,
-                "month", invoiceMonth.toString()));
+        InvoiceGenerationService.GenerationResult result =
+                invoiceGenerationService.generateForMonth(org, invoiceMonth, propertyId);
+        return ApiResponse.ok(Map.of("generated", result.generated(), "skipped", result.skipped(),
+                "month", invoiceMonth.atDay(1).toString()));
+    }
+
+    @GetMapping("/config")
+    ApiResponse<Map<String, Object>> getBillingConfig() {
+        BillingConfigService.BillingConfig config = billingConfigService.get(currentUser.organizationId());
+        return ApiResponse.ok(configPayload(config));
+    }
+
+    @PutMapping("/config")
+    ApiResponse<Map<String, Object>> updateBillingConfig(@Valid @RequestBody BillingConfigRequest request) {
+        BillingConfigService.BillingConfig config = billingConfigService.upsert(
+                currentUser.organizationId(), request.invoiceLeadDays(), request.autoGenerateEnabled());
+        return ApiResponse.ok("Billing settings updated", configPayload(config));
+    }
+
+    private Map<String, Object> configPayload(BillingConfigService.BillingConfig config) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("invoiceLeadDays", config.invoiceLeadDays());
+        payload.put("autoGenerateEnabled", config.autoGenerateEnabled());
+        payload.put("minLeadDays", BillingConfigService.MIN_LEAD_DAYS);
+        payload.put("maxLeadDays", BillingConfigService.MAX_LEAD_DAYS);
+        return payload;
     }
 
     @PostMapping("/advances")
@@ -355,6 +350,85 @@ public class BillingController {
         return ApiResponse.ok("Invoice written off", null);
     }
 
+    // Soft-cancel an invoice. Only invoices with no collected payment can be
+    // cancelled — anything already paid must be written off / refunded first so
+    // we never orphan a payment_allocation row.
+    @DeleteMapping("/invoices/{invoiceId}")
+    @Transactional
+    ApiResponse<Void> deleteInvoice(@PathVariable Long invoiceId) {
+        Long org = currentUser.organizationId();
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT paid_amount,status FROM invoice " +
+                "WHERE invoice_id=? AND organization_id=? FOR UPDATE",
+                invoiceId, org);
+        if (rows.isEmpty()) throw new NotFoundException("Invoice not found");
+        Map<String, Object> inv = rows.getFirst();
+        if ("CANCELLED".equals(inv.get("status"))) {
+            return ApiResponse.ok("Invoice already cancelled", null);
+        }
+        if (decimal(inv.get("paid_amount")).compareTo(BigDecimal.ZERO) > 0) {
+            throw new BadRequestException("Cannot delete an invoice with collected payments — write it off instead");
+        }
+        jdbc.update("UPDATE invoice SET status='CANCELLED',updated_at=NOW(),version=version+1 " +
+                "WHERE invoice_id=? AND organization_id=?", invoiceId, org);
+        return ApiResponse.ok("Invoice deleted", null);
+    }
+
+    // Override the charge breakdown of THIS month's invoice only — it never
+    // touches the tenant's master rent (facility_party.monthly_rent). Editable
+    // only while the invoice is still pending with nothing collected. Each
+    // existing charge line (PG rent / AC charges / security deposit / …) is
+    // re-priced individually and the invoice total is recomputed as their sum.
+    // The security-deposit line is special: it also updates the master deposit
+    // held on the occupancy row, since that's the figure the checkout screen
+    // shows the owner to refund.
+    @PatchMapping("/invoices/{invoiceId}/amount")
+    @Transactional
+    ApiResponse<Map<String, Object>> updateInvoiceAmount(@PathVariable Long invoiceId,
+                                                         @Valid @RequestBody AmountRequest request) {
+        Long org = currentUser.organizationId();
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT i.paid_amount,i.status,ba.party_id FROM invoice i " +
+                "JOIN billing_account ba ON ba.billing_account_id=i.billing_account_id " +
+                "WHERE i.invoice_id=? AND i.organization_id=? FOR UPDATE",
+                invoiceId, org);
+        if (rows.isEmpty()) throw new NotFoundException("Invoice not found");
+        Map<String, Object> inv = rows.getFirst();
+        if (!"PENDING".equals(inv.get("status")) || decimal(inv.get("paid_amount")).compareTo(BigDecimal.ZERO) > 0) {
+            throw new BadRequestException("Only a pending invoice with no payments can be edited");
+        }
+        // Only line items that actually belong to this invoice may be re-priced.
+        java.util.Set<Long> validItemIds = new java.util.HashSet<>(jdbc.queryForList(
+                "SELECT invoice_item_id FROM invoice_item WHERE invoice_id=?", Long.class, invoiceId));
+        for (AmountRequest.Item item : request.items()) {
+            if (!validItemIds.contains(item.invoiceItemId())) {
+                throw new BadRequestException("Charge line does not belong to this invoice");
+            }
+            jdbc.update("UPDATE invoice_item SET amount=?,updated_at=NOW() WHERE invoice_item_id=? AND invoice_id=?",
+                    item.amount(), item.invoiceItemId(), invoiceId);
+        }
+        BigDecimal total = jdbc.queryForObject(
+                "SELECT COALESCE(SUM(amount),0) FROM invoice_item WHERE invoice_id=?", BigDecimal.class, invoiceId);
+        if (total == null || total.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("Total amount must be greater than zero");
+        }
+        jdbc.update("UPDATE invoice SET total_amount=?,updated_at=NOW(),version=version+1 " +
+                "WHERE invoice_id=? AND organization_id=?", total, invoiceId, org);
+        // Mirror an edited security-deposit line onto the master deposit held on
+        // the active occupancy row (what checkout shows the owner to refund).
+        List<Map<String, Object>> depositLine = jdbc.queryForList(
+                "SELECT amount FROM invoice_item WHERE invoice_id=? AND item_type_id='SECURITY_DEPOSIT' LIMIT 1",
+                invoiceId);
+        if (!depositLine.isEmpty() && inv.get("party_id") != null) {
+            BigDecimal deposit = decimal(depositLine.getFirst().get("amount"));
+            Long partyId = ((Number) inv.get("party_id")).longValue();
+            jdbc.update("UPDATE facility_party SET security_deposit=?,updated_at=NOW() " +
+                    "WHERE organization_id=? AND party_id=? AND role_type_id='OCCUPANT' AND thru_date IS NULL",
+                    deposit, org, partyId);
+        }
+        return ApiResponse.ok("Invoice amount updated", Map.of("invoiceId", invoiceId, "totalAmount", total));
+    }
+
     private String partyPropFilter(String alias, Long propertyId) {
         if (propertyId == null) return "";
         String col = (alias == null || alias.isBlank()) ? "party_id" : alias + ".party_id";
@@ -385,4 +459,9 @@ public class BillingController {
     public record AdvanceRequest(@NotNull Long billingAccountId, @NotNull @DecimalMin("0.01") BigDecimal amount,
                                  LocalDate paymentDate, String referenceNumber, String notes, @NotNull String idempotencyKey) {}
     public record RefundRequest(@NotNull @DecimalMin("0.01") BigDecimal amount, String referenceNumber, String reason) {}
+    public record BillingConfigRequest(@NotNull @Min(0) @Max(28) Integer invoiceLeadDays,
+                                       @NotNull Boolean autoGenerateEnabled) {}
+    public record AmountRequest(@NotNull @NotEmpty @Valid List<Item> items) {
+        public record Item(@NotNull Long invoiceItemId, @NotNull @DecimalMin("0.00") BigDecimal amount) {}
+    }
 }
