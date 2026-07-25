@@ -29,8 +29,26 @@ class FakeApiClient extends ApiClient {
   /// Records every `get` path requested, in order.
   final List<String> getCalls = [];
 
+  /// Per-path DELETE responders. The key is the exact path passed to `delete`.
+  final Map<String, _Responder> _deleteResponders = {};
+
   /// Records every `post` path requested, in order.
   final List<String> postCalls = [];
+
+  /// Records the body of every `post`, in order (parallel to [postCalls]).
+  final List<Map<String, dynamic>> postBodies = [];
+
+  /// Records every `delete` path requested, in order.
+  final List<String> deleteCalls = [];
+
+  /// Per-path PUT responders. The key is the exact path passed to `put`.
+  final Map<String, _Responder> _putResponders = {};
+
+  /// Records every `put` path requested, in order.
+  final List<String> putCalls = [];
+
+  /// Records the body of every `put`, in order (parallel to [putCalls]).
+  final List<Map<String, dynamic>> putBodies = [];
 
   /// Make [get] on [path] resolve with [data]. Note: list payloads are wrapped
   /// by the real client as `{'items': <list>}`; replicate that here, e.g.
@@ -58,6 +76,22 @@ class FakeApiClient extends ApiClient {
   void stubPostError(String path, Object error) =>
       _postResponders[path] = _Responder.error(error);
 
+  /// Make [put] on [path] resolve with [data].
+  void stubPut(String path, [Map<String, dynamic> data = const {}]) =>
+      _putResponders[path] = _Responder.value(data);
+
+  /// Make [put] on [path] throw [error].
+  void stubPutError(String path, Object error) =>
+      _putResponders[path] = _Responder.error(error);
+
+  /// Make [delete] on [path] resolve with [data].
+  void stubDelete(String path, [Map<String, dynamic> data = const {}]) =>
+      _deleteResponders[path] = _Responder.value(data);
+
+  /// Make [delete] on [path] throw [error].
+  void stubDeleteError(String path, Object error) =>
+      _deleteResponders[path] = _Responder.error(error);
+
   @override
   Future<Map<String, dynamic>> get(String path) {
     getCalls.add(path);
@@ -72,10 +106,34 @@ class FakeApiClient extends ApiClient {
   @override
   Future<Map<String, dynamic>> post(String path, Map<String, dynamic> body) {
     postCalls.add(path);
+    postBodies.add(body);
     final responder = _postResponders[path];
     if (responder == null) {
       return Future.error(
           StateError('FakeApiClient: no POST stub registered for "$path"'));
+    }
+    return responder.respond();
+  }
+
+  @override
+  Future<Map<String, dynamic>> put(String path, Map<String, dynamic> body) {
+    putCalls.add(path);
+    putBodies.add(body);
+    final responder = _putResponders[path];
+    if (responder == null) {
+      return Future.error(
+          StateError('FakeApiClient: no PUT stub registered for "$path"'));
+    }
+    return responder.respond();
+  }
+
+  @override
+  Future<Map<String, dynamic>> delete(String path) {
+    deleteCalls.add(path);
+    final responder = _deleteResponders[path];
+    if (responder == null) {
+      return Future.error(
+          StateError('FakeApiClient: no DELETE stub registered for "$path"'));
     }
     return responder.respond();
   }

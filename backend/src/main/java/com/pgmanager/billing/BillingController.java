@@ -58,6 +58,9 @@ public class BillingController {
         result.put("totalCollection", amount(
                 "SELECT COALESCE(SUM(amount),0) FROM payment WHERE organization_id=? AND status='RECEIVED' AND payment_date BETWEEN DATE_FORMAT(CURRENT_DATE,'%Y-%m-01') AND LAST_DAY(CURRENT_DATE)" + payProp,
                 cat(org, pp2)));
+        result.put("totalCollectionCount", count(
+                "SELECT COUNT(*) FROM payment WHERE organization_id=? AND status='RECEIVED' AND payment_date BETWEEN DATE_FORMAT(CURRENT_DATE,'%Y-%m-01') AND LAST_DAY(CURRENT_DATE)" + payProp,
+                cat(org, pp2)));
         result.put("receivedToday", amount(
                 "SELECT COALESCE(SUM(amount),0) FROM payment WHERE organization_id=? AND payment_date=CURRENT_DATE AND status='RECEIVED'" + payProp,
                 cat(org, pp2)));
@@ -207,26 +210,21 @@ public class BillingController {
     }
 
     /**
-     * Manual/fallback batch generation for a whole month. The daily
-     * {@link InvoiceAutoGenerationScheduler} normally raises invoices per-tenant ahead of their
-     * anniversary; this endpoint remains for on-demand generation (e.g. a first run, catch-up, or
-     * an org that has automation switched off). Delegates to {@link InvoiceGenerationService} so
-     * numbering / due-date / line-item logic stays in one place. Idempotent per account+month.
+     * Manual/fallback generation for the invoices that come due <em>today</em> — the tenants whose
+     * billing anniversary is today's day-of-month, not the whole month. The daily
+     * {@link InvoiceAutoGenerationScheduler} normally raises these ahead of the anniversary; this
+     * endpoint is the on-demand equivalent for an org that has automation switched off (or a day
+     * the scheduler missed). Delegates to {@link InvoiceGenerationService} so numbering /
+     * due-date / line-item logic stays in one place. Idempotent per account+month.
      */
     @PostMapping("/generate-invoices")
-    ApiResponse<Map<String, Object>> generateInvoices(@RequestParam(required = false) String month,
-                                                       @RequestParam(required = false) Long propertyId) {
+    ApiResponse<Map<String, Object>> generateInvoices(@RequestParam(required = false) Long propertyId) {
         Long org = currentUser.organizationId();
-        java.time.YearMonth invoiceMonth;
-        try {
-            invoiceMonth = month != null ? java.time.YearMonth.parse(month) : java.time.YearMonth.now();
-        } catch (Exception e) {
-            throw new BadRequestException("Invalid month format; use YYYY-MM");
-        }
+        java.time.LocalDate today = java.time.LocalDate.now();
         InvoiceGenerationService.GenerationResult result =
-                invoiceGenerationService.generateForMonth(org, invoiceMonth, propertyId);
+                invoiceGenerationService.generateDueOn(org, today, propertyId);
         return ApiResponse.ok(Map.of("generated", result.generated(), "skipped", result.skipped(),
-                "month", invoiceMonth.atDay(1).toString()));
+                "notDue", result.notDue(), "date", today.toString()));
     }
 
     @GetMapping("/config")
@@ -238,16 +236,22 @@ public class BillingController {
     @PutMapping("/config")
     ApiResponse<Map<String, Object>> updateBillingConfig(@Valid @RequestBody BillingConfigRequest request) {
         BillingConfigService.BillingConfig config = billingConfigService.upsert(
-                currentUser.organizationId(), request.invoiceLeadDays(), request.autoGenerateEnabled());
+                currentUser.organizationId(), request.invoiceLeadDays(),
+                request.checkoutGraceDays() != null
+                        ? request.checkoutGraceDays() : BillingConfigService.DEFAULT.checkoutGraceDays(),
+                request.autoGenerateEnabled());
         return ApiResponse.ok("Billing settings updated", configPayload(config));
     }
 
     private Map<String, Object> configPayload(BillingConfigService.BillingConfig config) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("invoiceLeadDays", config.invoiceLeadDays());
+        payload.put("checkoutGraceDays", config.checkoutGraceDays());
         payload.put("autoGenerateEnabled", config.autoGenerateEnabled());
         payload.put("minLeadDays", BillingConfigService.MIN_LEAD_DAYS);
         payload.put("maxLeadDays", BillingConfigService.MAX_LEAD_DAYS);
+        payload.put("minGraceDays", BillingConfigService.MIN_GRACE_DAYS);
+        payload.put("maxGraceDays", BillingConfigService.MAX_GRACE_DAYS);
         return payload;
     }
 
@@ -440,6 +444,11 @@ public class BillingController {
         return value == null ? BigDecimal.ZERO : value;
     }
 
+    private int count(String sql, Object... args) {
+        Integer value = jdbc.queryForObject(sql, Integer.class, args);
+        return value == null ? 0 : value;
+    }
+
     private Object[] cat(Object first, Object[] rest) {
         Object[] result = new Object[1 + rest.length];
         result[0] = first;
@@ -459,7 +468,10 @@ public class BillingController {
     public record AdvanceRequest(@NotNull Long billingAccountId, @NotNull @DecimalMin("0.01") BigDecimal amount,
                                  LocalDate paymentDate, String referenceNumber, String notes, @NotNull String idempotencyKey) {}
     public record RefundRequest(@NotNull @DecimalMin("0.01") BigDecimal amount, String referenceNumber, String reason) {}
+    // checkoutGraceDays is optional so an older app build (which only sends lead days +
+    // the automation toggle) keeps working — it falls back to the default, not to 0.
     public record BillingConfigRequest(@NotNull @Min(0) @Max(28) Integer invoiceLeadDays,
+                                       @Min(0) @Max(28) Integer checkoutGraceDays,
                                        @NotNull Boolean autoGenerateEnabled) {}
     public record AmountRequest(@NotNull @NotEmpty @Valid List<Item> items) {
         public record Item(@NotNull Long invoiceItemId, @NotNull @DecimalMin("0.00") BigDecimal amount) {}

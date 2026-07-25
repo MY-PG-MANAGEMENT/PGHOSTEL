@@ -51,6 +51,7 @@ class TenantServiceTest {
     @Mock AuditService auditService;
     @Mock com.pgmanager.notification.NotificationService notificationService;
     @Mock TenantLoginService tenantLoginService;
+    @Mock TenantArchiveService tenantArchiveService;
 
     @InjectMocks TenantService service;
 
@@ -109,6 +110,135 @@ class TenantServiceTest {
         assertThatThrownBy(() -> service.create(ORG, USER, request(5L)))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("not in current organization");
+    }
+
+    /**
+     * Rejoin: the mobile belongs to an archived tenant of this org, so re-registering them
+     * must restore that <b>same party</b> (keeping their invoice / payment history) instead of
+     * minting a duplicate person.
+     */
+    @Test
+    void createRestoresAnArchivedTenantInsteadOfCreatingADuplicate() {
+        when(tenantArchiveService.findArchivedPartyByMobile(ORG, "9876543210")).thenReturn(Optional.of(55L));
+        when(tenantArchiveService.unarchive(ORG, USER, 55L)).thenReturn(true);
+        Person existing = new Person();
+        existing.setPartyId(55L);
+        existing.setFullName("Asha R");
+        existing.setMobileNumber("9876543210");
+        existing.setEmergencyContactName("Ravi Rao"); // never asked for by the Add Tenant form
+        when(personRepository.findById(55L)).thenReturn(Optional.of(existing));
+        when(facilityPartyRepository.findOrgMembership(ORG, 55L, OccupancyRole.TENANT))
+                .thenReturn(Optional.of(new FacilityParty()));
+
+        TenantResponse res = service.create(ORG, USER, request(null));
+
+        assertThat(res.tenantId()).isEqualTo(55L);
+        assertThat(res.restoredFromArchive()).isTrue();
+        // Details from the form are applied; untouched fields keep their stored values.
+        assertThat(existing.getFullName()).isEqualTo("Asha Rao");
+        assertThat(existing.getEmergencyContactName()).isEqualTo("Ravi Rao");
+        // No new party/person, and no second org-membership row.
+        verify(partyRepository, never()).save(any());
+        verify(facilityPartyRepository, never()).save(any());
+        verify(tenantLoginService).provisionForTenant(ORG, 55L, "9876543210");
+    }
+
+    /**
+     * Regression: archiving does not end the tenant's property-level TENANT row (thru_date stays
+     * null), so {@code countActiveTenantsByMobileAtProperty} still counts an archived tenant.
+     * The rejoin lookup must therefore run BEFORE that check — otherwise re-registering a deleted
+     * tenant at the property they left is rejected with "already registered at this property".
+     */
+    @Test
+    void createRestoresEvenThoughTheStaleTenantMembershipLooksLikeADuplicate() {
+        when(tenantArchiveService.findArchivedPartyByMobile(ORG, "9876543210")).thenReturn(Optional.of(55L));
+        when(tenantArchiveService.unarchive(ORG, USER, 55L)).thenReturn(true);
+        // The archived tenant's own property-level TENANT row is still active.
+        lenient().when(personRepository.countActiveTenantsByMobileAtProperty("9876543210", ORG, 5L)).thenReturn(1L);
+        when(personRepository.countOccupyingTenantsByMobileExcluding("9876543210", ORG, 55L)).thenReturn(0L);
+        Person existing = new Person();
+        existing.setPartyId(55L);
+        existing.setMobileNumber("9876543210");
+        when(personRepository.findById(55L)).thenReturn(Optional.of(existing));
+        when(facilityPartyRepository.findOrgMembership(ORG, 55L, OccupancyRole.TENANT))
+                .thenReturn(Optional.of(new FacilityParty()));
+        Facility property = new Facility();
+        property.setFacilityId(5L);
+        property.setOrganizationId(ORG);
+        when(facilityRepository.findById(5L)).thenReturn(Optional.of(property));
+        when(facilityPartyRepository.findByOrganizationIdAndPartyIdAndRoleTypeId(ORG, 55L, OccupancyRole.TENANT))
+                .thenReturn(List.of());
+
+        TenantResponse res = service.create(ORG, USER, request(5L));
+
+        assertThat(res.tenantId()).isEqualTo(55L);
+        assertThat(res.restoredFromArchive()).isTrue();
+        verify(partyRepository, never()).save(any());
+    }
+
+    /** …but a *live* tenant sharing that mobile is a real clash, not a rejoin. */
+    @Test
+    void createRejectsRejoinWhenAnotherTenantWithThatMobileStillOccupiesABed() {
+        when(tenantArchiveService.findArchivedPartyByMobile(ORG, "9876543210")).thenReturn(Optional.of(55L));
+        when(personRepository.countOccupyingTenantsByMobileExcluding("9876543210", ORG, 55L)).thenReturn(1L);
+
+        assertThatThrownBy(() -> service.create(ORG, USER, request(5L)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("currently occupying a bed");
+
+        verify(partyRepository, never()).save(any());
+        verify(tenantArchiveService, never()).unarchive(any(), any(), any());
+    }
+
+    /** An archived tenant rejoining at a property gets the property-scoped TENANT row written. */
+    @Test
+    void restoreWritesThePropertyMembershipForTheRejoinProperty() {
+        when(tenantArchiveService.unarchive(ORG, USER, 55L)).thenReturn(true);
+        Person existing = new Person();
+        existing.setPartyId(55L);
+        existing.setMobileNumber("9876543210");
+        when(personRepository.findById(55L)).thenReturn(Optional.of(existing));
+        when(facilityPartyRepository.findOrgMembership(ORG, 55L, OccupancyRole.TENANT))
+                .thenReturn(Optional.of(new FacilityParty()));
+        Facility property = new Facility();
+        property.setFacilityId(5L);
+        property.setOrganizationId(ORG);
+        when(facilityRepository.findById(5L)).thenReturn(Optional.of(property));
+        when(facilityPartyRepository.findByOrganizationIdAndPartyIdAndRoleTypeId(ORG, 55L, OccupancyRole.TENANT))
+                .thenReturn(List.of());
+
+        service.restoreFromArchive(ORG, USER, 55L, 5L, null);
+
+        verify(facilityPartyRepository).save(argThat(fp ->
+                fp.getFacilityId().equals(5L) && fp.getRoleTypeId().equals(OccupancyRole.TENANT)));
+        verify(auditService).log(eq(ORG), eq(USER), eq("TENANT_RESTORED_FROM_ARCHIVE"), any(), any(), any());
+    }
+
+    @Test
+    void restoreRejectsATenantThatIsNotArchived() {
+        Person existing = new Person();
+        existing.setPartyId(55L);
+        when(personRepository.findById(55L)).thenReturn(Optional.of(existing));
+        when(tenantArchiveService.unarchive(ORG, USER, 55L)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.restoreFromArchive(ORG, USER, 55L, null, null))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("not archived");
+    }
+
+    /** Archived tenants are hidden from the tenant list even though their rows still exist. */
+    @Test
+    void listHidesArchivedTenants() {
+        when(facilityPartyRepository.findTenantsAtFacility(ORG, ORG, OccupancyRole.TENANT))
+                .thenReturn(List.of(tenantRow(100L, ORG), tenantRow(101L, ORG)));
+        when(tenantArchiveService.archivedPartyIds(ORG)).thenReturn(java.util.Set.of(101L));
+        when(personRepository.findAllById(anyList())).thenReturn(List.of(person(100L, "Asha Rao")));
+        when(facilityPartyRepository.findActiveOccupantsByPartyIds(eq(ORG), anyList(), any()))
+                .thenReturn(List.of());
+
+        List<TenantResponse> result = service.list(ORG);
+
+        assertThat(result).extracting(TenantResponse::tenantId).containsExactly(100L);
     }
 
     @Test

@@ -53,6 +53,8 @@ class OccupancyServiceTest {
     @Mock com.pgmanager.expense.ExpenseWriter expenseWriter;
     @Mock com.pgmanager.party.PersonRepository personRepository;
     @Mock com.pgmanager.tenant.TenantLoginService tenantLoginService;
+    @Mock com.pgmanager.tenant.TenantArchiveService tenantArchiveService;
+    @Mock com.pgmanager.billing.CheckoutInvoiceService checkoutInvoiceService;
 
     @InjectMocks OccupancyService service;
 

@@ -3,6 +3,8 @@ package com.pgmanager.facility;
 import com.pgmanager.common.api.ApiResponse;
 import com.pgmanager.common.cache.CacheConfig;
 import com.pgmanager.common.exception.NotFoundException;
+import com.pgmanager.facility.dto.FacilityDtos.DeleteFacilityCheck;
+import com.pgmanager.facility.dto.FacilityDtos.DeleteFacilityResult;
 import com.pgmanager.facility.dto.FacilityDtos.FacilityCreateRequest;
 import com.pgmanager.facility.dto.FacilityDtos.FacilityResponse;
 import com.pgmanager.facility.dto.FacilityDtos.FacilityTreeResponse;
@@ -19,6 +21,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -57,10 +60,24 @@ public class FacilityController {
         return ApiResponse.ok(facilityService.toResponse(facilityService.update(currentUser.organizationId(), facilityId, request)));
     }
 
+    // Dry-run of the delete rules, so the app can show one popup instead of asking for
+    // confirmation and then failing.
+    @GetMapping("/facilities/{facilityId}/delete-check")
+    ApiResponse<DeleteFacilityCheck> deleteCheck(@PathVariable Long facilityId) {
+        return ApiResponse.ok(facilityService.checkDelete(currentUser.organizationId(), facilityId));
+    }
+
+    // Floors, rooms and beds only — and only when nothing under them is occupied.
     @DeleteMapping("/facilities/{facilityId}")
-    ApiResponse<Void> deleteBed(@PathVariable Long facilityId) {
-        facilityService.deleteBed(currentUser.organizationId(), facilityId);
-        return ApiResponse.ok("Bed deleted", null);
+    @PreAuthorize("hasAnyRole('OWNER','PROPERTY_MANAGER','MANAGER')")
+    ApiResponse<DeleteFacilityResult> deleteFacility(@PathVariable Long facilityId) {
+        DeleteFacilityResult result = facilityService.deleteNode(currentUser.organizationId(), facilityId);
+        String what = switch (result.facilityTypeId()) {
+            case FacilityType.FLOOR -> "Floor";
+            case FacilityType.ROOM -> "Room";
+            default -> "Bed";
+        };
+        return ApiResponse.ok(what + " deleted", result);
     }
 
     @GetMapping("/properties/{propertyId}/floors")

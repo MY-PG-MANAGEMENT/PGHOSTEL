@@ -105,8 +105,6 @@ public class TenantAuthService {
     }
 
     private static boolean toBool(Object o) {
-        if (o instanceof Boolean b) return b;
-        if (o instanceof Number n) return n.intValue() != 0;
-        return false;
+        return com.pgmanager.common.util.JdbcValues.toBoolean(o, false);
     }
 }

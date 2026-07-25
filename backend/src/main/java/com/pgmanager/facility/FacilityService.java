@@ -7,6 +7,8 @@ import com.pgmanager.facility.dto.FacilityDtos.*;
 import com.pgmanager.occupancy.FacilityParty;
 import com.pgmanager.occupancy.FacilityPartyRepository;
 import com.pgmanager.occupancy.OccupancyRole;
+import com.pgmanager.occupancy.ScheduledBedTransfer;
+import com.pgmanager.occupancy.ScheduledBedTransferRepository;
 import com.pgmanager.party.Person;
 import com.pgmanager.party.PersonRepository;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,7 @@ public class FacilityService {
     private final FacilityGroupMemberRepository groupMemberRepository;
     private final FacilityPartyRepository facilityPartyRepository;
     private final PersonRepository personRepository;
+    private final ScheduledBedTransferRepository scheduledBedTransferRepository;
 
     // A structural change (new/updated/deleted node, or a re-parenting link) invalidates
     // the tree and every occupancy read model derived from it. Evict wholesale — cheap
@@ -88,26 +91,96 @@ public class FacilityService {
         return facility;
     }
 
+    /** A bed is "in use" for both a permanent and a temporary occupant. */
+    private static final List<String> OCCUPYING_ROLES =
+            List.of(OccupancyRole.OCCUPANT, OccupancyRole.TEMP_OCCUPANT);
+
+    /**
+     * Deletes a BED, ROOM or FLOOR along with everything under it (a floor takes its rooms
+     * and their beds, a room takes its beds). Refused while any bed in that subtree still
+     * holds an active occupant — the tenant must be checked out first — or is the target of
+     * a pending sharing-change transfer, which would otherwise fire at a bed that no longer
+     * exists. Floors/rooms/beds are pure structure, so this is a real delete, not an archive.
+     */
     @CacheEvict(cacheNames = {CacheConfig.FACILITY_TREE, CacheConfig.ROOM_SUMMARY,
             CacheConfig.PROPERTY_STATS, CacheConfig.VACANT_BEDS, CacheConfig.TEMP_STAYS},
             allEntries = true)
     @Transactional
-    public void deleteBed(Long organizationId, Long facilityId) {
+    public DeleteFacilityResult deleteNode(Long organizationId, Long facilityId) {
         Facility facility = facilityRepository.findByFacilityIdAndOrganizationId(facilityId, organizationId)
-                .orElseThrow(() -> new NotFoundException("Bed not found"));
-        if (!"BED".equals(facility.getFacilityTypeId())) {
-            throw new BadRequestException("Only beds can be deleted");
+                .orElseThrow(() -> new NotFoundException("Facility not found"));
+        Subtree subtree = subtreeOf(facility);
+
+        String blocked = blockingReason(organizationId, subtree);
+        if (blocked != null) {
+            throw new BadRequestException(blocked);
         }
-        boolean isOccupied = facilityPartyRepository
-                .findByOrganizationIdAndFacilityIdAndRoleTypeIdAndThruDateIsNull(
-                        organizationId, facilityId, OccupancyRole.OCCUPANT)
-                .isPresent();
-        if (isOccupied) {
-            throw new BadRequestException("Cannot delete an occupied bed");
+
+        // Bottom-up: beds, then rooms, then the node itself — each with its occupancy
+        // history and its parent/child links.
+        // Set: for a BED the node itself is also its own "bed id".
+        List<Long> all = new ArrayList<>(new LinkedHashSet<>(subtree.bedIds()));
+        all.addAll(subtree.roomIds());
+        if (!all.contains(facilityId)) all.add(facilityId);
+        facilityPartyRepository.deleteAllByFacilityIdIn(all);
+        groupMemberRepository.deleteAllByChildFacilityIdIn(all);
+        groupMemberRepository.deleteAllByParentFacilityIdIn(all);
+        facilityRepository.deleteAllById(all);
+
+        return new DeleteFacilityResult(subtree.type(), subtree.roomIds().size(), subtree.bedIds().size());
+    }
+
+    /**
+     * Same rules as {@link #deleteNode}, without deleting anything — lets the app ask
+     * "can this go?" up front so a blocked delete is one popup (the reason) instead of
+     * a confirmation followed by an error.
+     */
+    @Transactional(readOnly = true)
+    public DeleteFacilityCheck checkDelete(Long organizationId, Long facilityId) {
+        Facility facility = facilityRepository.findByFacilityIdAndOrganizationId(facilityId, organizationId)
+                .orElseThrow(() -> new NotFoundException("Facility not found"));
+        Subtree subtree = subtreeOf(facility);
+        String blocked = blockingReason(organizationId, subtree);
+        return new DeleteFacilityCheck(subtree.type(), blocked == null, blocked,
+                subtree.roomIds().size(), subtree.bedIds().size());
+    }
+
+    /** The nodes a delete would take with it. */
+    private record Subtree(String type, List<Long> roomIds, List<Long> bedIds) {}
+
+    private Subtree subtreeOf(Facility facility) {
+        Long id = facility.getFacilityId();
+        return switch (facility.getFacilityTypeId()) {
+            case FacilityType.BED -> new Subtree(FacilityType.BED, List.of(), List.of(id));
+            case FacilityType.ROOM -> new Subtree(FacilityType.ROOM, List.of(), childIdsOf(List.of(id)));
+            case FacilityType.FLOOR -> {
+                List<Long> roomIds = childIdsOf(List.of(id));
+                yield new Subtree(FacilityType.FLOOR, roomIds, childIdsOf(roomIds));
+            }
+            default -> throw new BadRequestException("Only floors, rooms and beds can be deleted");
+        };
+    }
+
+    /** null when the subtree can be deleted, otherwise the user-facing reason it can't. */
+    private String blockingReason(Long organizationId, Subtree subtree) {
+        if (subtree.bedIds().isEmpty()) return null;
+        long occupied = facilityPartyRepository
+                .findByOrganizationIdAndFacilityIdInAndRoleTypeIdInAndThruDateIsNull(
+                        organizationId, subtree.bedIds(), OCCUPYING_ROLES)
+                .size();
+        if (occupied > 0) {
+            return (occupied == 1 ? "1 bed is occupied." : occupied + " beds are occupied.")
+                    + " Check the tenant" + (occupied == 1 ? "" : "s")
+                    + " out or move them to another room first.";
         }
-        facilityPartyRepository.deleteAllByFacilityId(facilityId);
-        groupMemberRepository.deleteAllByChildFacilityId(facilityId);
-        facilityRepository.delete(facility);
+        long incoming = scheduledBedTransferRepository
+                .countByToBedFacilityIdInAndStatus(subtree.bedIds(), ScheduledBedTransfer.PENDING);
+        if (incoming > 0) {
+            return incoming == 1
+                    ? "A bed transfer is scheduled here. Cancel it first."
+                    : incoming + " bed transfers are scheduled here. Cancel them first.";
+        }
+        return null;
     }
 
     // Structure (rarely changes); evicted by the structural writers above + BulkUpload.

@@ -49,6 +49,8 @@ public class OccupancyService {
     private final ExpenseWriter expenseWriter;
     private final PersonRepository personRepository;
     private final com.pgmanager.tenant.TenantLoginService tenantLoginService;
+    private final com.pgmanager.tenant.TenantArchiveService tenantArchiveService;
+    private final com.pgmanager.billing.CheckoutInvoiceService checkoutInvoiceService;
 
     @Transactional
     @EvictOccupancyCaches
@@ -394,6 +396,9 @@ public class OccupancyService {
         scheduledTransferRepository
                 .findByOrganizationIdAndPartyIdAndStatus(organizationId, request.partyId(), ScheduledBedTransfer.PENDING)
                 .forEach(s -> { s.setStatus(ScheduledBedTransfer.CANCELLED); s.setNote("Tenant checked out"); });
+        // Drop the next-cycle invoice the tenant never consumed (auto-generated ahead of its
+        // due date). Hard-deleted, not cancelled — it should never have existed for them.
+        dropUnconsumedInvoices(organizationId, userLoginId, request.partyId(), checkoutDate);
         recordDepositRefund(organizationId, userLoginId, request, active, checkoutDate);
         // Disable the tenant's login, revoke sessions/tokens (status → INACTIVE, reason CHECKED_OUT).
         // The login row is preserved so a future rejoin can reactivate it.
@@ -402,6 +407,21 @@ public class OccupancyService {
         notificationService.notifyTenantCheckout(organizationId, request.partyId(), checkoutDate,
                 request.refundAmount(), request.refundMethod());
         return toResponse(active);
+    }
+
+    /**
+     * Removes the invoices the leaving tenant never consumed — the monthly invoice raised a
+     * day or two ahead of its due date. See {@code CheckoutInvoiceService} for the window and
+     * the exclusions (anything paid, or a move-in invoice carrying the deposit, is kept).
+     */
+    private void dropUnconsumedInvoices(Long organizationId, Long userLoginId, Long partyId,
+                                        LocalDate checkoutDate) {
+        checkoutInvoiceService.dropUnconsumedInvoices(organizationId, partyId, checkoutDate)
+                .forEach(invoice -> auditService.log(organizationId, userLoginId, "INVOICE_DROPPED_AT_CHECKOUT",
+                        "INVOICE", invoice.invoiceId(),
+                        "Invoice " + invoice.invoiceNumber() + " (" + invoice.amount() + " due "
+                                + invoice.dueDate() + ") deleted — tenant checked out on " + checkoutDate
+                                + " before consuming the cycle"));
     }
 
     /**
@@ -445,9 +465,19 @@ public class OccupancyService {
 
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
+    /**
+     * The single gate both {@link #assign} and {@link #tempStay} pass through before a party
+     * takes a bed.
+     *
+     * <p>Also un-hides an archived ("deleted") tenant: the tenant lists never offer them, but
+     * an API caller could still assign one, which would leave an <em>active occupant nobody
+     * can see</em>. Putting a tenant into a bed unambiguously means they are back, so the
+     * archive row is dropped here rather than the assignment being refused.
+     */
     private void validateTenant(Long organizationId, Long partyId) {
         facilityPartyRepository.findOrgMembership(organizationId, partyId, OccupancyRole.TENANT)
                 .orElseThrow(() -> new NotFoundException("Tenant not found in current organization"));
+        tenantArchiveService.unarchive(organizationId, null, partyId); // no-op when not archived
     }
 
     private void validateBed(Long organizationId, Long bedFacilityId) {

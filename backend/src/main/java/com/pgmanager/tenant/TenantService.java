@@ -51,6 +51,7 @@ public class TenantService {
     private final AuditService auditService;
     private final NotificationService notificationService;
     private final TenantLoginService tenantLoginService;
+    private final TenantArchiveService tenantArchiveService;
 
     // Creating a tenant writes facility_party (bed occupant + property membership),
     // so it changes bed occupancy → drop the occupancy read models.
@@ -59,6 +60,36 @@ public class TenantService {
     public TenantResponse create(Long organizationId, Long userLoginId, TenantCreateRequest request) {
         log.info("Tenant create START: org={}, userLogin={}, mobile={}, propertyId={}, name='{}'",
                 organizationId, userLoginId, request.mobileNumber(), request.propertyId(), request.fullName());
+
+        // ── Rejoin is checked FIRST, before the duplicate-mobile rejection ──
+        // This mobile belongs to a tenant who was archived ("deleted") from this org, so
+        // registering them again is not a duplicate — it is the same person coming back.
+        // The order matters: archiving deliberately leaves their TENANT membership rows with a
+        // null thru_date, so countActiveTenantsByMobileAtProperty still counts them and would
+        // reject the rejoin with "already registered at this property" if it ran first.
+        //
+        // Restoring reuses their original partyId, so the invoice / payment history they built
+        // up comes back with them instead of being orphaned behind a duplicate person.
+        // To the caller it looks like a normal create (`restoredFromArchive: true` on the DTO).
+        Optional<Long> archivedParty = tenantArchiveService.findArchivedPartyByMobile(
+                organizationId, request.mobileNumber());
+        if (archivedParty.isPresent()) {
+            Long restoreParty = archivedParty.get();
+            // The one case where a repeat mobile really is a clash: a *different* tenant with
+            // that number is living here right now. Then this is not a rejoin.
+            if (personRepository.countOccupyingTenantsByMobileExcluding(
+                    request.mobileNumber(), organizationId, restoreParty) > 0) {
+                log.warn("Tenant create REJECTED: mobile {} is archived as party {} but another tenant "
+                        + "with that mobile currently occupies a bed (org {})",
+                        request.mobileNumber(), restoreParty, organizationId);
+                throw new com.pgmanager.common.exception.BadRequestException(
+                        "Another tenant with this mobile number is currently occupying a bed");
+            }
+            log.info("Tenant create: mobile {} matches archived party {} in org {} — restoring instead of creating",
+                    request.mobileNumber(), restoreParty, organizationId);
+            return restoreFromArchive(organizationId, userLoginId, restoreParty,
+                    request.propertyId(), request);
+        }
 
         // Reject if an active TENANT with this mobile already exists at the same property.
         // No check when propertyId is absent — same mobile is allowed across different properties.
@@ -84,33 +115,7 @@ public class TenantService {
         log.debug("Tenant create: org-level TENANT membership ensured for partyId={}", party.getPartyId());
 
         if (request.propertyId() != null) {
-            Facility property = facilityRepository.findById(request.propertyId())
-                    .orElseThrow(() -> {
-                        log.warn("Tenant create FAILED: property {} not found (org {})", request.propertyId(), organizationId);
-                        return new com.pgmanager.common.exception.BadRequestException("Property not found");
-                    });
-            if (!organizationId.equals(property.getOrganizationId())) {
-                log.warn("Tenant create FAILED: property {} belongs to org {} but caller org is {}",
-                        request.propertyId(), property.getOrganizationId(), organizationId);
-                throw new com.pgmanager.common.exception.BadRequestException("Property not in current organization");
-            }
-            if (facilityPartyRepository.findOrgMembership(organizationId, party.getPartyId(), OccupancyRole.TENANT)
-                    .map(fp -> !fp.getFacilityId().equals(request.propertyId())).orElse(true)) {
-                boolean propMemberExists = facilityPartyRepository
-                        .findByOrganizationIdAndPartyIdAndRoleTypeId(organizationId, party.getPartyId(), OccupancyRole.TENANT)
-                        .stream().anyMatch(fp -> fp.getFacilityId().equals(request.propertyId()));
-                if (!propMemberExists) {
-                    FacilityParty propertyMembership = new FacilityParty();
-                    propertyMembership.setOrganizationId(organizationId);
-                    propertyMembership.setFacilityId(request.propertyId());
-                    propertyMembership.setPartyId(party.getPartyId());
-                    propertyMembership.setRoleTypeId(OccupancyRole.TENANT);
-                    propertyMembership.setFromDate(LocalDate.now());
-                    facilityPartyRepository.save(propertyMembership);
-                    log.info("Tenant create: property-level TENANT membership written partyId={} property={}",
-                            party.getPartyId(), request.propertyId());
-                }
-            }
+            ensurePropertyTenantMembership(organizationId, party.getPartyId(), request.propertyId());
         }
 
         // Post-persist side effects are best-effort: a failure in audit / welcome notification /
@@ -132,6 +137,79 @@ public class TenantService {
         log.info("Tenant create OK (pending commit): partyId={} for org={} (propertyId={})",
                 party.getPartyId(), organizationId, request.propertyId());
         return toResponse(person, null, null, null, null, false, null, null, null, null);
+    }
+
+    /**
+     * Writes the property-scoped TENANT membership row (so the tenant shows up in
+     * property-scoped lists), validating that the property belongs to the caller's org.
+     * Idempotent — an existing active row is left alone.
+     */
+    private void ensurePropertyTenantMembership(Long organizationId, Long partyId, Long propertyId) {
+        Facility property = facilityRepository.findById(propertyId)
+                .orElseThrow(() -> {
+                    log.warn("Tenant property membership FAILED: property {} not found (org {})", propertyId, organizationId);
+                    return new com.pgmanager.common.exception.BadRequestException("Property not found");
+                });
+        if (!organizationId.equals(property.getOrganizationId())) {
+            log.warn("Tenant property membership FAILED: property {} belongs to org {} but caller org is {}",
+                    propertyId, property.getOrganizationId(), organizationId);
+            throw new com.pgmanager.common.exception.BadRequestException("Property not in current organization");
+        }
+        boolean exists = facilityPartyRepository
+                .findByOrganizationIdAndPartyIdAndRoleTypeId(organizationId, partyId, OccupancyRole.TENANT)
+                .stream().anyMatch(fp -> propertyId.equals(fp.getFacilityId()) && fp.getThruDate() == null);
+        if (exists) return;
+        FacilityParty propertyMembership = new FacilityParty();
+        propertyMembership.setOrganizationId(organizationId);
+        propertyMembership.setFacilityId(propertyId);
+        propertyMembership.setPartyId(partyId);
+        propertyMembership.setRoleTypeId(OccupancyRole.TENANT);
+        propertyMembership.setFromDate(LocalDate.now());
+        facilityPartyRepository.save(propertyMembership);
+        log.info("Tenant: property-level TENANT membership written partyId={} property={}", partyId, propertyId);
+    }
+
+    /**
+     * Un-archives a tenant so they reappear in the tenant lists (as Inactive — no bed yet),
+     * keeping the original partyId and therefore every invoice, payment and document they
+     * already had.
+     *
+     * <p>Two callers: the owner's explicit "Restore" action on the Archived Tenants screen
+     * ({@code details == null}), and {@link #create} when a rejoining tenant is re-registered
+     * through the Add Tenant form ({@code details} = that form). In the second case only the
+     * fields the form actually filled in are written over the stored profile — a blank field
+     * keeps its old value rather than wiping emergency-contact / employment details the form
+     * never asks for.
+     */
+    @Transactional
+    public TenantResponse restoreFromArchive(Long organizationId, Long userLoginId, Long partyId,
+            Long propertyId, TenantCreateRequest details) {
+        Person person = personRepository.findById(partyId)
+                .orElseThrow(() -> new NotFoundException("Tenant not found"));
+        boolean wasArchived = tenantArchiveService.unarchive(organizationId, userLoginId, partyId);
+        if (!wasArchived) {
+            throw new com.pgmanager.common.exception.BadRequestException("This tenant is not archived");
+        }
+        if (details != null) {
+            applyEnteredFields(person, details);
+            personRepository.save(person);
+        }
+        // Archiving never ended the membership rows, so these are safety nets for a tenant
+        // whose org row was missing, plus the property scope they are rejoining at.
+        ensureOrgTenantMembership(organizationId, partyId);
+        if (propertyId != null) {
+            ensurePropertyTenantMembership(organizationId, partyId, propertyId);
+        }
+        try {
+            auditService.log(organizationId, userLoginId, "TENANT_RESTORED_FROM_ARCHIVE", "PARTY", partyId,
+                    details != null ? "Tenant restored on re-registration" : "Tenant restored from archive");
+        } catch (Exception e) {
+            log.warn("Tenant restore: audit log failed for partyId={} (restore still applied): {}", partyId, e.getMessage(), e);
+        }
+        // Reactivates the tenant's portal login when the org has the feature on (no-op otherwise).
+        tenantLoginService.provisionForTenant(organizationId, partyId, person.getMobileNumber());
+        log.info("Tenant restore OK (pending commit): partyId={} org={} propertyId={}", partyId, organizationId, propertyId);
+        return toResponse(person, true);
     }
 
     public void ensureOrgTenantMembership(Long organizationId, Long partyId) {
@@ -163,6 +241,16 @@ public class TenantService {
      */
     private List<TenantResponse> buildTenantResponses(Long organizationId, List<FacilityParty> tenantRows) {
         if (tenantRows.isEmpty()) return List.of();
+
+        // Archived ("deleted") tenants are hidden from every tenant list. One query for the
+        // whole org — filtering here covers both list() and listByProperty().
+        Set<Long> archived = tenantArchiveService.archivedPartyIds(organizationId);
+        if (!archived.isEmpty()) {
+            int before = tenantRows.size();
+            tenantRows = tenantRows.stream().filter(fp -> !archived.contains(fp.getPartyId())).toList();
+            log.debug("Tenant list: org={} hid {} archived tenant(s) of {}", organizationId, before - tenantRows.size(), before);
+            if (tenantRows.isEmpty()) return List.of();
+        }
 
         List<Long> partyIds = tenantRows.stream().map(FacilityParty::getPartyId).distinct().toList();
 
@@ -359,7 +447,7 @@ public class TenantService {
         return toResponse(person, bedName, roomName, currentPropertyId, currentBedFacilityId, hasAdmission,
                 moveInDate, monthlyRent, securityDeposit, expectedCheckoutDate,
                 currentSharingType, inTemporaryStay, tempBedFacilityId, tempBedName, tempIsAllocation,
-                tempFromDate, tempExpectedCheckoutDate);
+                tempFromDate, tempExpectedCheckoutDate, false);
     }
 
     private String resolveSharingType(Long bedId) {
@@ -433,13 +521,47 @@ public class TenantService {
         person.setHasVehicle(r.hasVehicle());
     }
 
+    /**
+     * Merge-applies only the fields the Add Tenant form actually supplied — used when a
+     * rejoining tenant is restored from the archive. A blank/null field is left untouched so
+     * the stored profile (emergency contact, employment, …) survives the re-registration.
+     */
+    private void applyEnteredFields(Person person, TenantCreateRequest r) {
+        if (notBlank(r.fullName())) person.setFullName(r.fullName().trim());
+        if (notBlank(r.mobileNumber())) person.setMobileNumber(r.mobileNumber().trim());
+        if (notBlank(r.email())) person.setEmail(r.email().trim());
+        if (notBlank(r.gender())) person.setGender(r.gender());
+        if (r.dateOfBirth() != null) person.setDateOfBirth(r.dateOfBirth());
+        if (notBlank(r.aadhaarNumber())) person.setAadhaarNumber(r.aadhaarNumber().trim());
+        if (notBlank(r.occupation())) person.setOccupation(r.occupation());
+        if (notBlank(r.permanentAddress())) person.setPermanentAddress(r.permanentAddress());
+        if (notBlank(r.emergencyContactName())) person.setEmergencyContactName(r.emergencyContactName());
+        if (notBlank(r.emergencyContactMobile())) person.setEmergencyContactMobile(r.emergencyContactMobile());
+        if (notBlank(r.emergencyContactRelation())) person.setEmergencyContactRelation(r.emergencyContactRelation());
+        if (notBlank(r.employerName())) person.setEmployerName(r.employerName());
+        if (notBlank(r.designation())) person.setDesignation(r.designation());
+        if (notBlank(r.workAddress())) person.setWorkAddress(r.workAddress());
+        // hasVehicle is a primitive — the form always states it, so it always applies.
+        person.setHasVehicle(r.hasVehicle());
+    }
+
+    private static boolean notBlank(String s) {
+        return s != null && !s.isBlank();
+    }
+
     public TenantResponse toResponse(Person person, String currentBedName, String currentRoomName,
             Long currentPropertyId, Long currentBedFacilityId,
             boolean hasActiveAdmission, LocalDate moveInDate, BigDecimal monthlyRent, BigDecimal securityDeposit,
             LocalDate expectedCheckoutDate) {
         return toResponse(person, currentBedName, currentRoomName, currentPropertyId, currentBedFacilityId,
                 hasActiveAdmission, moveInDate, monthlyRent, securityDeposit, expectedCheckoutDate,
-                null, false, null, null, false, null, null);
+                null, false, null, null, false, null, null, false);
+    }
+
+    /** Profile-only response carrying the restore flag (no bed/occupancy context). */
+    public TenantResponse toResponse(Person person, boolean restoredFromArchive) {
+        return toResponse(person, null, null, null, null, false, null, null, null, null,
+                null, false, null, null, false, null, null, restoredFromArchive);
     }
 
     public TenantResponse toResponse(Person person, String currentBedName, String currentRoomName,
@@ -447,7 +569,7 @@ public class TenantService {
             boolean hasActiveAdmission, LocalDate moveInDate, BigDecimal monthlyRent, BigDecimal securityDeposit,
             LocalDate expectedCheckoutDate, String currentSharingType, boolean inTemporaryStay,
             Long tempBedFacilityId, String tempBedName, boolean tempIsAllocation,
-            LocalDate tempFromDate, LocalDate tempExpectedCheckoutDate) {
+            LocalDate tempFromDate, LocalDate tempExpectedCheckoutDate, boolean restoredFromArchive) {
         return new TenantResponse(
                 person.getPartyId(),
                 person.getFullName(),
@@ -479,7 +601,8 @@ public class TenantService {
                 tempBedName,
                 tempIsAllocation,
                 tempFromDate,
-                tempExpectedCheckoutDate
+                tempExpectedCheckoutDate,
+                restoredFromArchive
         );
     }
 

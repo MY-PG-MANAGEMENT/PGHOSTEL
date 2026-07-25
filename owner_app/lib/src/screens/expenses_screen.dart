@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
+import '../utils/expense_categories.dart';
 import '../widgets/animations.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/skeleton.dart';
@@ -33,29 +34,11 @@ class ExpensesScreen extends StatefulWidget {
 
 // ─────────────────────────────────────────────────────────── category meta ──
 
-class _CategoryMeta {
-  final String label;
-  final Color color;
-  final IconData icon;
-  const _CategoryMeta(this.label, this.color, this.icon);
-}
+// The category master lives in utils/expense_categories.dart so the reports
+// screen filters on exactly the same list.
+const _categoryMeta = expenseCategoryMeta;
 
-const Map<String, _CategoryMeta> _categoryMeta = {
-  'FOOD': _CategoryMeta('Food & Groceries', Color(0xFFD9A514), Icons.restaurant_rounded),
-  'SALARY': _CategoryMeta('Salary', Color(0xFF16A085), Icons.payments_rounded),
-  'ELECTRICITY': _CategoryMeta('Electricity', Color(0xFFE05C4B), Icons.bolt_rounded),
-  'MAINTENANCE': _CategoryMeta('Maintenance', Color(0xFF9B59D0), Icons.build_rounded),
-  'TRANSPORT': _CategoryMeta('Transport', Color(0xFFE07B2A), Icons.local_shipping_rounded),
-  'LAUNDRY': _CategoryMeta('Laundry', Color(0xFF0E9AAB), Icons.local_laundry_service_rounded),
-  'RENT': _CategoryMeta('Rent', Color(0xFFDB4A6B), Icons.home_rounded),
-  'DEPOSIT_REFUND':
-      _CategoryMeta('Deposit Refund', Color(0xFF3B7DD8), Icons.currency_exchange_rounded),
-  'OTHERS': _CategoryMeta('Others', Color(0xFF6B7280), Icons.category_rounded),
-};
-
-_CategoryMeta _meta(String? category) =>
-    _categoryMeta[category] ??
-    const _CategoryMeta('Others', Color(0xFF6B7280), Icons.category_rounded);
+ExpenseCategoryMeta _meta(String? category) => expenseCategory(category);
 
 const Map<String, String> _paymentMethods = {
   'CASH': 'Cash',
@@ -109,9 +92,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   List<Map<String, dynamic>> _properties = const [];
   int? _propertyId;
   String? _propertyName;
-  String? _txnCategory; // Recent Transactions category filter (null = All)
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
-  final _approvalsKey = GlobalKey();
 
   bool get _locked => widget.propertyId != null;
 
@@ -168,10 +149,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     final next = DateTime(_month.year, _month.month + delta);
     final now = DateTime.now();
     if (next.isAfter(DateTime(now.year, now.month))) return;
-    setState(() {
-      _month = next;
-      _txnCategory = null;
-    });
+    setState(() => _month = next);
     _reload();
   }
 
@@ -216,7 +194,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     final summary = Map<String, dynamic>.from(d['summary'] as Map? ?? {});
     final categories = _listOfMaps(d['categories']);
     final pending = Map<String, dynamic>.from(d['pendingApprovals'] as Map? ?? {});
-    final txns = _listOfMaps(d['recentTransactions']);
     final insights = [for (final i in (d['insights'] as List? ?? const [])) '$i'];
 
     return RefreshIndicator(
@@ -239,7 +216,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               const SizedBox(height: 18),
               FadeSlideIn(
                   delay: const Duration(milliseconds: 80),
-                  child: _buildQuickActions()),
+                  child: _buildQuickActions(pending)),
               const SizedBox(height: 22),
               FadeSlideIn(
                 delay: const Duration(milliseconds: 120),
@@ -254,34 +231,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               ),
               const SizedBox(height: 22),
               FadeSlideIn(
-                delay: const Duration(milliseconds: 160),
-                child: KeyedSubtree(
-                    key: _approvalsKey, child: _buildApprovalsCard(pending)),
-              ),
-              const SizedBox(height: 22),
-              FadeSlideIn(
-                delay: const Duration(milliseconds: 200),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _SectionHeader('Recent Transactions',
-                        subtitle: _isCurrentMonth
-                            ? 'This month'
-                            : DateFormat('MMMM yyyy').format(_month)),
-                    const SizedBox(height: 10),
-                    ..._txnFilterBar(txns),
-                    _buildTransactions(_txnCategory == null
-                        ? txns
-                        : [
-                            for (final t in txns)
-                              if ('${t['category']}' == _txnCategory) t
-                          ]),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 22),
-              FadeSlideIn(
-                  delay: const Duration(milliseconds: 240),
+                  delay: const Duration(milliseconds: 160),
                   child: _buildInsights(insights)),
             ],
           ),
@@ -298,16 +248,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   void _toastSuccess(String msg, {String? title}) {
     if (!mounted) return;
     AppToast.success(context, msg, title: title);
-  }
-
-  void _toastError(String msg) {
-    if (!mounted) return;
-    AppToast.error(context, msg);
-  }
-
-  void _toastInfo(String msg, {String? title}) {
-    if (!mounted) return;
-    AppToast.info(context, msg, title: title);
   }
 
   // ─────────────────────────────────────────────────── property selector ──
@@ -450,7 +390,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         setState(() {
           _propertyId = id;
           _propertyName = id == null ? null : name;
-          _txnCategory = null;
         });
         _reload();
       },
@@ -570,7 +509,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
   // ─────────────────────────────────────────────────────── quick actions ──
 
-  Widget _buildQuickActions() {
+  /// The landing page is the month's *picture* (total, categories, insights);
+  /// the row-by-row work lives one tap away in [ExpenseActivityScreen].
+  Widget _buildQuickActions(Map<String, dynamic> pending) {
+    final count = (pending['count'] as num?)?.toInt() ?? 0;
     return Row(
       children: [
         Expanded(
@@ -578,30 +520,34 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             label: 'Approvals',
             icon: Icons.fact_check_outlined,
             color: PgColors.warning,
-            onTap: _scrollToApprovals,
+            badge: count > 0 ? '$count' : null,
+            onTap: () => _openActivity(0),
           ),
         ),
         const SizedBox(width: 10),
         Expanded(
           child: _QuickActionChip(
-            label: 'Reports',
-            icon: Icons.insert_chart_outlined_rounded,
+            label: 'Transactions',
+            icon: Icons.receipt_long_rounded,
             color: PgColors.primary,
-            onTap: () =>
-                _toastInfo('Detailed reports coming soon', title: 'Coming Soon'),
+            onTap: () => _openActivity(1),
           ),
         ),
       ],
     );
   }
 
-  void _scrollToApprovals() {
-    final ctx = _approvalsKey.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(ctx,
-          duration: const Duration(milliseconds: 450),
-          curve: Curves.easeOutCubic);
-    }
+  Future<void> _openActivity(int page) async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => ExpenseActivityScreen(
+        propertyId: _propertyId,
+        scopeLabel: _scopeLabel,
+        month: _month,
+        initialPage: page,
+      ),
+    ));
+    // Approvals/edits/deletes there move this month's totals.
+    if (mounted) _reload();
   }
 
   // ─────────────────────────────────────────────────── category overview ──
@@ -692,6 +638,568 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     );
   }
 
+
+  // ──────────────────────────────────────────────────────────── insights ──
+
+  Widget _buildInsights(List<String> insights) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1EEFE),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.auto_awesome_rounded,
+                    color: PgColors.primary, size: 19),
+              ),
+              const SizedBox(width: 12),
+              const Text('Smart Insights',
+                  style: TextStyle(
+                      color: PgColors.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800)),
+            ],
+          ),
+          const SizedBox(height: 14),
+          for (var i = 0; i < insights.length; i++) ...[
+            if (i > 0) const SizedBox(height: 10),
+            _insightRow(insights[i]),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _insightRow(String text) {
+    final lower = text.toLowerCase();
+    final (icon, color) = lower.contains('increased')
+        ? (Icons.trending_up_rounded, PgColors.danger)
+        : lower.contains('utilization')
+            ? (Icons.pie_chart_rounded, PgColors.warning)
+            : lower.contains('saving')
+                ? (Icons.savings_rounded, PgColors.success)
+                : (Icons.auto_awesome_rounded, PgColors.primary);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(text,
+                style: const TextStyle(
+                    color: PgColors.textPrimary, fontSize: 13, height: 1.45)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────── sheets ──
+
+  Future<void> _openAddExpense() async {
+    final saved = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) =>
+          _AddExpenseSheet(propertyId: _propertyId, scopeLabel: _scopeLabel),
+    );
+    if (saved != null) {
+      _toastSuccess(
+          saved == 'pending'
+              ? 'Expense recorded — awaiting approval'
+              : 'Expense recorded',
+          title: 'Expense Added');
+      _reload();
+    }
+  }
+
+  Future<void> _openSetBudget() async {
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) =>
+          _SetBudgetSheet(propertyId: _propertyId, scopeLabel: _scopeLabel),
+    );
+    if (saved == true) {
+      _toastSuccess('Budget saved', title: 'Budget Saved');
+      _reload();
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────── expense activity ──
+
+/// The row-by-row half of the expenses module, split out of the landing page so
+/// that page stays a single glance at the month (total, categories, insights).
+///
+/// Layout: the month selector is a **fixed** header — it applies to both pages,
+/// so it must not scroll away — and below it the two work lists live in a
+/// swipeable [PageView]: Pending Expenses (approve / reject) and Transactions
+/// (edit / delete). Reached from the Approvals / Transactions chips.
+class ExpenseActivityScreen extends StatefulWidget {
+  final int? propertyId;
+  final String scopeLabel;
+  final DateTime month;
+  /// 0 = Pending Expenses, 1 = Transactions.
+  final int initialPage;
+  const ExpenseActivityScreen({
+    super.key,
+    required this.propertyId,
+    required this.scopeLabel,
+    required this.month,
+    this.initialPage = 0,
+  });
+
+  @override
+  State<ExpenseActivityScreen> createState() => _ExpenseActivityScreenState();
+}
+
+class _ExpenseActivityScreenState extends State<ExpenseActivityScreen> {
+  late Future<Map<String, dynamic>> _future;
+  late DateTime _month;
+  late final PageController _pageController;
+  late int _page;
+  String? _txnCategory; // Transactions category filter (null = All)
+
+  @override
+  void initState() {
+    super.initState();
+    _month = widget.month;
+    _page = widget.initialPage;
+    _pageController = PageController(initialPage: widget.initialPage);
+    _future = _fetch();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  String get _monthParam =>
+      '${_month.year}-${_month.month.toString().padLeft(2, '0')}';
+
+  bool get _isCurrentMonth {
+    final now = DateTime.now();
+    return _month.year == now.year && _month.month == now.month;
+  }
+
+  Future<Map<String, dynamic>> _fetch() {
+    final query = [
+      if (widget.propertyId != null) 'propertyId=${widget.propertyId}',
+      'month=$_monthParam',
+    ].join('&');
+    return context.read<AppState>().apiClient.get('/expenses/dashboard?$query');
+  }
+
+  // Block body: an arrow body would return the Future and trip setState's assert.
+  void _reload() {
+    setState(() {
+      _future = _fetch();
+    });
+  }
+
+  void _shiftMonth(int delta) {
+    final next = DateTime(_month.year, _month.month + delta);
+    final now = DateTime.now();
+    if (next.isAfter(DateTime(now.year, now.month))) return;
+    setState(() {
+      _month = next;
+      _txnCategory = null;
+    });
+    _reload();
+  }
+
+  void _selectPage(int index) => _pageController.animateToPage(
+        index,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeInOut,
+      );
+
+  void _toastSuccess(String msg, {String? title}) {
+    if (!mounted) return;
+    AppToast.success(context, msg, title: title);
+  }
+
+  void _toastError(String msg) {
+    if (!mounted) return;
+    AppToast.error(context, msg);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: PgColors.scaffold,
+      appBar: AppBar(
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Expense Activity',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+            Text(widget.scopeLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 11.5,
+                    color: PgColors.textSecondary,
+                    fontWeight: FontWeight.w500)),
+          ],
+        ),
+        actions: [
+          IconButton(
+              onPressed: _reload, icon: const Icon(Icons.refresh_rounded)),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _openAddExpense,
+        backgroundColor: PgColors.primary,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('Add Expense',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+      ),
+      body: FutureBuilder<Map<String, dynamic>>(
+        future: _future,
+        builder: (context, snap) {
+          final loading = snap.connectionState != ConnectionState.done;
+          final pending = Map<String, dynamic>.from(
+              (snap.data?['pendingApprovals'] as Map?) ?? const {});
+          final txns = _listOfMaps(snap.data?['recentTransactions']);
+          final count = (pending['count'] as num?)?.toInt() ?? 0;
+
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 640),
+              child: Column(
+                children: [
+                  // Fixed: the month applies to both pages.
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                    child: _monthBar(),
+                  ),
+                  _pageTabs(count),
+                  // The pager stays mounted across reloads — swapping it for a
+                  // skeleton detaches _pageController, which then restores to
+                  // its initialPage and leaves the highlighted tab pointing at
+                  // a different page than the one on screen.
+                  Expanded(
+                    child: PageView(
+                      controller: _pageController,
+                      onPageChanged: (i) => setState(() => _page = i),
+                      children: [
+                        _pageState(loading, snap.error,
+                            () => _pendingPage(pending)),
+                        _pageState(loading, snap.error,
+                            () => _transactionsPage(txns)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Per-page loading/error wrapper, so the pager itself never leaves the tree.
+  Widget _pageState(bool loading, Object? error, Widget Function() content) {
+    if (loading) return const SkeletonList(showLeading: false);
+    if (error != null) return ErrorRetryView(error: error, onRetry: _reload);
+    return content();
+  }
+
+  Widget _monthBar() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: PgColors.border),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _shiftMonth(-1),
+            icon: const Icon(Icons.chevron_left_rounded,
+                color: PgColors.textSecondary, size: 22),
+          ),
+          Text(DateFormat('MMMM yyyy').format(_month),
+              style: const TextStyle(
+                  color: PgColors.textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700)),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            onPressed: _isCurrentMonth ? null : () => _shiftMonth(1),
+            icon: Icon(Icons.chevron_right_rounded,
+                color: _isCurrentMonth
+                    ? PgColors.hairline
+                    : PgColors.textSecondary,
+                size: 22),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Segmented control mirroring the [PageView] — tap or swipe, both work.
+  Widget _pageTabs(int pendingCount) {
+    Widget tab(int index, String label, String? badge) {
+      final selected = _page == index;
+      return Expanded(
+        child: InkWell(
+          onTap: () => _selectPage(index),
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(vertical: 9),
+            decoration: BoxDecoration(
+              color: selected ? PgColors.primary : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Flexible(
+                  child: Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: selected
+                              ? Colors.white
+                              : PgColors.textSecondary)),
+                ),
+                if (badge != null) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? Colors.white.withValues(alpha: 0.25)
+                          : PgColors.danger.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(badge,
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color:
+                                selected ? Colors.white : PgColors.danger)),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: PgColors.border),
+      ),
+      child: Row(
+        children: [
+          tab(0, 'Pending', pendingCount > 0 ? '$pendingCount' : null),
+          tab(1, 'Transactions', null),
+        ],
+      ),
+    );
+  }
+
+  Widget _pendingPage(Map<String, dynamic> pending) {
+    return RefreshIndicator(
+      onRefresh: () async {
+        _reload();
+        await _future;
+      },
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
+        children: [_buildApprovalsCard(pending)],
+      ),
+    );
+  }
+
+  Widget _transactionsPage(List<Map<String, dynamic>> txns) {
+    final filtered = _txnCategory == null
+        ? txns
+        : [
+            for (final t in txns)
+              if ('${t['category']}' == _txnCategory) t
+          ];
+    return RefreshIndicator(
+      onRefresh: () async {
+        _reload();
+        await _future;
+      },
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
+        children: [
+          _SectionHeader('Transactions',
+              subtitle: _isCurrentMonth
+                  ? 'This month'
+                  : DateFormat('MMMM yyyy').format(_month)),
+          const SizedBox(height: 10),
+          ..._txnFilterBar(txns),
+          _buildTransactions(filtered),
+        ],
+      ),
+    );
+  }
+
+  static List<Map<String, dynamic>> _listOfMaps(dynamic v) => [
+        for (final e in (v as List? ?? const []))
+          Map<String, dynamic>.from(e as Map),
+      ];
+
+  // ─────────────────────────────────────────────────────────────── sheets ──
+
+  Future<void> _openAddExpense() async {
+    final saved = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _AddExpenseSheet(
+          propertyId: widget.propertyId, scopeLabel: widget.scopeLabel),
+    );
+    if (saved != null) {
+      _toastSuccess(
+          saved == 'pending'
+              ? 'Expense recorded — awaiting approval'
+              : 'Expense recorded',
+          title: 'Expense Added');
+      _reload();
+    }
+  }
+
+  /// Fetches the full row (the dashboard payload omits vendor/notes/property),
+  /// then reopens the expense sheet in edit mode.
+  Future<void> _openEditExpense(Map<String, dynamic> txn) async {
+    final messenger = ScaffoldMessenger.of(context);
+    Map<String, dynamic> detail;
+    try {
+      detail = await context
+          .read<AppState>()
+          .apiClient
+          .get('/expenses/${txn['expenseId']}');
+    } catch (e) {
+      AppToast.errorOf(messenger, e.toString().replaceFirst('Exception: ', ''));
+      return;
+    }
+    if (!mounted) return;
+    if (detail['editable'] == false) {
+      _showLocked('Cannot Edit Expense', detail['lockedReason']);
+      return;
+    }
+    final saved = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _AddExpenseSheet(
+        propertyId: widget.propertyId,
+        scopeLabel: widget.scopeLabel,
+        expense: detail,
+      ),
+    );
+    if (saved != null) {
+      _toastSuccess('Expense updated', title: 'Expense Updated');
+      _reload();
+    }
+  }
+
+  Future<void> _deleteExpense(Map<String, dynamic> txn) async {
+    final title = '${txn['title'] ?? 'this expense'}';
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Expense?'),
+        content: Text('$title · ${_inr(_num(txn['amount']))} will be removed '
+            'from this month\'s totals.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: PgColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context
+          .read<AppState>()
+          .apiClient
+          .delete('/expenses/${txn['expenseId']}');
+      AppToast.successOf(messenger, '$title was deleted',
+          title: 'Expense Deleted');
+      _reload();
+    } catch (e) {
+      if (mounted) {
+        _showLocked('Cannot Delete Expense',
+            e.toString().replaceFirst('Exception: ', ''));
+      }
+    }
+  }
+
+  void _showLocked(String title, Object? reason) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text('${reason ?? 'This expense cannot be changed.'}'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+        ],
+      ),
+    );
+  }
+
+  // ─── moved from the landing page: approvals + transactions ───────────────
   // ──────────────────────────────────────────────────── pending approvals ──
 
   Widget _buildApprovalsCard(Map<String, dynamic> pending) {
@@ -958,119 +1466,41 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       color: PgColors.textTertiary, fontSize: 11.5)),
             ],
           ),
-        ],
-      ),
-    );
-  }
-
-  // ──────────────────────────────────────────────────────────── insights ──
-
-  Widget _buildInsights(List<String> insights) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF1EEFE),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
+          // Fix a mis-keyed amount/category, or drop the row entirely.
+          SizedBox(
+            width: 28,
+            child: PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert_rounded,
+                  size: 18, color: PgColors.textTertiary),
+              padding: EdgeInsets.zero,
+              tooltip: 'Expense actions',
+              onSelected: (v) {
+                if (v == 'edit') _openEditExpense(t);
+                if (v == 'delete') _deleteExpense(t);
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Row(children: [
+                    Icon(Icons.edit_outlined, size: 18),
+                    SizedBox(width: 8),
+                    Text('Edit'),
+                  ]),
                 ),
-                child: const Icon(Icons.auto_awesome_rounded,
-                    color: PgColors.primary, size: 19),
-              ),
-              const SizedBox(width: 12),
-              const Text('Smart Insights',
-                  style: TextStyle(
-                      color: PgColors.textPrimary,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800)),
-            ],
-          ),
-          const SizedBox(height: 14),
-          for (var i = 0; i < insights.length; i++) ...[
-            if (i > 0) const SizedBox(height: 10),
-            _insightRow(insights[i]),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _insightRow(String text) {
-    final lower = text.toLowerCase();
-    final (icon, color) = lower.contains('increased')
-        ? (Icons.trending_up_rounded, PgColors.danger)
-        : lower.contains('utilization')
-            ? (Icons.pie_chart_rounded, PgColors.warning)
-            : lower.contains('saving')
-                ? (Icons.savings_rounded, PgColors.success)
-                : (Icons.auto_awesome_rounded, PgColors.primary);
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: color, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(text,
-                style: const TextStyle(
-                    color: PgColors.textPrimary, fontSize: 13, height: 1.45)),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Row(children: [
+                    Icon(Icons.delete_outline, size: 18, color: PgColors.danger),
+                    SizedBox(width: 8),
+                    Text('Delete', style: TextStyle(color: PgColors.danger)),
+                  ]),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
-  }
-
-  // ─────────────────────────────────────────────────────────────── sheets ──
-
-  Future<void> _openAddExpense() async {
-    final saved = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) =>
-          _AddExpenseSheet(propertyId: _propertyId, scopeLabel: _scopeLabel),
-    );
-    if (saved != null) {
-      _toastSuccess(
-          saved == 'pending'
-              ? 'Expense recorded — awaiting approval'
-              : 'Expense recorded',
-          title: 'Expense Added');
-      _reload();
-    }
-  }
-
-  Future<void> _openSetBudget() async {
-    final saved = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) =>
-          _SetBudgetSheet(propertyId: _propertyId, scopeLabel: _scopeLabel),
-    );
-    if (saved == true) {
-      _toastSuccess('Budget saved', title: 'Budget Saved');
-      _reload();
-    }
   }
 }
 
@@ -1122,7 +1552,13 @@ class _SheetScaffold extends StatelessWidget {
 class _AddExpenseSheet extends StatefulWidget {
   final int? propertyId;
   final String scopeLabel;
-  const _AddExpenseSheet({required this.propertyId, required this.scopeLabel});
+  /// Detail payload from `GET /expenses/{id}` — set to edit instead of create.
+  final Map<String, dynamic>? expense;
+  const _AddExpenseSheet({
+    required this.propertyId,
+    required this.scopeLabel,
+    this.expense,
+  });
 
   @override
   State<_AddExpenseSheet> createState() => _AddExpenseSheetState();
@@ -1140,6 +1576,23 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet> {
   bool _requiresApproval = false;
   bool _saving = false;
 
+  bool get _isEdit => widget.expense != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.expense;
+    if (e == null) return;
+    _title.text = '${e['title'] ?? ''}';
+    _amount.text = _num(e['amount']).toStringAsFixed(2);
+    _vendor.text = '${e['vendorName'] ?? ''}';
+    _description.text = '${e['description'] ?? ''}';
+    if (_categoryMeta.containsKey('${e['category']}')) _category = '${e['category']}';
+    if (_paymentMethods.containsKey('${e['paymentMethod']}')) _method = '${e['paymentMethod']}';
+    final parsed = DateTime.tryParse('${e['expenseDate']}');
+    if (parsed != null) _date = parsed;
+  }
+
   @override
   void dispose() {
     _title.dispose();
@@ -1152,22 +1605,36 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
+    // On edit, keep the expense on the property it was booked against — the sheet
+    // may have been opened from the org-level screen.
+    final propertyId = _isEdit
+        ? (widget.expense!['propertyId'] as num?)?.toInt()
+        : widget.propertyId;
+    final body = {
+      'title': _title.text.trim(),
+      'category': _category,
+      'amount': double.parse(_amount.text.trim()),
+      'expenseDate': DateFormat('yyyy-MM-dd').format(_date),
+      'paymentMethod': _method,
+      if (propertyId != null) 'propertyId': propertyId,
+      if (_vendor.text.trim().isNotEmpty) 'vendorName': _vendor.text.trim(),
+      if (_description.text.trim().isNotEmpty)
+        'description': _description.text.trim(),
+      if (!_isEdit) 'requiresApproval': _requiresApproval,
+    };
     try {
-      final res = await context.read<AppState>().apiClient.post('/expenses', {
-        'title': _title.text.trim(),
-        'category': _category,
-        'amount': double.parse(_amount.text.trim()),
-        'expenseDate': DateFormat('yyyy-MM-dd').format(_date),
-        'paymentMethod': _method,
-        if (widget.propertyId != null) 'propertyId': widget.propertyId,
-        if (_vendor.text.trim().isNotEmpty) 'vendorName': _vendor.text.trim(),
-        if (_description.text.trim().isNotEmpty)
-          'description': _description.text.trim(),
-        'requiresApproval': _requiresApproval,
-      });
+      final api = context.read<AppState>().apiClient;
+      final res = _isEdit
+          ? await api.put('/expenses/${widget.expense!['expenseId']}', body)
+          : await api.post('/expenses', body);
       if (mounted) {
         Navigator.pop(
-            context, res['status'] == 'PENDING' ? 'pending' : 'approved');
+            context,
+            _isEdit
+                ? 'updated'
+                : res['status'] == 'PENDING'
+                    ? 'pending'
+                    : 'approved');
       }
     } catch (e) {
       setState(() => _saving = false);
@@ -1178,11 +1645,14 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet> {
   }
 
   Future<void> _pickDate() async {
+    final now = DateTime.now();
+    // An older expense being corrected must stay inside the picker's range.
+    final earliest = now.subtract(const Duration(days: 365));
     final picked = await showDatePicker(
       context: context,
       initialDate: _date,
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
-      lastDate: DateTime.now(),
+      firstDate: _date.isBefore(earliest) ? _date : earliest,
+      lastDate: _date.isAfter(now) ? _date : now,
     );
     if (picked != null) setState(() => _date = picked);
   }
@@ -1190,7 +1660,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet> {
   @override
   Widget build(BuildContext context) {
     return _SheetScaffold(
-      title: 'Add Expense',
+      title: _isEdit ? 'Edit Expense' : 'Add Expense',
       scopeLabel: widget.scopeLabel,
       children: [
         Form(
@@ -1278,16 +1748,20 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet> {
                 decoration:
                     const InputDecoration(labelText: 'Notes (optional)'),
               ),
-              SwitchListTile(
-                value: _requiresApproval,
-                onChanged: (v) => setState(() => _requiresApproval = v),
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Requires approval',
-                    style: TextStyle(fontSize: 14)),
-                subtitle: const Text('Keep it pending until approved',
-                    style: TextStyle(
-                        fontSize: 12, color: PgColors.textSecondary)),
-              ),
+              // Approval is a status change (PATCH /status), not part of an edit.
+              if (!_isEdit)
+                SwitchListTile(
+                  value: _requiresApproval,
+                  onChanged: (v) => setState(() => _requiresApproval = v),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Requires approval',
+                      style: TextStyle(fontSize: 14)),
+                  subtitle: const Text('Keep it pending until approved',
+                      style: TextStyle(
+                          fontSize: 12, color: PgColors.textSecondary)),
+                )
+              else
+                const SizedBox(height: 12),
               const SizedBox(height: 6),
               FilledButton(
                 onPressed: _saving ? null : _save,
@@ -1298,8 +1772,8 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet> {
                         height: 20,
                         child: CircularProgressIndicator(
                             color: Colors.white, strokeWidth: 2.4))
-                    : const Text('Save Expense',
-                        style: TextStyle(
+                    : Text(_isEdit ? 'Update Expense' : 'Save Expense',
+                        style: const TextStyle(
                             fontSize: 15, fontWeight: FontWeight.w700)),
               ),
             ],
@@ -1322,7 +1796,8 @@ class _SetBudgetSheet extends StatefulWidget {
 class _SetBudgetSheetState extends State<_SetBudgetSheet> {
   final _formKey = GlobalKey<FormState>();
   final _amount = TextEditingController();
-  String _category = 'ALL';
+  /// Fixed to the overall monthly budget while the category picker is hidden.
+  final String _category = 'ALL';
   bool _saving = false;
 
   @override
@@ -1360,18 +1835,23 @@ class _SetBudgetSheetState extends State<_SetBudgetSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              DropdownButtonFormField<String>(
-                initialValue: _category,
-                decoration: const InputDecoration(labelText: 'Budget for'),
-                items: [
-                  const DropdownMenuItem(
-                      value: 'ALL', child: Text('Overall (this month)')),
-                  for (final e in _categoryMeta.entries)
-                    DropdownMenuItem(value: e.key, child: Text(e.value.label)),
-                ],
-                onChanged: (v) => setState(() => _category = v ?? _category),
-              ),
-              const SizedBox(height: 12),
+              // Per-category budgets are hidden for now — the sheet only sets
+              // the overall monthly budget (`_category` stays 'ALL'). The
+              // endpoint and `expense_budget` still accept a category, so
+              // restoring this dropdown is all that's needed to bring them back.
+              //
+              // DropdownButtonFormField<String>(
+              //   initialValue: _category,
+              //   decoration: const InputDecoration(labelText: 'Budget for'),
+              //   items: [
+              //     const DropdownMenuItem(
+              //         value: 'ALL', child: Text('Overall (this month)')),
+              //     for (final e in _categoryMeta.entries)
+              //       DropdownMenuItem(value: e.key, child: Text(e.value.label)),
+              //   ],
+              //   onChanged: (v) => setState(() => _category = v ?? _category),
+              // ),
+              // const SizedBox(height: 12),
               TextFormField(
                 controller: _amount,
                 keyboardType:
@@ -1467,11 +1947,14 @@ class _QuickActionChip extends StatelessWidget {
   final IconData icon;
   final Color color;
   final VoidCallback onTap;
+  /// Optional count pill (e.g. how many approvals are waiting).
+  final String? badge;
   const _QuickActionChip(
       {required this.label,
       required this.icon,
       required this.color,
-      required this.onTap});
+      required this.onTap,
+      this.badge});
 
   @override
   Widget build(BuildContext context) {
@@ -1490,11 +1973,30 @@ class _QuickActionChip extends StatelessWidget {
           children: [
             Icon(icon, color: color, size: 18),
             const SizedBox(width: 8),
-            Text(label,
-                style: const TextStyle(
-                    color: PgColors.textPrimary,
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w600)),
+            Flexible(
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: PgColors.textPrimary,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600)),
+            ),
+            if (badge != null) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(badge!,
+                    style: TextStyle(
+                        color: color,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800)),
+              ),
+            ],
           ],
         ),
       ),

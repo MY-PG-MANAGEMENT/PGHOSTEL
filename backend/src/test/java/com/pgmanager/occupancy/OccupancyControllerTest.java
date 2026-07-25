@@ -42,9 +42,12 @@ class OccupancyControllerTest {
         lenient().when(currentUser.userLoginId()).thenReturn(7L);
         com.pgmanager.billing.MoveInBillingService moveInBillingService =
                 mock(com.pgmanager.billing.MoveInBillingService.class);
+        com.pgmanager.billing.CheckoutInvoiceService checkoutInvoiceService =
+                mock(com.pgmanager.billing.CheckoutInvoiceService.class);
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
-        mvc = MockMvcBuilders.standaloneSetup(new OccupancyController(occupancyService, currentUser, jdbc, moveInBillingService))
+        mvc = MockMvcBuilders.standaloneSetup(new OccupancyController(occupancyService, currentUser, jdbc,
+                        moveInBillingService, checkoutInvoiceService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setValidator(validator)
                 .build();

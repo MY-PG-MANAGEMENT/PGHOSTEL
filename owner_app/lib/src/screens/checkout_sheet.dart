@@ -35,6 +35,12 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
   DateTime _checkoutDate = DateTime.now();
   bool _checkingOut = false;
 
+  // Invoice ids the backend will delete on checkout — the next-cycle invoice raised
+  // ahead of its due date, which the tenant is leaving before consuming. They are not
+  // dues, so they are kept out of the settle list (no Pay / Write Off) and shown as a
+  // note instead. Recomputed whenever the checkout date changes.
+  Set<int> _droppedIds = {};
+
   // Security-deposit refund (optional, owner-provided at checkout).
   double? _depositHeld;
   final _refundCtrl = TextEditingController();
@@ -45,7 +51,11 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
     super.initState();
     _load();
     _loadDeposit();
+    _loadDropPreview();
   }
+
+  String _iso(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   @override
   void dispose() {
@@ -76,6 +86,27 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
     }
   }
 
+  /// Asks the backend which invoices this checkout date would delete. Server-side so the
+  /// grace-window rule lives in exactly one place; on failure nothing is hidden and the
+  /// owner just sees the normal dues list.
+  Future<void> _loadDropPreview() async {
+    try {
+      final result = await context.read<AppState>().apiClient.get(
+          '/occupancy/checkout-preview?partyId=${widget.partyId}'
+          '&checkoutDate=${_iso(_checkoutDate)}');
+      final items = (result['droppedInvoices'] is List
+              ? result['droppedInvoices'] as List
+              : [])
+          .cast<Map<String, dynamic>>();
+      if (mounted) {
+        setState(() => _droppedIds =
+            items.map((i) => (i['invoiceId'] as num).toInt()).toSet());
+      }
+    } catch (_) {
+      if (mounted) setState(() => _droppedIds = {});
+    }
+  }
+
   Future<void> _pickCheckoutDate() async {
     final now = DateTime.now();
     final picked = await showDatePicker(
@@ -85,7 +116,11 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
       lastDate: now,
       helpText: 'Select checkout date',
     );
-    if (picked != null) setState(() => _checkoutDate = picked);
+    if (picked != null) {
+      setState(() => _checkoutDate = picked);
+      // A different checkout date can move an invoice in or out of the grace window.
+      await _loadDropPreview();
+    }
   }
 
   Future<void> _load() async {
@@ -223,13 +258,10 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
       return;
     }
     setState(() => _checkingOut = true);
-    final d = _checkoutDate;
-    final iso =
-        '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
     try {
       await context.read<AppState>().apiClient.post('/occupancy/checkout', {
         'partyId': widget.partyId,
-        'checkoutDate': iso,
+        'checkoutDate': _iso(_checkoutDate),
         if (refund != null && refund > 0) ...{
           'refundAmount': refund,
           'refundMethod': _refundMode,
@@ -251,9 +283,72 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
     }
   }
 
+  /// Card explaining the invoices that will disappear on checkout, so their absence
+  /// from the dues list is never a surprise.
+  Widget _droppedCard(List<Map<String, dynamic>> dropped) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: PgColors.primary.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: PgColors.primary.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.auto_delete_outlined, color: PgColors.primary, size: 18),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text('Not billed — removed on checkout',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          for (final inv in dropped)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                '${_fmtMonth(inv['invoice_month'] as String?)} · '
+                '${inr(inv['total_amount'])} (due ${_fmtDay(inv['due_date'] as String?)})',
+                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+              ),
+            ),
+          const SizedBox(height: 6),
+          const Text(
+            'Raised ahead of the due date for a cycle this tenant is not staying, '
+            'so it is deleted instead of paid or written off.',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _fmtDay(String? iso) {
+    if (iso == null || iso.isEmpty) return '—';
+    try {
+      final d = DateTime.parse(iso);
+      const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return '${d.day} ${m[d.month - 1]}';
+    } catch (_) {
+      return iso;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final invoices = _invoices;
+    final loaded = _invoices;
+    int idOf(Map<String, dynamic> inv) => (inv['invoice_id'] as num).toInt();
+    // Invoices inside the checkout grace window are not dues — they are dropped by the
+    // backend on checkout, so they must not gate the Confirm Checkout button either.
+    final invoices =
+        loaded?.where((inv) => !_droppedIds.contains(idOf(inv))).toList();
+    final dropped =
+        loaded?.where((inv) => _droppedIds.contains(idOf(inv))).toList() ?? [];
     final allSettled = invoices != null && invoices.isEmpty;
     final padding = MediaQuery.viewInsetsOf(context).bottom;
 
@@ -307,6 +402,7 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
                   if (_loadError != null)
                     Text('Failed to load: $_loadError',
                         style: const TextStyle(color: Colors.red)),
+                  if (dropped.isNotEmpty) _droppedCard(dropped),
                   if (invoices != null && invoices.isNotEmpty) ...[
                     const Text('Settle dues before checkout',
                         style: TextStyle(

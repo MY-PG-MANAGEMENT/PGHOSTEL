@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
-import '../utils/money.dart';
 import 'tenant_screen.dart';
 import 'billing_screen.dart';
 import 'expenses_screen.dart';
@@ -12,6 +11,7 @@ import 'staff_screen.dart';
 import 'transactions_screen.dart';
 import 'complaints_screen.dart';
 import 'temporary_stay_screen.dart';
+import 'reports_screen.dart';
 import 'room_screen.dart' show AssignBedSheet;
 import '../widgets/animations.dart';
 import '../widgets/app_toast.dart';
@@ -118,6 +118,13 @@ class _PropertyWorkspaceScreenState extends State<PropertyWorkspaceScreen> {
                     builder: (_) => FloorsRoomsScreen(propertyId: _propertyId),
                   ),
                 );
+              } else if (v == 'deleted-tenants') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ArchivedTenantsScreen(propertyId: _propertyId),
+                  ),
+                );
               } else if (v == 'edit') {
                 showModalBottomSheet<bool>(
                   context: context,
@@ -152,6 +159,28 @@ class _PropertyWorkspaceScreenState extends State<PropertyWorkspaceScreen> {
                     ),
                     const SizedBox(width: 12),
                     const Text('Edit Property',
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF1A1A2E))),
+                  ]),
+                ),
+              // Tenants tab only — the deleted ("archived") tenants of this property.
+              if (_tab == 1)
+                PopupMenuItem<String>(
+                  value: 'deleted-tenants',
+                  child: Row(children: [
+                    Container(
+                      width: 32, height: 32,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEECEC),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.delete_outline,
+                          size: 16, color: PgColors.danger),
+                    ),
+                    const SizedBox(width: 12),
+                    const Text('Deleted Tenants',
                         style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
@@ -197,7 +226,10 @@ class _PropertyWorkspaceScreenState extends State<PropertyWorkspaceScreen> {
           ),
           _PropertyTenantsTab(propertyId: _propertyId),
           _PropertyPaymentsTab(propertyId: _propertyId),
-          _PropertyReportsTab(propertyId: _propertyId),
+          ReportsTab(
+            propertyId: _propertyId,
+            propertyName: '${widget.property['facilityName'] ?? ''}',
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -421,15 +453,15 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
                         ),
                       ),
                       _QuickActionCard(
-                        icon: Icons.badge_outlined,
-                        iconBg: const Color(0xFFEBF3FF),
-                        iconColor: const Color(0xFF2563EB),
-                        title: 'Staff',
-                        subtitle: 'Manage staff',
+                        icon: Icons.hotel_outlined,
+                        iconBg: const Color(0xFFFFF7ED),
+                        iconColor: const Color(0xFFF97316),
+                        title: 'Temporary Stay',
+                        subtitle: 'Short-term guests',
                         onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => StaffScreen(
+                            builder: (_) => TemporaryStayScreen(
                               propertyId: widget.propertyId,
                               propertyName:
                                   '${widget.property['facilityName'] ?? 'Property'}',
@@ -472,6 +504,23 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
                         ),
                       ),
                       _QuickActionCard(
+                        icon: Icons.badge_outlined,
+                        iconBg: const Color(0xFFEBF3FF),
+                        iconColor: const Color(0xFF2563EB),
+                        title: 'Staff',
+                        subtitle: 'Manage staff',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => StaffScreen(
+                              propertyId: widget.propertyId,
+                              propertyName:
+                                  '${widget.property['facilityName'] ?? 'Property'}',
+                            ),
+                          ),
+                        ),
+                      ),
+                      _QuickActionCard(
                         icon: Icons.currency_rupee,
                         iconBg: const Color(0xFFDCFCE7),
                         iconColor: const Color(0xFF16A34A),
@@ -495,23 +544,6 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
                           context,
                           MaterialPageRoute(
                             builder: (_) => ComplaintsScreen(
-                              propertyId: widget.propertyId,
-                              propertyName:
-                                  '${widget.property['facilityName'] ?? 'Property'}',
-                            ),
-                          ),
-                        ),
-                      ),
-                      _QuickActionCard(
-                        icon: Icons.hotel_outlined,
-                        iconBg: const Color(0xFFFFF7ED),
-                        iconColor: const Color(0xFFF97316),
-                        title: 'Temporary Stay',
-                        subtitle: 'Short-term guests',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => TemporaryStayScreen(
                               propertyId: widget.propertyId,
                               propertyName:
                                   '${widget.property['facilityName'] ?? 'Property'}',
@@ -1948,6 +1980,14 @@ class _FloorsRoomsScreenState extends State<FloorsRoomsScreen> {
     if (added == true && mounted) setState(_loadFloors);
   }
 
+  /// The deleted floor's page no longer exists — jump back to the first floor
+  /// before the shorter list rebuilds, then reload.
+  void _onFloorDeleted() {
+    if (_pageController.hasClients) _pageController.jumpToPage(0);
+    _currentPage = 0;
+    _loadFloors();
+  }
+
   void _onPageChanged(int index) {
     setState(() => _currentPage = index);
     if (index < _tabKeys.length) {
@@ -2160,6 +2200,7 @@ class _FloorsRoomsScreenState extends State<FloorsRoomsScreen> {
                     floor: floors[i],
                     propertyId: widget.propertyId,
                     onReload: () => setState(_loadFloors),
+                    onDeleted: _onFloorDeleted,
                   ),
                 ),
               ),
@@ -2431,13 +2472,53 @@ class _StatCard extends StatelessWidget {
 
 // ─── Floor Page ───────────────────────────────────────────────────────────────
 
+/// Dry-runs the delete. Returns the check payload when the node can go, or null
+/// after showing the single "why not" popup — the caller then does nothing.
+Future<Map<String, dynamic>?> _deleteCheck(
+    BuildContext context, int facilityId, String blockedTitle) async {
+  try {
+    final check = await context
+        .read<AppState>()
+        .apiClient
+        .get('/facilities/$facilityId/delete-check');
+    if (check['deletable'] == true) return check;
+    if (context.mounted) {
+      _showDeleteBlocked(context, blockedTitle,
+          check['reason'] ?? 'This cannot be deleted right now.');
+    }
+  } catch (e) {
+    if (context.mounted) _showDeleteBlocked(context, blockedTitle, e);
+  }
+  return null;
+}
+
+/// Why a floor/room delete was refused (occupied beds, scheduled transfer, …).
+/// The backend owns the wording; the app just shows it.
+void _showDeleteBlocked(BuildContext context, String title, Object error) {
+  showDialog(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(title),
+      content: Text(error.toString().replaceFirst('Exception: ', '')),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+      ],
+    ),
+  );
+}
+
 class _FloorPage extends StatefulWidget {
   final Map<String, dynamic> floor;
   final VoidCallback onReload;
+  /// Reloads the floor strip *and* resets the pager — the page this widget
+  /// lives on is gone once the floor is deleted.
+  final VoidCallback onDeleted;
   final int propertyId;
   const _FloorPage({
     required this.floor,
     required this.onReload,
+    required this.onDeleted,
     required this.propertyId,
     super.key,
   });
@@ -2490,6 +2571,48 @@ class _FloorPageState extends State<_FloorPage> {
     if (saved == true) {
       _loadRooms();
       widget.onReload();
+    }
+  }
+
+  Future<void> _deleteFloor() async {
+    // Ask the server first: a blocked delete shows only the reason, never a
+    // confirmation the user can't act on.
+    final check = await _deleteCheck(context, _floorId, 'Cannot Delete Floor');
+    if (check == null || !mounted) return;
+    final rooms = (check['rooms'] as num?)?.toInt() ?? 0;
+    final beds = (check['beds'] as num?)?.toInt() ?? 0;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete $_floorName?'),
+        content: Text(rooms == 0
+            ? 'The floor will be removed.'
+            : 'The floor, its $rooms room${rooms == 1 ? '' : 's'} and '
+                '$beds bed${beds == 1 ? '' : 's'} will be removed.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: PgColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<AppState>().apiClient.delete('/facilities/$_floorId');
+      AppToast.successOf(messenger, '$_floorName was deleted',
+          title: 'Floor Deleted');
+      widget.onDeleted();
+    } catch (e) {
+      // Blocked deletes are a dialog, not a toast — the reason has to be read.
+      if (mounted) _showDeleteBlocked(context, 'Cannot Delete Floor', e);
     }
   }
 
@@ -2582,6 +2705,7 @@ class _FloorPageState extends State<_FloorPage> {
                       padding: EdgeInsets.zero,
                       onSelected: (v) {
                         if (v == 'edit') _editFloor();
+                        if (v == 'delete') _deleteFloor();
                       },
                       itemBuilder: (_) => const [
                         PopupMenuItem(
@@ -2590,6 +2714,16 @@ class _FloorPageState extends State<_FloorPage> {
                             Icon(Icons.edit_outlined, size: 18),
                             SizedBox(width: 8),
                             Text('Edit Floor'),
+                          ]),
+                        ),
+                        PopupMenuItem(
+                          value: 'delete',
+                          child: Row(children: [
+                            Icon(Icons.delete_outline,
+                                size: 18, color: PgColors.danger),
+                            SizedBox(width: 8),
+                            Text('Delete Floor',
+                                style: TextStyle(color: PgColors.danger)),
                           ]),
                         ),
                       ],
@@ -2718,6 +2852,43 @@ class _RoomTileState extends State<_RoomTile> {
     }
   }
 
+  Future<void> _deleteRoom() async {
+    final check = await _deleteCheck(context, _roomId, 'Cannot Delete Room');
+    if (check == null || !mounted) return;
+    final beds = (check['beds'] as num?)?.toInt() ?? 0;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete $_roomName?'),
+        content: Text(beds == 0
+            ? 'The room will be removed.'
+            : 'The room and its $beds bed${beds == 1 ? '' : 's'} will be removed.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: PgColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<AppState>().apiClient.delete('/facilities/$_roomId');
+      AppToast.successOf(messenger, '$_roomName was deleted',
+          title: 'Room Deleted');
+      widget.onReload();
+    } catch (e) {
+      if (mounted) _showDeleteBlocked(context, 'Cannot Delete Room', e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final sharing = widget.room['sharingType'] as String?;
@@ -2807,6 +2978,7 @@ class _RoomTileState extends State<_RoomTile> {
                           padding: EdgeInsets.zero,
                           onSelected: (v) {
                             if (v == 'edit') _editRoom();
+                            if (v == 'delete') _deleteRoom();
                           },
                           itemBuilder: (_) => const [
                             PopupMenuItem(
@@ -2815,6 +2987,15 @@ class _RoomTileState extends State<_RoomTile> {
                                   Icon(Icons.edit_outlined, size: 18),
                                   SizedBox(width: 8),
                                   Text('Edit Room'),
+                                ])),
+                            PopupMenuItem(
+                                value: 'delete',
+                                child: Row(children: [
+                                  Icon(Icons.delete_outline,
+                                      size: 18, color: PgColors.danger),
+                                  SizedBox(width: 8),
+                                  Text('Delete Room',
+                                      style: TextStyle(color: PgColors.danger)),
                                 ])),
                           ],
                         ),
@@ -3139,347 +3320,6 @@ class _PropertyPaymentsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => BillingScreen(embedded: true, propertyId: propertyId);
-}
-
-// ─── Reports Tab ──────────────────────────────────────────────────────────────
-
-class _PropertyReportsTab extends StatefulWidget {
-  const _PropertyReportsTab({required this.propertyId});
-  final int propertyId;
-
-  @override
-  State<_PropertyReportsTab> createState() => _PropertyReportsTabState();
-}
-
-class _PropertyReportsTabState extends State<_PropertyReportsTab> {
-  Map<String, dynamic>? _data;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() { _error = null; });
-    try {
-      final raw = await context.read<AppState>().apiClient
-          .get('/properties/${widget.propertyId}/report');
-      setState(() => _data = Map<String, dynamic>.from(raw));
-    } catch (e) {
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(_error!, style: const TextStyle(color: Colors.red)),
-            const SizedBox(height: 12),
-            FilledButton(onPressed: _load, child: const Text('Retry')),
-          ]),
-        ),
-      );
-    }
-    if (_data == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    final upcoming = (_data!['upcomingCheckouts'] as List? ?? []).cast<Map<String, dynamic>>();
-    final joiners  = (_data!['recentJoiners']      as List? ?? []).cast<Map<String, dynamic>>();
-    final defaulters = (_data!['defaulters']        as List? ?? []).cast<Map<String, dynamic>>();
-    final trend    = (_data!['monthlyTrend']        as List? ?? []).cast<Map<String, dynamic>>();
-
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _ReportCard(
-            icon: Icons.logout_outlined,
-            iconColor: PgColors.warning,
-            title: 'Upcoming Checkouts',
-            subtitle: 'Next 30 days',
-            count: upcoming.length,
-            emptyText: 'No checkouts expected in the next 30 days',
-            children: upcoming.map((r) => _ReportRow(
-              leading: Icons.person_outlined,
-              title: '${r['full_name']}',
-              trailing: _fmtDate(r['expected_checkout_date']?.toString()),
-              trailingColor: PgColors.warning,
-            )).toList(),
-          ),
-          const SizedBox(height: 12),
-          _ReportCard(
-            icon: Icons.person_add_outlined,
-            iconColor: PgColors.success,
-            title: 'New Joiners',
-            subtitle: 'Last 30 days',
-            count: joiners.length,
-            emptyText: 'No new tenants in the last 30 days',
-            children: joiners.map((r) => _ReportRow(
-              leading: Icons.person_outlined,
-              title: '${r['full_name']}',
-              trailing: _fmtDate(r['from_date']?.toString()),
-              sub: r['monthly_rent'] != null ? '${inr(r['monthly_rent'])}/mo' : null,
-            )).toList(),
-          ),
-          const SizedBox(height: 12),
-          _ReportCard(
-            icon: Icons.warning_amber_rounded,
-            iconColor: PgColors.danger,
-            title: 'Unpaid This Month',
-            subtitle: 'Pending / overdue invoices',
-            count: defaulters.length,
-            emptyText: 'All tenants have paid this month',
-            emptyColor: PgColors.success,
-            children: defaulters.map((r) {
-              final status = '${r['status']}';
-              final color = status == 'OVERDUE' ? PgColors.danger : PgColors.warning;
-              return _ReportRow(
-                leading: Icons.receipt_long_outlined,
-                leadingColor: color,
-                title: '${r['full_name']}',
-                trailing: '${inr(r['balance'])} due',
-                trailingColor: color,
-                sub: status,
-                subColor: color,
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 12),
-          _MonthlyTrendCard(trend: trend),
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
-
-  String _fmtDate(String? iso) {
-    if (iso == null) return '—';
-    try {
-      final d = DateTime.parse(iso);
-      const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      return '${d.day} ${m[d.month - 1]} ${d.year}';
-    } catch (_) { return iso; }
-  }
-}
-
-class _ReportCard extends StatelessWidget {
-  const _ReportCard({
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.subtitle,
-    required this.count,
-    required this.emptyText,
-    required this.children,
-    this.emptyColor,
-  });
-
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final String subtitle;
-  final int count;
-  final String emptyText;
-  final List<Widget> children;
-  final Color? emptyColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: PgColors.border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: iconColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, color: iconColor, size: 18),
-              ),
-              const SizedBox(width: 10),
-              Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                  Text(subtitle, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
-                ],
-              )),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: count > 0 ? iconColor.withValues(alpha: 0.1) : Colors.grey.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text('$count',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                        color: count > 0 ? iconColor : Colors.grey)),
-              ),
-            ]),
-            if (children.isNotEmpty) ...[
-              const Divider(height: 20),
-              ...children,
-            ] else ...[
-              const SizedBox(height: 12),
-              Row(children: [
-                Icon(Icons.check_circle_outline, size: 15, color: emptyColor ?? Colors.grey[400]),
-                const SizedBox(width: 6),
-                Text(emptyText, style: TextStyle(fontSize: 12, color: emptyColor ?? Colors.grey[500])),
-              ]),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ReportRow extends StatelessWidget {
-  const _ReportRow({
-    required this.leading,
-    required this.title,
-    required this.trailing,
-    this.leadingColor,
-    this.trailingColor,
-    this.sub,
-    this.subColor,
-  });
-
-  final IconData leading;
-  final String title;
-  final String trailing;
-  final Color? leadingColor;
-  final Color? trailingColor;
-  final String? sub;
-  final Color? subColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(children: [
-        Icon(leading, size: 15, color: leadingColor ?? Colors.grey[400]),
-        const SizedBox(width: 8),
-        Expanded(child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-            if (sub != null)
-              Text(sub!, style: TextStyle(fontSize: 11, color: subColor ?? Colors.grey[500])),
-          ],
-        )),
-        Text(trailing,
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: trailingColor ?? Colors.grey[700])),
-      ]),
-    );
-  }
-}
-
-class _MonthlyTrendCard extends StatelessWidget {
-  const _MonthlyTrendCard({required this.trend});
-  final List<Map<String, dynamic>> trend;
-
-  @override
-  Widget build(BuildContext context) {
-    if (trend.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    final maxVal = trend.fold<double>(
-        1, (m, r) => (double.tryParse('${r['collected']}') ?? 0) > m
-            ? double.tryParse('${r['collected']}') ?? 0
-            : m);
-
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: PgColors.border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: PgColors.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.bar_chart, color: PgColors.primary, size: 18),
-              ),
-              const SizedBox(width: 10),
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Monthly Collection', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                Text('Last 6 months', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
-              ]),
-            ]),
-            const SizedBox(height: 16),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: trend.map((r) {
-                final val = double.tryParse('${r['collected']}') ?? 0;
-                final ratio = maxVal > 0 ? val / maxVal : 0.0;
-                final label = '${r['month']}'.substring(5); // "MM" from "YYYY-MM"
-                return Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 3),
-                    child: Column(
-                      children: [
-                        Text(_fmt(val),
-                            style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w600),
-                            textAlign: TextAlign.center),
-                        const SizedBox(height: 3),
-                        Container(
-                          height: 60 * ratio + 4,
-                          decoration: BoxDecoration(
-                            color: PgColors.primary.withValues(alpha: 0.7 + 0.3 * ratio),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(label,
-                            style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-                            textAlign: TextAlign.center),
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _fmt(double v) {
-    if (v >= 100000) return '${(v / 100000).toStringAsFixed(1)}L';
-    if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}k';
-    return v.toStringAsFixed(0);
-  }
 }
 
 // ─── Edit Property Sheet ──────────────────────────────────────────────────────

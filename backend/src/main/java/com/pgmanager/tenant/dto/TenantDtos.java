@@ -4,6 +4,7 @@ import jakarta.validation.constraints.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 public final class TenantDtos {
     private TenantDtos() {}
@@ -90,6 +91,15 @@ public final class TenantDtos {
             // Temporary-stay dates (null when not in a temporary stay): check-in
             // and the planned checkout used by the day-wise Temporary Stay card.
             LocalDate tempFromDate,
-            LocalDate tempExpectedCheckoutDate
+            LocalDate tempExpectedCheckoutDate,
+            // true when this response came from restoring an archived tenant rather than
+            // creating a new one — the Add Tenant form uses it to tell the owner their
+            // history was brought back instead of a fresh record being made.
+            boolean restoredFromArchive
+    ) {}
+
+    /** Bulk "delete" (archive) selection from the Inactive tenant list. */
+    public record TenantArchiveRequest(
+            @NotEmpty(message = "select at least one tenant") List<@NotNull Long> partyIds
     ) {}
 }

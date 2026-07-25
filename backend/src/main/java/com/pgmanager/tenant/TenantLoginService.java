@@ -38,6 +38,7 @@ public class TenantLoginService {
     /** Temporary password for every auto-provisioned / reactivated tenant login. */
     public static final String TEMP_PASSWORD = "abc@123";
     public static final String REASON_CHECKED_OUT = "CHECKED_OUT";
+    public static final String REASON_ARCHIVED = "ARCHIVED";
 
     private static final Logger log = LoggerFactory.getLogger(TenantLoginService.class);
 
@@ -111,9 +112,24 @@ public class TenantLoginService {
      * The login row is never deleted (so a rejoin can reactivate it).
      */
     public void disableForCheckout(Long organizationId, Long partyId) {
+        disable(organizationId, partyId, REASON_CHECKED_OUT, "TENANT_LOGIN_DISABLED",
+                "Tenant login disabled on checkout");
+    }
+
+    /**
+     * Disables active tenant logins when the tenant is archived ("deleted" in the app).
+     * Checkout normally already did this; this covers a tenant archived without ever
+     * holding a bed. The login row survives so a rejoin can reactivate it.
+     */
+    public void disableForArchive(Long organizationId, Long partyId) {
+        disable(organizationId, partyId, REASON_ARCHIVED, "TENANT_LOGIN_DISABLED",
+                "Tenant login disabled on archive");
+    }
+
+    private void disable(Long organizationId, Long partyId, String reason, String auditEvent, String auditDetail) {
         if (organizationId == null || partyId == null) return;
-        // Best-effort: a login-disable failure must not block checkout (caught before the
-        // caller's @Transactional boundary so the surrounding tx is never marked rollback-only).
+        // Best-effort: a login-disable failure must not block checkout / archive (caught before
+        // the caller's @Transactional boundary so the surrounding tx is never marked rollback-only).
         try {
             List<Long> ids = jdbc.queryForList(
                     "SELECT user_login_id FROM user_login WHERE organization_id=? AND party_id=? " +
@@ -123,15 +139,14 @@ public class TenantLoginService {
             LocalDateTime now = LocalDateTime.now();
             for (Long id : ids) {
                 jdbc.update("UPDATE user_login SET status='INACTIVE', disabled_reason=?, updated_at=? WHERE user_login_id=?",
-                        REASON_CHECKED_OUT, now, id);
+                        reason, now, id);
                 jdbc.update("UPDATE refresh_token SET revoked=TRUE, updated_at=? WHERE user_login_id=? AND revoked=FALSE",
                         now, id);
             }
-            auditService.log(organizationId, null, "TENANT_LOGIN_DISABLED", "PARTY", partyId,
-                    "Tenant login disabled on checkout");
+            auditService.log(organizationId, null, auditEvent, "PARTY", partyId, auditDetail);
         } catch (Exception e) {
-            log.warn("Tenant login disable-on-checkout failed for org={} party={} (checkout still proceeds): {}",
-                    organizationId, partyId, e.getMessage(), e);
+            log.warn("Tenant login disable ({}) failed for org={} party={} (caller still proceeds): {}",
+                    reason, organizationId, partyId, e.getMessage(), e);
         }
     }
 
@@ -163,13 +178,20 @@ public class TenantLoginService {
         Set<Long> withActiveLogin = new HashSet<>(jdbc.queryForList(
                 "SELECT DISTINCT party_id FROM user_login WHERE organization_id=? AND role_type_id=? AND status='ACTIVE'",
                 Long.class, organizationId, RoleType.TENANT));
+        // Archived ("deleted") tenants are hidden from every tenant list — never give them a login.
+        Set<Long> archived = new HashSet<>(jdbc.queryForList(
+                "SELECT party_id FROM tenant_archive WHERE organization_id=?", Long.class, organizationId));
 
-        int total = 0, created = 0, skippedExisting = 0, skippedInactive = 0, skippedCheckedOut = 0;
+        int total = 0, created = 0, skippedExisting = 0, skippedInactive = 0, skippedCheckedOut = 0, skippedArchived = 0;
         for (Map<String, Object> row : tenants) {
             total++;
             Long partyId = asLong(row.get("party_id"));
             String mobile = (String) row.get("mobile_number");
 
+            if (archived.contains(partyId)) {
+                skippedArchived++;
+                continue;
+            }
             if (row.get("thru_date") != null || mobile == null || mobile.isBlank()) {
                 skippedInactive++;
                 continue;
@@ -198,6 +220,7 @@ public class TenantLoginService {
         summary.put("skippedExisting", skippedExisting);
         summary.put("skippedInactive", skippedInactive);
         summary.put("skippedCheckedOut", skippedCheckedOut);
+        summary.put("skippedArchived", skippedArchived);
         auditService.log(organizationId, null, "TENANT_LOGINS_GENERATED", "ORGANIZATION", organizationId,
                 "Generated " + created + " tenant logins");
         return summary;
