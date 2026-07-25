@@ -16,5 +16,9 @@ public interface ScheduledBedTransferRepository extends JpaRepository<ScheduledB
 
     boolean existsByToBedFacilityIdAndStatus(Long toBedFacilityId, String status);
 
+    // Batch variant — used before deleting a floor/room to reject the delete when a
+    // scheduled transfer still points at one of its beds.
+    long countByToBedFacilityIdInAndStatus(List<Long> toBedFacilityIds, String status);
+
     boolean existsByOrganizationIdAndPartyIdAndStatus(Long organizationId, Long partyId, String status);
 }

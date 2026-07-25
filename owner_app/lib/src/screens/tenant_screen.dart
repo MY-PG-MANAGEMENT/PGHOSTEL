@@ -12,6 +12,7 @@ import '../widgets/animations.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/async_action_button.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/error_retry_view.dart';
 import 'billing_screen.dart' show InvoiceDetailSheet;
 import 'checkout_sheet.dart' show CheckoutSheet, TransferBedScreen;
@@ -66,70 +67,17 @@ class _TenantScreenState extends State<TenantScreen> {
   String _query = '';
   String _filter = 'ACTIVE'; // default to current tenants; All/Inactive on tap
 
-  bool _tenantLoginEnabled = false;
+  // Multi-select for bulk delete — only offered on the Inactive list, since an
+  // active tenant has to be checked out before they can be removed.
+  bool _selectMode = false;
+  final Set<int> _selected = <int>{};
 
   @override
   void initState() {
     super.initState();
     _load();
-    _checkLoginFeature();
     _search.addListener(() => setState(() => _query = _search.text.toLowerCase()));
   }
-
-  Future<void> _checkLoginFeature() async {
-    try {
-      final data = await context.read<AppState>().apiClient.get('/tenants/login-feature');
-      if (mounted) setState(() => _tenantLoginEnabled = data['enabled'] == true);
-    } catch (_) {}
-  }
-
-  Future<void> _generateLogins() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Generate Tenant Logins'),
-        content: const Text(
-            'Create login accounts for tenants who don’t have one yet. '
-            'Inactive and checked-out tenants are skipped. '
-            'Each new login gets the temporary password abc@123.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Generate')),
-        ],
-      ),
-    );
-    if (confirm != true || !mounted) return;
-    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
-    try {
-      final res = await context.read<AppState>().apiClient.post('/tenants/generate-logins', {});
-      if (!mounted) return;
-      Navigator.pop(context); // dismiss spinner
-      showDialog(context: context, builder: (ctx) => AlertDialog(
-        title: const Text('Generation Complete'),
-        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _summaryRow('Created', res['created']),
-          _summaryRow('Already had login', res['skippedExisting']),
-          _summaryRow('Skipped (inactive)', res['skippedInactive']),
-          _summaryRow('Skipped (checked out)', res['skippedCheckedOut']),
-          const Divider(),
-          _summaryRow('Total tenants', res['total']),
-        ]),
-        actions: [FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done'))],
-      ));
-    } catch (e) {
-      if (!mounted) return;
-      Navigator.pop(context);
-      AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
-    }
-  }
-
-  Widget _summaryRow(String label, dynamic value) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Text(label),
-          Text('${value ?? 0}', style: const TextStyle(fontWeight: FontWeight.w700)),
-        ]),
-      );
 
   @override
   void dispose() {
@@ -142,6 +90,142 @@ class _TenantScreenState extends State<TenantScreen> {
         ? '/properties/${widget.propertyId}/tenants'
         : '/tenants';
     _future = context.read<AppState>().apiClient.get(path);
+    _selectMode = false;
+    _selected.clear();
+  }
+
+  void _setFilter(String f) {
+    setState(() {
+      _filter = f;
+      // Selection only makes sense while the Inactive list is showing.
+      if (f != 'INACTIVE') {
+        _selectMode = false;
+        _selected.clear();
+      }
+    });
+  }
+
+  static int _idOf(Map<String, dynamic> tenant) => (tenant['tenantId'] as num).toInt();
+
+  // ─── Delete (archive) ───────────────────────────────────────────────────
+
+  /// Bulk "delete" of the selected inactive tenants. Nothing is erased server-side:
+  /// they move to the deleted list, keep their payment history, and are restored
+  /// automatically if they are ever registered again.
+  Future<void> _deleteSelected() async {
+    final ids = _selected.toList();
+    if (ids.isEmpty) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete ${ids.length} tenant${ids.length == 1 ? '' : 's'}?'),
+        content: const Text(
+            'They will be removed from the tenant list.\n\n'
+            'Their invoices and payment history are kept, and if any of them joins '
+            'again later the same profile is restored automatically.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: PgColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final res = await context
+          .read<AppState>()
+          .apiClient
+          .post('/tenants/archive', {'partyIds': ids});
+      if (!mounted) return;
+      setState(_load);
+      final deleted = (res['archived'] as num?)?.toInt() ?? 0;
+      final active = (res['skippedActive'] as num?)?.toInt() ?? 0;
+      AppToast.successOf(
+        messenger,
+        active > 0
+            ? 'Deleted $deleted · skipped $active still occupying a bed'
+            : 'Deleted $deleted tenant${deleted == 1 ? '' : 's'}',
+        title: 'Tenants Deleted',
+      );
+    } catch (e) {
+      AppToast.errorOf(messenger, e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<void> _openArchived() async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ArchivedTenantsScreen(propertyId: widget.propertyId),
+    ));
+    // A restore from that screen puts the tenant back in this list.
+    if (mounted) setState(_load);
+  }
+
+  /// Starts multi-select on the Inactive list. Sits next to the filter chips (both
+  /// entry modes have it) rather than behind an overflow menu — deleting departed
+  /// tenants is the one bulk action this list has.
+  Widget _bulkDeleteButton() {
+    return IconButton(
+      icon: const Icon(Icons.delete_outline),
+      color: PgColors.danger,
+      tooltip: 'Delete tenants',
+      onPressed: () {
+        setState(() {
+          _selectMode = true;
+          _selected.clear();
+        });
+      },
+    );
+  }
+
+  Widget _selectionBar(List<Map<String, dynamic>> visible) {
+    final visibleIds = visible.map(_idOf).toList();
+    final allSelected = visibleIds.isNotEmpty && visibleIds.every(_selected.contains);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(left: 4, right: 8),
+      decoration: BoxDecoration(
+        color: PgColors.lavender,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Checkbox(
+            value: allSelected,
+            onChanged: (v) {
+              setState(() {
+                _selected.clear();
+                if (v == true) _selected.addAll(visibleIds);
+              });
+            },
+          ),
+          Expanded(
+            child: Text('${_selected.length} selected',
+                style: const TextStyle(fontWeight: FontWeight.w700, color: PgColors.primary)),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _selectMode = false;
+                _selected.clear();
+              });
+            },
+            child: const Text('Cancel'),
+          ),
+          const SizedBox(width: 4),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: PgColors.danger),
+            onPressed: _selected.isEmpty ? null : _deleteSelected,
+            icon: const Icon(Icons.delete_outline, size: 18),
+            label: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
   }
 
   List<Map<String, dynamic>> _applyFilters(List<Map<String, dynamic>> items) {
@@ -173,26 +257,33 @@ class _TenantScreenState extends State<TenantScreen> {
           ),
         ),
         const SizedBox(height: 10),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: ['ALL', 'ACTIVE', 'INACTIVE'].map((f) {
-              final selected = _filter == f;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: FilterChip(
-                  label: Text(f == 'ALL' ? 'All Tenants' : f),
-                  selected: selected,
-                  selectedColor: PgColors.lavender,
-                  checkmarkColor: PgColors.primary,
-                  labelStyle: TextStyle(
-                      color: selected ? PgColors.primary : null,
-                      fontWeight: selected ? FontWeight.w700 : null),
-                  onSelected: (_) => setState(() => _filter = f),
+        Row(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: ['ALL', 'ACTIVE', 'INACTIVE'].map((f) {
+                    final selected = _filter == f;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: FilterChip(
+                        label: Text(f == 'ALL' ? 'All Tenants' : f),
+                        selected: selected,
+                        selectedColor: PgColors.lavender,
+                        checkmarkColor: PgColors.primary,
+                        labelStyle: TextStyle(
+                            color: selected ? PgColors.primary : null,
+                            fontWeight: selected ? FontWeight.w700 : null),
+                        onSelected: (_) => _setFilter(f),
+                      ),
+                    );
+                  }).toList(),
                 ),
-              );
-            }).toList(),
-          ),
+              ),
+            ),
+            if (_filter == 'INACTIVE' && !_selectMode) _bulkDeleteButton(),
+          ],
         ),
         const SizedBox(height: 10),
         Expanded(
@@ -214,23 +305,45 @@ class _TenantScreenState extends State<TenantScreen> {
               if (tenants.isEmpty) {
                 return _TenantEmptyState(onAdd: _query.isEmpty ? _openAdd : null);
               }
-              return RefreshIndicator(
-                onRefresh: () async => setState(_load),
-                child: ListView.separated(
-                  itemCount: tenants.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, i) => FadeSlideIn(
-                    delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
-                    child: _TenantCard(
-                      data: tenants[i],
-                      onTap: () => Navigator.of(context)
-                          .push(MaterialPageRoute(
-                            builder: (_) => TenantDetailScreen(tenant: tenants[i]),
-                          ))
-                          .then((_) => setState(_load)),
+              return Column(
+                children: [
+                  if (_selectMode) _selectionBar(tenants),
+                  Expanded(
+                    child: RefreshIndicator(
+                      onRefresh: () async => setState(_load),
+                      child: ListView.separated(
+                        itemCount: tenants.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (context, i) {
+                          final id = _idOf(tenants[i]);
+                          return FadeSlideIn(
+                            delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+                            child: _TenantCard(
+                              data: tenants[i],
+                              selectable: _selectMode,
+                              selected: _selected.contains(id),
+                              onTap: () {
+                                if (_selectMode) {
+                                  setState(() {
+                                    if (!_selected.remove(id)) _selected.add(id);
+                                  });
+                                  return;
+                                }
+                                Navigator.of(context)
+                                    .push(MaterialPageRoute(
+                                      builder: (_) => TenantDetailScreen(tenant: tenants[i]),
+                                    ))
+                                    .then((_) {
+                                      if (mounted) setState(_load);
+                                    });
+                              },
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   ),
-                ),
+                ],
               );
             },
           ),
@@ -255,7 +368,9 @@ class _TenantScreenState extends State<TenantScreen> {
               heroTag: 'addTenant_${widget.propertyId}',
               onPressed: _openAdd,
               tooltip: 'Add Tenant',
-              child: const Icon(Icons.person_add_outlined),
+              backgroundColor: PgColors.primary,
+              foregroundColor: Colors.white,
+              child: const Icon(Icons.person_add_alt_1_rounded),
             ),
           ),
         ],
@@ -270,21 +385,40 @@ class _TenantScreenState extends State<TenantScreen> {
         title: const Text('Tenants',
             style: TextStyle(fontWeight: FontWeight.w700)),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.person_add_outlined),
-            tooltip: 'Add Tenant',
-            onPressed: _openAdd,
-          ),
-          if (_tenantLoginEnabled)
-            PopupMenuButton<String>(
-              tooltip: 'More',
-              onSelected: (v) {
-                if (v == 'generate-logins') _generateLogins();
-              },
-              itemBuilder: (_) => [
-                const PopupMenuItem(value: 'generate-logins', child: Text('Generate tenant logins')),
-              ],
+          // Filled tile in the app's purple (same as the billing Generate
+          // button) so the primary action reads as a button on the white app
+          // bar, not as one more grey glyph next to ⋮.
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Tooltip(
+              message: 'Add Tenant',
+              child: InkWell(
+                onTap: _openAdd,
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: PgColors.primary,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.person_add_alt_1_rounded,
+                      color: Colors.white, size: 20),
+                ),
+              ),
             ),
+          ),
+          // Only on the full Tenants screen — the property-workspace Tenants tab
+          // has no app bar of its own.
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            onSelected: (v) {
+              if (v == 'archived') _openArchived();
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'archived', child: Text('Deleted tenants')),
+            ],
+          ),
         ],
         bottom: const PreferredSize(
           preferredSize: Size.fromHeight(1),
@@ -310,10 +444,17 @@ class _TenantScreenState extends State<TenantScreen> {
 // ─── Tenant Card ──────────────────────────────────────────────────────────
 
 class _TenantCard extends StatelessWidget {
-  const _TenantCard({required this.data, required this.onTap});
+  const _TenantCard({
+    required this.data,
+    required this.onTap,
+    this.selectable = false,
+    this.selected = false,
+  });
 
   final Map<String, dynamic> data;
   final VoidCallback onTap;
+  final bool selectable;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -324,6 +465,7 @@ class _TenantCard extends StatelessWidget {
     final active = data['hasActiveAdmission'] == true;
 
     return Card(
+      color: selected ? PgColors.lavender : null,
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
         onTap: onTap,
@@ -331,6 +473,10 @@ class _TenantCard extends StatelessWidget {
           padding: const EdgeInsets.all(14),
           child: Row(
             children: [
+              if (selectable) ...[
+                Checkbox(value: selected, onChanged: (_) => onTap()),
+                const SizedBox(width: 2),
+              ],
               _tenantAvatar(name, radius: 26),
               const SizedBox(width: 14),
               Expanded(
@@ -366,7 +512,7 @@ class _TenantCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right, color: Colors.grey),
+              if (!selectable) const Icon(Icons.chevron_right, color: Colors.grey),
             ],
           ),
         ),
@@ -493,6 +639,7 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
                   tenant: _tenant,
                   onCheckoutDateSet: _refreshTenant,
                   onCheckedOut: _refreshTenant,
+                  onDelete: _deleteTenant,
                 ),
                 _TenantPaymentsTab(tenantId: (_tenant['tenantId'] as num).toInt()),
                 _EmergencyTab(tenant: _tenant),
@@ -556,6 +703,43 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
     }
     if (changed == true && mounted) {
       await _refreshTenant();
+    }
+  }
+
+  /// Removes this tenant from the tenant list. Server-side this archives them:
+  /// the profile, invoices and payments all stay, and re-registering the same
+  /// mobile later brings this exact record back. Triggered by the danger card at
+  /// the bottom of the Profile tab (only rendered for a tenant with no bed).
+  Future<void> _deleteTenant() async {
+    final name = '${_tenant['fullName'] ?? 'this tenant'}';
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Tenant?'),
+        content: Text(
+            '$name will be removed from the tenant list.\n\n'
+            'Their invoices and payment history are kept. If they join again later, '
+            'registering the same mobile number restores this profile automatically.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: PgColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<AppState>().apiClient.delete('/tenants/${_tenant['tenantId']}');
+      AppToast.successOf(messenger, '$name was deleted', title: 'Tenant Deleted');
+      navigator.pop(true); // back to the list, which reloads
+    } catch (e) {
+      AppToast.errorOf(messenger, e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
@@ -928,11 +1112,13 @@ class _ProfileTab extends StatefulWidget {
     required this.tenant,
     required this.onCheckoutDateSet,
     required this.onCheckedOut,
+    required this.onDelete,
   });
 
   final Map<String, dynamic> tenant;
   final VoidCallback onCheckoutDateSet;
   final VoidCallback onCheckedOut;
+  final VoidCallback onDelete;
 
   @override
   State<_ProfileTab> createState() => _ProfileTabState();
@@ -1147,6 +1333,50 @@ class _ProfileTabState extends State<_ProfileTab> {
         _InfoSection(title: 'Permanent Address', items: [
           ('Address', '${tenant['permanentAddress'] ?? '—'}', Icons.home_outlined),
         ]),
+        // Deleting is only offered once the tenant has left — an occupied bed must be
+        // released through Checkout first (that settles dues and the deposit refund),
+        // which is why an active tenant sees "Checkout Tenant" above instead.
+        if (!hasAdmission && !inTemp) ...[
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: PgColors.danger.withValues(alpha: 0.04),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: PgColors.danger.withValues(alpha: 0.25)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Delete this tenant',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 13, color: PgColors.danger)),
+                const SizedBox(height: 6),
+                const Text(
+                  'Removes them from the tenant list. Their invoices and payment history '
+                  'are kept, and registering the same mobile number again restores this '
+                  'profile automatically.',
+                  style: TextStyle(fontSize: 12, color: PgColors.textSecondary, height: 1.35),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.delete_outline, size: 16),
+                    label: const Text('Delete Tenant'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: PgColors.danger,
+                      side: const BorderSide(color: PgColors.danger),
+                      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                    onPressed: widget.onDelete,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 8),
       ],
     );
   }
@@ -2258,7 +2488,7 @@ class _AddTenantScreenState extends State<AddTenantScreen> {
                     onPressed: () async {
                       if (!_formKey.currentState!.validate()) return;
                       try {
-                        await context.read<AppState>().apiClient.post('/tenants', {
+                        final res = await context.read<AppState>().apiClient.post('/tenants', {
                           'fullName': _fullName.text.trim(),
                           'mobileNumber': _mobile.text.trim(),
                           if (_gender != null) 'gender': _gender,
@@ -2273,6 +2503,29 @@ class _AddTenantScreenState extends State<AddTenantScreen> {
                           if (widget.propertyId != null)
                             'propertyId': widget.propertyId,
                         });
+                        if (!mounted) return;
+                        // The mobile matched a previously deleted tenant, so the
+                        // backend brought that record back instead of creating a
+                        // second one. Say so — the owner needs to know the old
+                        // dues/payments came with it.
+                        if (res['restoredFromArchive'] == true) {
+                          await showDialog<void>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Existing Tenant Restored'),
+                              content: Text(
+                                  '${_fullName.text.trim()} was registered here before and had been '
+                                  'deleted. Their earlier profile has been restored with all past '
+                                  'invoices and payments, updated with the details you just entered.\n\n'
+                                  'They are now inactive — assign a bed to start billing.'),
+                              actions: [
+                                FilledButton(
+                                    onPressed: () => Navigator.pop(ctx),
+                                    child: const Text('Got it')),
+                              ],
+                            ),
+                          );
+                        }
                         if (mounted) Navigator.pop(context, true);
                       } catch (e) {
                         if (mounted) {
@@ -2747,6 +3000,213 @@ class _TenantErrorState extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       ErrorRetryView(error: error ?? Exception('Unknown error'), onRetry: onRetry);
+}
+
+// ─── Deleted (Archived) Tenants ───────────────────────────────────────────
+
+/// The recycle bin for tenants "deleted" from the Inactive list. Nothing here was
+/// erased — each row is a full tenant record (profile, invoices, payments) that is
+/// simply hidden from the tenant lists, and Restore puts it straight back.
+class ArchivedTenantsScreen extends StatefulWidget {
+  const ArchivedTenantsScreen({this.propertyId, super.key});
+
+  final int? propertyId;
+
+  @override
+  State<ArchivedTenantsScreen> createState() => _ArchivedTenantsScreenState();
+}
+
+class _ArchivedTenantsScreenState extends State<ArchivedTenantsScreen> {
+  late Future<Map<String, dynamic>> _future;
+  final _search = TextEditingController();
+  String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    _search.addListener(() => setState(() => _query = _search.text.toLowerCase()));
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  void _load() {
+    final qs = widget.propertyId != null ? '?propertyId=${widget.propertyId}' : '';
+    _future = context.read<AppState>().apiClient.get('/tenants/archived$qs');
+  }
+
+  Future<void> _restore(Map<String, dynamic> tenant) async {
+    final name = '${tenant['fullName'] ?? 'This tenant'}';
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Restore Tenant?'),
+        content: Text('$name will appear in the tenant list again as inactive, '
+            'with all their past invoices and payments. Assign a bed to start billing.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Restore')),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final qs = widget.propertyId != null ? '?propertyId=${widget.propertyId}' : '';
+    try {
+      await context
+          .read<AppState>()
+          .apiClient
+          .post('/tenants/${tenant['tenantId']}/restore$qs', {});
+      if (!mounted) return;
+      setState(_load);
+      AppToast.successOf(messenger, '$name was restored', title: 'Tenant Restored');
+    } catch (e) {
+      AppToast.errorOf(messenger, e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F6FA),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        foregroundColor: PgColors.textPrimary,
+        elevation: 0,
+        title: const Text('Deleted Tenants', style: TextStyle(fontWeight: FontWeight.w700)),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, thickness: 1, color: PgColors.hairline),
+        ),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        child: Column(
+          children: [
+            TextField(
+              controller: _search,
+              decoration: const InputDecoration(
+                hintText: 'Search by name or mobile…',
+                prefixIcon: Icon(Icons.search),
+                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: FutureBuilder<Map<String, dynamic>>(
+                future: _future,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const SkeletonList();
+                  }
+                  if (snapshot.hasError) {
+                    return _TenantErrorState(
+                        error: snapshot.error, onRetry: () => setState(_load));
+                  }
+                  final raw = snapshot.data?['items'];
+                  var items = (raw is List ? raw : []).cast<Map<String, dynamic>>();
+                  if (_query.isNotEmpty) {
+                    items = items
+                        .where((t) =>
+                            '${t['fullName']}'.toLowerCase().contains(_query) ||
+                            '${t['mobileNumber']}'.contains(_query))
+                        .toList();
+                  }
+                  if (items.isEmpty) {
+                    return const EmptyState(
+                      icon: Icons.delete_outline,
+                      title: 'No deleted tenants',
+                      message: 'Tenants you delete from the Inactive list appear here. '
+                          'Nothing is erased — you can restore them any time.',
+                    );
+                  }
+                  return RefreshIndicator(
+                    onRefresh: () async => setState(_load),
+                    child: ListView.separated(
+                      itemCount: items.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, i) => _ArchivedTenantCard(
+                        data: items[i],
+                        onRestore: () => _restore(items[i]),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ArchivedTenantCard extends StatelessWidget {
+  const _ArchivedTenantCard({required this.data, required this.onRestore});
+
+  final Map<String, dynamic> data;
+  final VoidCallback onRestore;
+
+  String _date(Object? raw) {
+    if (raw == null) return '';
+    final text = '$raw';
+    try {
+      final d = DateTime.parse(text);
+      return '${d.day.toString().padLeft(2, '0')}-${d.month.toString().padLeft(2, '0')}-${d.year}';
+    } catch (_) {
+      return text;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = '${data['fullName'] ?? 'Tenant'}';
+    final mobile = '${data['mobileNumber'] ?? ''}';
+    final property = data['propertyName'];
+    final deletedOn = _date(data['archivedAt']);
+    final leftOn = _date(data['lastCheckoutDate']);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            _tenantAvatar(name, radius: 24),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                  if (mobile.isNotEmpty)
+                    Text(mobile, style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+                  const SizedBox(height: 4),
+                  Text(
+                    [
+                      if (property != null) '$property',
+                      if (leftOn.isNotEmpty) 'Left $leftOn',
+                      if (deletedOn.isNotEmpty) 'Deleted $deletedOn',
+                    ].join(' · '),
+                    style: const TextStyle(color: PgColors.textTertiary, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            TextButton.icon(
+              onPressed: onRestore,
+              icon: const Icon(Icons.restore, size: 18),
+              label: const Text('Restore'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _TenantEmptyState extends StatelessWidget {

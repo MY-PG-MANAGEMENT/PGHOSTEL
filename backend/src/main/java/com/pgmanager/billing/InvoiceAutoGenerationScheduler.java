@@ -1,5 +1,6 @@
 package com.pgmanager.billing;
 
+import com.pgmanager.common.util.JdbcValues;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,12 +59,12 @@ public class InvoiceAutoGenerationScheduler {
         int generated = 0;
         for (Map<String, Object> row : rows) {
             try {
-                boolean autoEnabled = row.get("auto_enabled") == null
-                        || ((Number) row.get("auto_enabled")).intValue() != 0;
-                if (!autoEnabled) continue;
+                // TINYINT(1) reaches us as a Boolean (or a Number once wrapped in COALESCE) —
+                // casting to Number would throw, and this catch would silently skip the org.
+                if (!JdbcValues.toBoolean(row.get("auto_enabled"), true)) continue;
                 if (row.get("from_date") == null) continue;
 
-                int leadDays = row.get("lead_days") != null ? ((Number) row.get("lead_days")).intValue() : 1;
+                int leadDays = JdbcValues.toInt(row.get("lead_days"), 1);
                 int anniversaryDay = ((java.sql.Date) row.get("from_date")).toLocalDate().getDayOfMonth();
 
                 // The prospective due date if we generate today; fire only when it lands exactly on

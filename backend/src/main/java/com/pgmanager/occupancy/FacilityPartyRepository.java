@@ -48,4 +48,6 @@ public interface FacilityPartyRepository extends JpaRepository<FacilityParty, Lo
             Long organizationId, List<Long> facilityIds, String roleTypeId);
 
     void deleteAllByFacilityId(Long facilityId);
+
+    void deleteAllByFacilityIdIn(List<Long> facilityIds);
 }

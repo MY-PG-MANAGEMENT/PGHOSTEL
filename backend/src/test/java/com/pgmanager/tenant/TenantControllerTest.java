@@ -27,6 +27,7 @@ class TenantControllerTest {
 
     private MockMvc mvc;
     private TenantService tenantService;
+    private TenantArchiveService tenantArchiveService;
     private final ObjectMapper json = new ObjectMapper();
 
     @BeforeEach
@@ -42,7 +43,8 @@ class TenantControllerTest {
         SelfCheckinTokenService selfCheckinTokenService = mock(SelfCheckinTokenService.class);
         TenantLoginPolicy tenantLoginPolicy = mock(TenantLoginPolicy.class);
         TenantLoginService tenantLoginService = mock(TenantLoginService.class);
-        mvc = MockMvcBuilders.standaloneSetup(new TenantController(tenantService, currentUser, selfCheckinTokenService, tenantLoginPolicy, tenantLoginService))
+        tenantArchiveService = mock(TenantArchiveService.class);
+        mvc = MockMvcBuilders.standaloneSetup(new TenantController(tenantService, tenantArchiveService, currentUser, selfCheckinTokenService, tenantLoginPolicy, tenantLoginService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setValidator(validator)
                 .build();
@@ -51,7 +53,7 @@ class TenantControllerTest {
     private TenantResponse sampleResponse() {
         return new TenantResponse(100L, "Asha Rao", "9876543210", null, null, null, null, null,
                 null, null, null, null, null, null, false, null, null, null, null, false, null, null, null,
-                null, null, false, null, null, false, null, null);
+                null, null, false, null, null, false, null, null, false);
     }
 
     @Test

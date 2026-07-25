@@ -482,6 +482,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       builder: (_) => const _InvoiceAutomationSheet(),
                     )),
           ]),
+          // Renders nothing unless the org has Tenant Login switched on.
+          const _TenantPortalSettingsGroup(),
           _SettingsGroup(title: 'Data & Storage', children: [
             _SettingTile(
               icon: Icons.delete_outline,
@@ -806,6 +808,108 @@ class _SettingTile extends StatelessWidget {
   Widget build(BuildContext context) => ListTile(leading: Icon(icon), title: Text(title), subtitle: subtitle == null ? null : Text(subtitle!), trailing: onTap == null ? null : const Icon(Icons.chevron_right), onTap: onTap);
 }
 
+/// Tenant-portal settings. Tenant Login is opt-in per organization (super-admin
+/// controlled), so the whole group stays hidden until `GET /tenants/login-feature`
+/// reports it enabled — that keeps a feature the org cannot use out of Settings.
+class _TenantPortalSettingsGroup extends StatefulWidget {
+  const _TenantPortalSettingsGroup();
+
+  @override
+  State<_TenantPortalSettingsGroup> createState() => _TenantPortalSettingsGroupState();
+}
+
+class _TenantPortalSettingsGroupState extends State<_TenantPortalSettingsGroup> {
+  bool _enabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFeature();
+  }
+
+  Future<void> _checkFeature() async {
+    try {
+      final data = await context.read<AppState>().apiClient.get('/tenants/login-feature');
+      if (mounted) setState(() => _enabled = data['enabled'] == true);
+    } catch (_) {
+      // Feature probe is best-effort — on failure the group simply stays hidden.
+    }
+  }
+
+  Widget _summaryRow(String label, dynamic value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text(label),
+          Text('${value ?? 0}', style: const TextStyle(fontWeight: FontWeight.w700)),
+        ]),
+      );
+
+  Future<void> _generateLogins() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Generate Tenant Logins'),
+        content: const Text(
+            'Create login accounts for tenants who don’t have one yet. '
+            'Inactive, deleted and checked-out tenants are skipped. '
+            'Each new login gets the temporary password abc@123.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Generate')),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()));
+    try {
+      final res = await context.read<AppState>().apiClient.post('/tenants/generate-logins', {});
+      if (!mounted) return;
+      Navigator.pop(context); // dismiss spinner
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Generation Complete'),
+          content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _summaryRow('Created', res['created']),
+                _summaryRow('Already had login', res['skippedExisting']),
+                _summaryRow('Skipped (inactive)', res['skippedInactive']),
+                _summaryRow('Skipped (checked out)', res['skippedCheckedOut']),
+                _summaryRow('Skipped (deleted)', res['skippedArchived']),
+                const Divider(),
+                _summaryRow('Total tenants', res['total']),
+              ]),
+          actions: [
+            FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done')),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_enabled) return const SizedBox.shrink();
+    return _SettingsGroup(title: 'Tenant Portal', children: [
+      _SettingTile(
+        icon: Icons.key_outlined,
+        title: 'Generate Tenant Logins',
+        subtitle: 'Create portal logins for tenants without one',
+        onTap: _generateLogins,
+      ),
+    ]);
+  }
+}
+
 /// Per-organization invoice automation config (backed by GET/PUT /billing/config).
 /// Controls whether invoices auto-generate daily and how many days before the tenant's
 /// billing anniversary (their move-in day-of-month) each invoice is raised.
@@ -823,6 +927,9 @@ class _InvoiceAutomationSheetState extends State<_InvoiceAutomationSheet> {
   int _leadDays = 1;
   int _minLeadDays = 0;
   int _maxLeadDays = 28;
+  int _graceDays = 2;
+  int _minGraceDays = 0;
+  int _maxGraceDays = 28;
 
   @override
   void initState() {
@@ -843,6 +950,9 @@ class _InvoiceAutomationSheetState extends State<_InvoiceAutomationSheet> {
         _leadDays = (data['invoiceLeadDays'] as num?)?.toInt() ?? 1;
         _minLeadDays = (data['minLeadDays'] as num?)?.toInt() ?? 0;
         _maxLeadDays = (data['maxLeadDays'] as num?)?.toInt() ?? 28;
+        _graceDays = (data['checkoutGraceDays'] as num?)?.toInt() ?? 2;
+        _minGraceDays = (data['minGraceDays'] as num?)?.toInt() ?? 0;
+        _maxGraceDays = (data['maxGraceDays'] as num?)?.toInt() ?? 28;
         _loading = false;
       });
     } catch (e) {
@@ -861,6 +971,7 @@ class _InvoiceAutomationSheetState extends State<_InvoiceAutomationSheet> {
     try {
       await context.read<AppState>().apiClient.put('/billing/config', {
         'invoiceLeadDays': _leadDays,
+        'checkoutGraceDays': _graceDays,
         'autoGenerateEnabled': _autoEnabled,
       });
       if (!mounted) return;
@@ -874,13 +985,42 @@ class _InvoiceAutomationSheetState extends State<_InvoiceAutomationSheet> {
     }
   }
 
+  /// Labelled −/+ stepper shared by the lead-days and grace-days settings.
+  Widget _dayStepper({
+    required String title,
+    required String description,
+    required String valueLabel,
+    required VoidCallback? onMinus,
+    required VoidCallback? onPlus,
+  }) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+      const SizedBox(height: 4),
+      Text(description, style: const TextStyle(color: Colors.black54, fontSize: 13)),
+      const SizedBox(height: 12),
+      Row(children: [
+        IconButton.filledTonal(onPressed: onMinus, icon: const Icon(Icons.remove)),
+        Expanded(
+          child: Center(
+            child: Text(valueLabel,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+          ),
+        ),
+        IconButton.filledTonal(onPressed: onPlus, icon: const Icon(Icons.add)),
+      ]),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.only(
           left: 20, right: 20, top: 20,
           bottom: MediaQuery.of(context).viewInsets.bottom + 20),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Two steppers plus the toggle can outgrow a short screen — keep it scrollable.
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           const Icon(Icons.receipt_long, color: PgColors.primary),
           const SizedBox(width: 10),
@@ -909,35 +1049,36 @@ class _InvoiceAutomationSheetState extends State<_InvoiceAutomationSheet> {
           const Divider(height: 24),
           Opacity(
             opacity: _autoEnabled ? 1 : 0.4,
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Generate invoices in advance',
-                  style: TextStyle(fontWeight: FontWeight.w600)),
-              const SizedBox(height: 4),
-              Text('How many days before the due date to raise the invoice ($_minLeadDays–$_maxLeadDays).',
-                  style: const TextStyle(color: Colors.black54, fontSize: 13)),
-              const SizedBox(height: 12),
-              Row(children: [
-                IconButton.filledTonal(
-                  onPressed: (!_autoEnabled || _saving || _leadDays <= _minLeadDays)
-                      ? null : () => setState(() => _leadDays--),
-                  icon: const Icon(Icons.remove),
-                ),
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      _leadDays == 0
-                          ? 'On the due date'
-                          : '$_leadDays day${_leadDays == 1 ? '' : 's'} before',
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                  ),
-                ),
-                IconButton.filledTonal(
-                  onPressed: (!_autoEnabled || _saving || _leadDays >= _maxLeadDays)
-                      ? null : () => setState(() => _leadDays++),
-                  icon: const Icon(Icons.add),
-                ),
-              ]),
-            ]),
+            child: _dayStepper(
+              title: 'Generate invoices in advance',
+              description:
+                  'How many days before the due date to raise the invoice ($_minLeadDays–$_maxLeadDays).',
+              valueLabel: _leadDays == 0
+                  ? 'On the due date'
+                  : '$_leadDays day${_leadDays == 1 ? '' : 's'} before',
+              onMinus: (!_autoEnabled || _saving || _leadDays <= _minLeadDays)
+                  ? null : () => setState(() => _leadDays--),
+              onPlus: (!_autoEnabled || _saving || _leadDays >= _maxLeadDays)
+                  ? null : () => setState(() => _leadDays++),
+            ),
+          ),
+          const Divider(height: 24),
+          // Applies however the invoice was raised (scheduler or manual), so it is not
+          // dimmed with the automation toggle.
+          _dayStepper(
+            title: 'Checkout grace after the due date',
+            description:
+                'A tenant checking out within this many days of the due date has that '
+                'invoice deleted instead of being asked to pay or write it off '
+                '($_minGraceDays–$_maxGraceDays). Invoices with a payment already collected '
+                'are always kept.',
+            valueLabel: _graceDays == 0
+                ? 'Up to the due date'
+                : '$_graceDays day${_graceDays == 1 ? '' : 's'} after',
+            onMinus: (_saving || _graceDays <= _minGraceDays)
+                ? null : () => setState(() => _graceDays--),
+            onPlus: (_saving || _graceDays >= _maxGraceDays)
+                ? null : () => setState(() => _graceDays++),
           ),
           const SizedBox(height: 20),
           SizedBox(
@@ -951,6 +1092,7 @@ class _InvoiceAutomationSheetState extends State<_InvoiceAutomationSheet> {
           ),
         ],
       ]),
+      ),
     );
   }
 }

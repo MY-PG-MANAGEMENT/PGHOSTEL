@@ -3,12 +3,15 @@ package com.pgmanager.tenant;
 import com.pgmanager.common.api.ApiResponse;
 import com.pgmanager.security.CurrentUser;
 import com.pgmanager.selfcheckin.SelfCheckinTokenService;
+import com.pgmanager.tenant.dto.TenantDtos.TenantArchiveRequest;
 import com.pgmanager.tenant.dto.TenantDtos.TenantCreateRequest;
 import com.pgmanager.tenant.dto.TenantDtos.TenantPatchRequest;
 import com.pgmanager.tenant.dto.TenantDtos.TenantResponse;
 import com.pgmanager.tenant.dto.TenantDtos.TenantUpdateRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -28,7 +31,11 @@ import java.util.Map;
 public class TenantController {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TenantController.class);
 
+    /** Archiving / restoring a tenant is a management action — read-only roles are excluded. */
+    private static final String ARCHIVE_ROLES = "hasAnyRole('OWNER','PROPERTY_MANAGER','MANAGER')";
+
     private final TenantService tenantService;
+    private final TenantArchiveService tenantArchiveService;
     private final CurrentUser currentUser;
     private final SelfCheckinTokenService selfCheckinTokenService;
     private final TenantLoginPolicy tenantLoginPolicy;
@@ -74,6 +81,57 @@ public class TenantController {
         List<TenantResponse> tenants = tenantService.list(currentUser.organizationId());
         log.info("GET /api/tenants: org={} returned {} tenants", currentUser.organizationId(), tenants.size());
         return ApiResponse.ok(tenants);
+    }
+
+    /**
+     * Archived ("deleted") tenants for the org — hidden from the normal tenant lists but
+     * fully intact. Optionally scoped to a property and filtered by name / mobile.
+     */
+    @GetMapping("/archived")
+    ApiResponse<List<Map<String, Object>>> archived(
+            @RequestParam(name = "propertyId", required = false) Long propertyId,
+            @RequestParam(name = "q", required = false) String q) {
+        List<Map<String, Object>> items = tenantArchiveService.list(currentUser.organizationId(), propertyId, q);
+        log.info("GET /api/tenants/archived: org={} propertyId={} returned {} archived tenants",
+                currentUser.organizationId(), propertyId, items.size());
+        return ApiResponse.ok(items);
+    }
+
+    /**
+     * "Delete" one tenant = move them to the archive. Nothing is removed: their party,
+     * person, occupancy history, invoices and payments all stay, they just stop showing in
+     * the tenant lists. Rejected while the tenant still holds a bed — check them out first.
+     */
+    @DeleteMapping("/{partyId}")
+    @PreAuthorize(ARCHIVE_ROLES)
+    ApiResponse<Map<String, Object>> archive(@PathVariable Long partyId) {
+        Long orgId = currentUser.organizationId();
+        tenantArchiveService.archiveOne(orgId, currentUser.userLoginId(), partyId);
+        log.info("DELETE /api/tenants/{}: archived (org={})", partyId, orgId);
+        return ApiResponse.ok("Tenant deleted", Map.of("archived", 1));
+    }
+
+    /** Bulk "delete" from the Inactive list's multi-select. Returns a per-reason summary. */
+    @PostMapping("/archive")
+    @PreAuthorize(ARCHIVE_ROLES)
+    ApiResponse<Map<String, Object>> archiveBulk(@Valid @RequestBody TenantArchiveRequest request) {
+        return ApiResponse.ok("Tenants deleted",
+                tenantArchiveService.archiveMany(currentUser.organizationId(), currentUser.userLoginId(),
+                        request.partyIds()));
+    }
+
+    /**
+     * Brings an archived tenant back (Inactive, no bed) with their full history. The Add
+     * Tenant form does this automatically when a rejoining tenant's mobile matches; this is
+     * the explicit Restore action on the Archived Tenants screen.
+     */
+    @PostMapping("/{partyId}/restore")
+    @PreAuthorize(ARCHIVE_ROLES)
+    ApiResponse<TenantResponse> restore(@PathVariable Long partyId,
+            @RequestParam(name = "propertyId", required = false) Long propertyId) {
+        return ApiResponse.ok("Tenant restored",
+                tenantService.restoreFromArchive(currentUser.organizationId(), currentUser.userLoginId(),
+                        partyId, propertyId, null));
     }
 
     @GetMapping("/{partyId}")

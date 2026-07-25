@@ -15,6 +15,13 @@ import '../widgets/error_retry_view.dart';
 
 String _rupees(dynamic v) => inr(v ?? 0, nullText: '₹0');
 
+/// "3 invoices" / "1 payment" — null when the backend didn't send a count.
+String? _countLabel(dynamic v, String noun) {
+  final n = v is num ? v.toInt() : int.tryParse('${v ?? ''}');
+  if (n == null) return null;
+  return '$n $noun${n == 1 ? '' : 's'}';
+}
+
 String _fmtDate(dynamic v) {
   if (v == null) return '—';
   try {
@@ -130,8 +137,8 @@ class _BillingScreenState extends State<BillingScreen>
           controller: _tabs,
           tabs: const [
             Tab(text: 'Dashboard'),
-            Tab(text: 'Payments'),
             Tab(text: 'Invoices'),
+            Tab(text: 'Payments'),
           ],
         ),
         Expanded(
@@ -139,16 +146,16 @@ class _BillingScreenState extends State<BillingScreen>
             controller: _tabs,
             children: [
               _DashboardTab(dashFuture: _dashFuture, onRefresh: () => setState(_load)),
-              _PaymentsTab(
-                refreshTrigger: _paymentsRefreshTrigger,
-                onCollect: _openCollect,
-                propertyId: widget.propertyId,
-              ),
               _InvoicesTab(
                 invoicesFuture: _invoicesFuture,
                 onRefresh: () => setState(_load),
                 onCollect: _openCollect,
                 onGenerate: _generateInvoices,
+              ),
+              _PaymentsTab(
+                refreshTrigger: _paymentsRefreshTrigger,
+                onCollect: _openCollect,
+                propertyId: widget.propertyId,
               ),
             ],
           ),
@@ -198,23 +205,25 @@ class _BillingScreenState extends State<BillingScreen>
     if (done == true) setState(_load);
   }
 
+  // Raises only the invoices that fall due today (the backend filters on each
+  // tenant's billing anniversary) — never a whole month at once.
   Future<void> _generateInvoices() async {
-    final now = DateTime.now();
-    final month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
     final pid = widget.propertyId;
-    final query = 'month=$month${pid != null ? '&propertyId=$pid' : ''}';
+    final query = pid != null ? '?propertyId=$pid' : '';
     try {
       final result = await context.read<AppState>().apiClient
-          .post('/billing/generate-invoices?$query', {});
+          .post('/billing/generate-invoices$query', {});
       if (mounted) {
         final gen = result['generated'] ?? 0;
         final skip = result['skipped'] ?? 0;
         if (gen is num && gen > 0) {
           AppToast.success(
-              context, '$gen invoice(s) generated, $skip already existed.',
+              context, '$gen invoice(s) due today generated, $skip already existed.',
               title: 'Invoices Generated');
+        } else if (skip is num && skip > 0) {
+          AppToast.info(context, 'All invoices due today already exist.');
         } else {
-          AppToast.info(context, 'All invoices for this month already exist.');
+          AppToast.info(context, 'No invoices are due today.');
         }
         setState(_load);
       }
@@ -289,6 +298,7 @@ class _DashboardTabState extends State<_DashboardTab> {
                     child: _StatCard(
                       label: 'Total Collected',
                       value: _rupees(data['totalCollection']),
+                      count: _countLabel(data['totalCollectionCount'], 'payment'),
                       icon: Icons.check_circle_outline,
                       color: PgColors.success,
                     ),
@@ -298,6 +308,7 @@ class _DashboardTabState extends State<_DashboardTab> {
                     child: _StatCard(
                       label: 'Received Today',
                       value: _rupees(data['receivedToday']),
+                      count: _countLabel(todayPayments.length, 'payment'),
                       icon: Icons.calendar_month_outlined,
                       color: PgColors.primary,
                       selected: _activeFilter == 'payments',
@@ -314,6 +325,7 @@ class _DashboardTabState extends State<_DashboardTab> {
                     child: _StatCard(
                       label: 'Outstanding Today',
                       value: _rupees(data['outstandingToday']),
+                      count: _countLabel(outstandingInvoices.length, 'invoice'),
                       icon: Icons.warning_amber_outlined,
                       color: PgColors.warning,
                       selected: _activeFilter == 'outstanding',
@@ -325,6 +337,7 @@ class _DashboardTabState extends State<_DashboardTab> {
                     child: _StatCard(
                       label: 'Overdue',
                       value: _rupees(data['overdue']),
+                      count: _countLabel(overdueInvoices.length, 'invoice'),
                       icon: Icons.error_outline,
                       color: PgColors.danger,
                       selected: _activeFilter == 'overdue',
@@ -764,7 +777,7 @@ class _InvoicesTabState extends State<_InvoicesTab> {
                       message: _query.isNotEmpty
                           ? 'No invoices match "$_query".'
                           : _filter == 'ALL'
-                              ? 'Tap the button below to generate invoices for active tenants.'
+                              ? 'Tap the button below to generate the invoices due today.'
                               : 'No ${_filter.toLowerCase()} invoices.',
                     );
                   }
@@ -809,7 +822,7 @@ class _InvoicesTabState extends State<_InvoicesTab> {
                   backgroundColor: PgColors.primary,
                   icon: const Icon(Icons.auto_awesome_outlined, color: Colors.white),
                   label: const Text('Generate', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                  tooltip: 'Generate invoices for this month',
+                  tooltip: 'Generate invoices due today',
                   onPressed: () async {
                     setState(() => _generating = true);
                     await widget.onGenerate();
@@ -1809,12 +1822,15 @@ class _StatCard extends StatelessWidget {
     required this.value,
     required this.icon,
     required this.color,
+    this.count,
     this.onTap,
     this.selected = false,
   });
 
   final String label;
   final String value;
+  /// Optional "3 invoices" / "5 payments" line under the label.
+  final String? count;
   final IconData icon;
   final Color color;
   final VoidCallback? onTap;
@@ -1822,52 +1838,134 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: selected ? 3 : 1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: selected
-            ? BorderSide(color: color, width: 2)
-            : BorderSide.none,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Colors.white, color.withValues(alpha: selected ? 0.12 : 0.05)],
+        ),
+        border: Border.all(
+          color: selected ? color : color.withValues(alpha: 0.16),
+          width: selected ? 1.6 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: selected
+                ? color.withValues(alpha: 0.22)
+                : Colors.black.withValues(alpha: 0.05),
+            blurRadius: selected ? 14 : 8,
+            offset: Offset(0, selected ? 6 : 3),
+          ),
+        ],
       ),
-      color: Colors.white,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        splashColor: onTap != null ? color.withValues(alpha: 0.18) : null,
-        highlightColor: onTap != null ? color.withValues(alpha: 0.1) : null,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundColor: color.withValues(alpha: selected ? 0.2 : 0.12),
-                    child: Icon(icon, color: color, size: 18),
-                  ),
-                  if (onTap != null) ...[
-                    const Spacer(),
-                    Icon(
-                      selected ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                      size: 16,
-                      color: Colors.grey.shade400,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          splashColor: onTap != null ? color.withValues(alpha: 0.18) : null,
+          highlightColor: onTap != null ? color.withValues(alpha: 0.1) : null,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: selected ? 0.22 : 0.13),
+                        borderRadius: BorderRadius.circular(11),
+                      ),
+                      child: Icon(icon, color: color, size: 18),
                     ),
+                    if (count != null)
+                      // Flexible + scaleDown: the card is half the screen wide,
+                      // so the pill shrinks rather than overflowing the row.
+                      Flexible(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerRight,
+                            child: _countPill(),
+                          ),
+                        ),
+                      ),
+                    if (onTap != null)
+                      AnimatedRotation(
+                        turns: selected ? 0.5 : 0,
+                        duration: const Duration(milliseconds: 180),
+                        child: Icon(
+                          Icons.keyboard_arrow_down,
+                          size: 18,
+                          color: selected ? color : Colors.grey.shade400,
+                        ),
+                      ),
                   ],
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(value,
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: color)),
-              Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-            ],
+                ),
+                const SizedBox(height: 12),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 19,
+                      letterSpacing: -0.4,
+                      color: color,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.grey,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+
+  Widget _countPill() => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 5,
+              height: 5,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              count!,
+              style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+      );
 }
 
 class _DashboardInvoiceCard extends StatelessWidget {

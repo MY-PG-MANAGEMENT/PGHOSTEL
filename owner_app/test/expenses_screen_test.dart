@@ -21,7 +21,10 @@ void main() {
   final dashPath = '/expenses/dashboard?month=$thisMonth';
   final prevDashPath = '/expenses/dashboard?month=$prevMonth';
 
-  Map<String, dynamic> dashboard({required String txnTitle}) => {
+  /// [marker] is echoed into both the insight text (rendered on the landing
+  /// page) and the transaction title (rendered on ExpenseActivityScreen), so
+  /// each test can assert on whichever surface it is exercising.
+  Map<String, dynamic> dashboard({required String marker}) => {
         'month': thisMonth,
         'summary': {'total': 100, 'lastMonthTotal': 0},
         'categories': const [],
@@ -31,7 +34,7 @@ void main() {
         'recentTransactions': [
           {
             'expenseId': 1,
-            'title': txnTitle,
+            'title': marker,
             'category': 'FOOD',
             'amount': 100,
             'paymentMethod': 'CASH',
@@ -40,7 +43,7 @@ void main() {
           },
         ],
         'pettyCash': const {},
-        'insights': const ['ok'],
+        'insights': [marker],
       };
 
   group('ExpensesScreen reload', () {
@@ -48,7 +51,7 @@ void main() {
         (tester) async {
       final fake = FakeApiClient()
         ..stubGet('/owner/properties', {'items': const []})
-        ..stubGet(dashPath, dashboard(txnTitle: 'OLD-EXPENSE'))
+        ..stubGet(dashPath, dashboard(marker: 'OLD-EXPENSE'))
         ..stubPost('/expenses', {'expenseId': 99, 'status': 'APPROVED'});
 
       await pumpDataScreen(tester, const ExpensesScreen(), state: ownerState(fake));
@@ -56,7 +59,7 @@ void main() {
       expect(find.text('OLD-EXPENSE'), findsOneWidget);
 
       // The next dashboard fetch returns the new expense.
-      fake.stubGet(dashPath, dashboard(txnTitle: 'NEW-EXPENSE'));
+      fake.stubGet(dashPath, dashboard(marker: 'NEW-EXPENSE'));
 
       await tester.tap(find.byType(FloatingActionButton));
       await tester.pumpAndSettle();
@@ -74,51 +77,16 @@ void main() {
       expect(find.text('OLD-EXPENSE'), findsNothing);
     });
 
-    testWidgets('category filter chips narrow recent transactions',
-        (tester) async {
-      final dash = dashboard(txnTitle: 'FOOD-TXN');
-      dash['recentTransactions'] = [
-        ...dash['recentTransactions'] as List,
-        {
-          'expenseId': 2,
-          'title': 'RENT-TXN',
-          'category': 'RENT',
-          'amount': 500,
-          'paymentMethod': 'UPI',
-          'status': 'APPROVED',
-          'expenseDate': '2026-07-03',
-        },
-      ];
-      final fake = FakeApiClient()
-        ..stubGet('/owner/properties', {'items': const []})
-        ..stubGet(dashPath, dash);
-
-      await pumpDataScreen(tester, const ExpensesScreen(), state: ownerState(fake));
-      await tester.pumpAndSettle();
-      expect(find.text('FOOD-TXN'), findsOneWidget);
-      expect(find.text('RENT-TXN'), findsOneWidget);
-
-      await tester.tap(find.text('Rent'));
-      await tester.pumpAndSettle();
-      expect(find.text('RENT-TXN'), findsOneWidget);
-      expect(find.text('FOOD-TXN'), findsNothing);
-
-      await tester.tap(find.text('All'));
-      await tester.pumpAndSettle();
-      expect(find.text('FOOD-TXN'), findsOneWidget);
-      expect(find.text('RENT-TXN'), findsOneWidget);
-    });
-
     testWidgets('app bar refresh icon re-fetches the dashboard', (tester) async {
       final fake = FakeApiClient()
         ..stubGet('/owner/properties', {'items': const []})
-        ..stubGet(dashPath, dashboard(txnTitle: 'OLD-EXPENSE'));
+        ..stubGet(dashPath, dashboard(marker: 'OLD-EXPENSE'));
 
       await pumpDataScreen(tester, const ExpensesScreen(), state: ownerState(fake));
       await tester.pumpAndSettle();
       expect(find.text('OLD-EXPENSE'), findsOneWidget);
 
-      fake.stubGet(dashPath, dashboard(txnTitle: 'REFRESHED'));
+      fake.stubGet(dashPath, dashboard(marker: 'REFRESHED'));
       await tester.tap(find.byIcon(Icons.refresh_rounded));
       await tester.pumpAndSettle();
 
@@ -129,8 +97,8 @@ void main() {
     testWidgets('month switcher fetches the selected month', (tester) async {
       final fake = FakeApiClient()
         ..stubGet('/owner/properties', {'items': const []})
-        ..stubGet(dashPath, dashboard(txnTitle: 'CURRENT-MONTH-TXN'))
-        ..stubGet(prevDashPath, dashboard(txnTitle: 'PREV-MONTH-TXN'));
+        ..stubGet(dashPath, dashboard(marker: 'CURRENT-MONTH-TXN'))
+        ..stubGet(prevDashPath, dashboard(marker: 'PREV-MONTH-TXN'));
 
       await pumpDataScreen(tester, const ExpensesScreen(), state: ownerState(fake));
       await tester.pumpAndSettle();
@@ -152,6 +120,67 @@ void main() {
       await tester.tap(find.byIcon(Icons.chevron_right_rounded));
       await tester.pumpAndSettle();
       expect(fake.getCalls.length, callsBefore);
+    });
+  });
+
+  group('ExpenseActivityScreen', () {
+    Widget activity({int page = 1}) => ExpenseActivityScreen(
+          propertyId: null,
+          scopeLabel: 'All Properties',
+          month: DateTime(now.year, now.month),
+          initialPage: page,
+        );
+
+    testWidgets('category filter chips narrow the transactions page',
+        (tester) async {
+      final dash = dashboard(marker: 'FOOD-TXN');
+      dash['recentTransactions'] = [
+        ...dash['recentTransactions'] as List,
+        {
+          'expenseId': 2,
+          'title': 'RENT-TXN',
+          'category': 'RENT',
+          'amount': 500,
+          'paymentMethod': 'UPI',
+          'status': 'APPROVED',
+          'expenseDate': '2026-07-03',
+        },
+      ];
+      final fake = FakeApiClient()..stubGet(dashPath, dash);
+
+      await pumpDataScreen(tester, activity(), state: ownerState(fake));
+      await tester.pumpAndSettle();
+      expect(find.text('FOOD-TXN'), findsOneWidget);
+      expect(find.text('RENT-TXN'), findsOneWidget);
+
+      await tester.tap(find.text('Rent'));
+      await tester.pumpAndSettle();
+      expect(find.text('RENT-TXN'), findsOneWidget);
+      expect(find.text('FOOD-TXN'), findsNothing);
+
+      await tester.tap(find.text('All'));
+      await tester.pumpAndSettle();
+      expect(find.text('FOOD-TXN'), findsOneWidget);
+      expect(find.text('RENT-TXN'), findsOneWidget);
+    });
+
+    testWidgets('the pinned month switcher refetches for both pages',
+        (tester) async {
+      final fake = FakeApiClient()
+        ..stubGet(dashPath, dashboard(marker: 'CURRENT-TXN'))
+        ..stubGet(prevDashPath, dashboard(marker: 'PREV-TXN'));
+
+      await pumpDataScreen(tester, activity(), state: ownerState(fake));
+      await tester.pumpAndSettle();
+      expect(find.text('CURRENT-TXN'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.chevron_left_rounded));
+      await tester.pumpAndSettle();
+
+      expect(fake.getCalls, contains(prevDashPath));
+      expect(find.text('PREV-TXN'), findsOneWidget);
+      // The month header stays put while the pages change under it.
+      expect(find.byIcon(Icons.chevron_left_rounded), findsOneWidget);
     });
   });
 }

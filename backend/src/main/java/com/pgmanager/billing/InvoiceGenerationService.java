@@ -22,7 +22,8 @@ import java.util.Map;
  * and line-item logic live in exactly one place:
  * <ul>
  *   <li>{@link BillingController} — the manual {@code POST /generate-invoices} fallback, via
- *       {@link #generateForMonth} (whole month, all active occupants).</li>
+ *       {@link #generateDueOn} (only the occupants whose billing anniversary falls on the
+ *       given day — never the whole month).</li>
  *   <li>{@link InvoiceAutoGenerationScheduler} — the daily 1 AM automation, which invoices each
  *       tenant a configurable number of days before their billing anniversary.</li>
  * </ul>
@@ -36,15 +37,21 @@ public class InvoiceGenerationService {
     private final JdbcTemplate jdbc;
     private final NotificationService notificationService;
 
-    public record GenerationResult(int generated, int skipped, YearMonth month) {}
+    public record GenerationResult(int generated, int skipped, int notDue, LocalDate date) {}
 
     /**
-     * Generates recurring invoices for every active occupant billing account in the org for
-     * {@code month} (optionally scoped to a property). Idempotent: accounts already invoiced
-     * for the month are skipped. This is the manual/fallback batch path.
+     * Generates recurring invoices for the active occupant billing accounts in the org whose
+     * billing anniversary falls on {@code date} (optionally scoped to a property) — i.e. only
+     * the invoices that come due that day, not the whole month. The anniversary is the
+     * occupancy {@code from_date} day-of-month, clamped to the month length so a 31st tenant
+     * falls due on the last day of a short month (same rule the scheduler applies).
+     *
+     * <p>Idempotent: an account already invoiced for that month counts as {@code skipped}.
+     * Accounts due on another day count as {@code notDue} and are left untouched.
+     * This is the manual/fallback path behind {@code POST /generate-invoices}.
      */
     @Transactional
-    public GenerationResult generateForMonth(Long org, YearMonth month, Long propertyId) {
+    public GenerationResult generateDueOn(Long org, LocalDate date, Long propertyId) {
         List<Object> args = new ArrayList<>();
         args.add(org);
         String propFilter = "";
@@ -60,16 +67,25 @@ public class InvoiceGenerationService {
                 "  AND fp.organization_id=ba.organization_id AND fp.role_type_id='OCCUPANT' AND fp.thru_date IS NULL " +
                 "WHERE ba.organization_id=?" + propFilter + " AND ba.status='ACTIVE'", args.toArray());
 
+        YearMonth month = YearMonth.from(date);
         int generated = 0;
+        int skipped = 0;
+        int notDue = 0;
         for (Map<String, Object> account : accounts) {
+            int anniversaryDay = dayOfMonth(account.get("from_date"));
+            int dueDay = Math.min(Math.max(anniversaryDay, 1), date.lengthOfMonth());
+            if (dueDay != date.getDayOfMonth()) {
+                notDue++;
+                continue;
+            }
             Long baId = ((Number) account.get("billing_account_id")).longValue();
             Long partyId = ((Number) account.get("party_id")).longValue();
             BigDecimal rent = decimal(account.get("monthly_rent"));
             BigDecimal ac = decimal(account.get("ac_charges"));
-            int anniversaryDay = dayOfMonth(account.get("from_date"));
             if (createRecurringInvoice(org, baId, partyId, rent, ac, anniversaryDay, month) != null) generated++;
+            else skipped++;
         }
-        return new GenerationResult(generated, accounts.size() - generated, month);
+        return new GenerationResult(generated, skipped, notDue, date);
     }
 
     /**
@@ -82,7 +98,7 @@ public class InvoiceGenerationService {
      *
      * <p>{@code @Transactional} so the INSERT and its {@code LAST_INSERT_ID()} read share one
      * connection — required when the scheduler calls this outside any surrounding transaction.
-     * (Within {@link #generateForMonth} the self-invocation simply joins that method's transaction,
+     * (Within {@link #generateDueOn} the self-invocation simply joins that method's transaction,
      * keeping the manual batch atomic as before.)
      */
     @Transactional

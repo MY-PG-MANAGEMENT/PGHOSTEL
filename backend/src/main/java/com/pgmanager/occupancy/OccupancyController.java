@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
@@ -42,6 +43,7 @@ public class OccupancyController {
     private final CurrentUser currentUser;
     private final JdbcTemplate jdbc;
     private final MoveInBillingService moveInBillingService;
+    private final com.pgmanager.billing.CheckoutInvoiceService checkoutInvoiceService;
 
     @PostMapping("/assign-bed")
     @Transactional
@@ -150,6 +152,34 @@ public class OccupancyController {
     @PostMapping("/checkout")
     ApiResponse<OccupancyResponse> checkout(@Valid @RequestBody CheckoutRequest request) {
         return ApiResponse.ok("Checkout completed", occupancyService.checkout(currentUser.organizationId(), currentUser.userLoginId(), request));
+    }
+
+    /**
+     * Which of the tenant's pending invoices checkout on {@code checkoutDate} would delete
+     * outright (the next-cycle invoice raised ahead of its due date). The checkout screen
+     * calls this so it can leave those out of "settle dues" instead of offering Pay /
+     * Write Off on a month the tenant is not staying — the backend stays the authority on
+     * the rule, so the list and the delete can never drift apart.
+     */
+    @GetMapping("/checkout-preview")
+    ApiResponse<Map<String, Object>> checkoutPreview(@RequestParam Long partyId,
+                                                     @RequestParam(required = false) String checkoutDate) {
+        LocalDate date;
+        try {
+            date = checkoutDate == null || checkoutDate.isBlank() ? LocalDate.now() : LocalDate.parse(checkoutDate);
+        } catch (Exception e) {
+            throw new com.pgmanager.common.exception.BadRequestException("Invalid date format; expected YYYY-MM-DD");
+        }
+        List<Map<String, Object>> items = checkoutInvoiceService
+                .previewUnconsumedInvoices(currentUser.organizationId(), partyId, date)
+                .stream()
+                .map(invoice -> Map.of(
+                        "invoiceId", (Object) invoice.invoiceId(),
+                        "invoiceNumber", String.valueOf(invoice.invoiceNumber()),
+                        "dueDate", String.valueOf(invoice.dueDate()),
+                        "amount", invoice.amount()))
+                .toList();
+        return ApiResponse.ok(Map.of("checkoutDate", date.toString(), "droppedInvoices", items));
     }
 
     @PutMapping("/expected-checkout")

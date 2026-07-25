@@ -13,6 +13,8 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -48,8 +50,12 @@ public class ExpenseController {
     private final AuditService auditService;
     private final ExpenseWriter expenseWriter;
 
+    // String constants, no master table (see docs/EXPENSES_SCHEMA_MAPPING.md). Categories are
+    // only ever added — an existing row's category must keep resolving, and DEPOSIT_REFUND is
+    // written by the tenant-checkout refund flow, not by hand.
     static final Set<String> CATEGORIES = Set.of(
-            "FOOD", "SALARY", "ELECTRICITY", "MAINTENANCE", "LAUNDRY", "TRANSPORT", "RENT", "DEPOSIT_REFUND", "OTHERS");
+            "FOOD", "SALARY", "ELECTRICITY", "MAINTENANCE", "LAUNDRY", "TRANSPORT", "RENT", "DEPOSIT_REFUND",
+            "WATER", "CLEANING", "REPAIRS", "INTERNET", "GAS", "OTHERS");
     static final Set<String> PAYMENT_METHODS = Set.of("CASH", "UPI", "CARD", "BANK_TRANSFER");
     private static final String SPENT_STATUSES = "('APPROVED','PAID')";
 
@@ -166,6 +172,17 @@ public class ExpenseController {
                 "page", page, "size", safeSize));
     }
 
+    /** Full row for the edit form, plus whether this expense may be edited/deleted at all. */
+    @GetMapping("/{expenseId}")
+    ApiResponse<Map<String, Object>> detail(@PathVariable Long expenseId) {
+        Long org = currentUser.organizationId();
+        Map<String, Object> result = new LinkedHashMap<>(loadExpense(org, expenseId));
+        String locked = lockReason(org, expenseId);
+        result.put("editable", locked == null);
+        result.put("lockedReason", locked);
+        return ApiResponse.ok(result);
+    }
+
     // ──────────────────────────────────────────────────────────── mutations ──
 
     @PostMapping
@@ -194,6 +211,64 @@ public class ExpenseController {
         auditService.log(org, currentUser.userLoginId(), "EXPENSE_CREATED", "EXPENSE", expenseId,
                 request.title() + " " + request.amount() + " (" + category + ")");
         return ApiResponse.ok("Expense recorded", Map.of("expenseId", expenseId, "status", approved ? "APPROVED" : "PENDING"));
+    }
+
+    /**
+     * Corrects a mis-keyed expense (wrong amount, wrong category, …). Status is not part
+     * of this — that stays with the approve/reject endpoint — but because the petty-cash
+     * OUT row is a mirror of an approved CASH expense, any change here re-syncs it.
+     */
+    @PutMapping("/{expenseId}")
+    @PreAuthorize("hasAnyRole('OWNER','PROPERTY_MANAGER','MANAGER','ACCOUNTANT')")
+    @Transactional
+    ApiResponse<Map<String, Object>> update(@PathVariable Long expenseId,
+                                            @Valid @RequestBody UpdateExpenseRequest request) {
+        Long org = currentUser.organizationId();
+        Map<String, Object> existing = loadExpenseForUpdate(org, expenseId);
+        String locked = lockReason(org, expenseId);
+        if (locked != null) throw new BadRequestException(locked);
+
+        String category = normalize(request.category(), CATEGORIES, "category");
+        String method = request.paymentMethod() == null || request.paymentMethod().isBlank()
+                ? "CASH" : normalize(request.paymentMethod(), PAYMENT_METHODS, "payment method");
+        if (request.propertyId() != null) requirePropertyInOrg(org, request.propertyId());
+        LocalDate date = request.expenseDate() != null ? request.expenseDate()
+                : ((java.sql.Date) existing.get("expense_date")).toLocalDate();
+        String title = request.title().trim();
+        String status = (String) existing.get("status");
+
+        jdbc.update("UPDATE expense SET property_facility_id=?, category=?, title=?, description=?, amount=?, " +
+                        "expense_date=?, payment_method=?, vendor_name=?, updated_at=NOW() " +
+                        "WHERE expense_id=? AND organization_id=?",
+                request.propertyId(), category, title, request.description(), request.amount(),
+                date, method, request.vendorName(), expenseId, org);
+        syncCashMirror(org, expenseId, request.propertyId(), status, method, request.amount(), title, date);
+
+        auditService.log(org, currentUser.userLoginId(), "EXPENSE_UPDATED", "EXPENSE", expenseId,
+                existing.get("title") + " " + existing.get("amount") + " → " + title + " " + request.amount()
+                        + " (" + category + ")");
+        return ApiResponse.ok("Expense updated", Map.of("expenseId", expenseId, "status", status));
+    }
+
+    /**
+     * Hard delete — an expense entered by mistake should leave no trace in any total, and
+     * there is no "void" state in the schema. The mirrored petty-cash row goes with it;
+     * `audit_log` keeps the record that it existed.
+     */
+    @DeleteMapping("/{expenseId}")
+    @PreAuthorize("hasAnyRole('OWNER','PROPERTY_MANAGER','MANAGER','ACCOUNTANT')")
+    @Transactional
+    ApiResponse<Map<String, Object>> delete(@PathVariable Long expenseId) {
+        Long org = currentUser.organizationId();
+        Map<String, Object> existing = loadExpenseForUpdate(org, expenseId);
+        String locked = lockReason(org, expenseId);
+        if (locked != null) throw new BadRequestException(locked);
+
+        jdbc.update("DELETE FROM petty_cash_entry WHERE organization_id=? AND expense_id=?", org, expenseId);
+        jdbc.update("DELETE FROM expense WHERE expense_id=? AND organization_id=?", expenseId, org);
+        auditService.log(org, currentUser.userLoginId(), "EXPENSE_DELETED", "EXPENSE", expenseId,
+                existing.get("title") + " " + existing.get("amount") + " (" + existing.get("category") + ")");
+        return ApiResponse.ok("Expense deleted", Map.of("expenseId", expenseId));
     }
 
     @PatchMapping("/{expenseId}/status")
@@ -379,6 +454,60 @@ public class ExpenseController {
         }
     }
 
+    /** Camel-cased row for the app (same aliases as the list endpoint). */
+    private Map<String, Object> loadExpense(Long org, Long expenseId) {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT expense_id expenseId, property_facility_id propertyId, title, category, description, amount, " +
+                "payment_method paymentMethod, vendor_name vendorName, status, expense_date expenseDate " +
+                "FROM expense WHERE expense_id=? AND organization_id=?", expenseId, org);
+        if (rows.isEmpty()) throw new NotFoundException("Expense not found");
+        return rows.getFirst();
+    }
+
+    /** Raw column names + row lock, for the mutating paths. */
+    private Map<String, Object> loadExpenseForUpdate(Long org, Long expenseId) {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT property_facility_id, title, category, amount, payment_method, expense_date, status " +
+                "FROM expense WHERE expense_id=? AND organization_id=? FOR UPDATE", expenseId, org);
+        if (rows.isEmpty()) throw new NotFoundException("Expense not found");
+        return rows.getFirst();
+    }
+
+    /**
+     * null when the expense is a plain manual entry. A salary expense is owned by the
+     * staff module (`staff_salary_payment.expense_id`) — editing it here would silently
+     * desync payroll, so it is redirected instead.
+     */
+    private String lockReason(Long org, Long expenseId) {
+        Long salaryLinks = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM staff_salary_payment WHERE organization_id=? AND expense_id=?",
+                Long.class, org, expenseId);
+        if (salaryLinks != null && salaryLinks > 0) {
+            return "This is a staff salary payment. Manage it from the Staff screen.";
+        }
+        return null;
+    }
+
+    /**
+     * Keeps the petty-cash OUT row in step with the expense it mirrors: present only while
+     * the expense is an approved CASH spend, and carrying its current amount/date/note.
+     */
+    private void syncCashMirror(Long org, Long expenseId, Long propertyId, String status,
+                                String method, BigDecimal amount, String title, LocalDate date) {
+        boolean mirrored = "CASH".equals(method) && ("APPROVED".equals(status) || "PAID".equals(status));
+        if (!mirrored) {
+            jdbc.update("DELETE FROM petty_cash_entry WHERE organization_id=? AND expense_id=?", org, expenseId);
+            return;
+        }
+        int updated = jdbc.update(
+                "UPDATE petty_cash_entry SET property_facility_id=?, amount=?, note=?, entry_date=?, updated_at=NOW() " +
+                "WHERE organization_id=? AND expense_id=?",
+                propertyId != null ? propertyId : 0L, amount, title, date, org, expenseId);
+        if (updated == 0) {
+            expenseWriter.recordCashOut(org, propertyId, expenseId, amount, title, date, currentUser.userLoginId());
+        }
+    }
+
     private static String normalize(String value, Set<String> allowed, String label) {
         String normalized = value == null ? "" : value.trim().toUpperCase().replace(' ', '_');
         if (!allowed.contains(normalized)) {
@@ -443,6 +572,17 @@ public class ExpenseController {
             @Size(max = 120) String vendorName,
             @Size(max = 500) String description,
             boolean requiresApproval) {}
+
+    /** Same shape as create, minus `requiresApproval` — status changes go through PATCH /status. */
+    public record UpdateExpenseRequest(
+            @NotBlank @Size(max = 120) String title,
+            @NotBlank String category,
+            @NotNull @DecimalMin("0.01") BigDecimal amount,
+            LocalDate expenseDate,
+            String paymentMethod,
+            Long propertyId,
+            @Size(max = 120) String vendorName,
+            @Size(max = 500) String description) {}
 
     public record StatusRequest(@NotBlank String status) {}
 

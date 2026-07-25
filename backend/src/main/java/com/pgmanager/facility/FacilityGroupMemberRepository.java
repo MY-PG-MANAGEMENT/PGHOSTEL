@@ -16,4 +16,8 @@ public interface FacilityGroupMemberRepository extends JpaRepository<FacilityGro
     List<FacilityGroupMember> findByChildFacilityIdInAndThruDateIsNull(List<Long> childFacilityIds);
 
     void deleteAllByChildFacilityId(Long childFacilityId);
+
+    void deleteAllByChildFacilityIdIn(List<Long> childFacilityIds);
+
+    void deleteAllByParentFacilityIdIn(List<Long> parentFacilityIds);
 }

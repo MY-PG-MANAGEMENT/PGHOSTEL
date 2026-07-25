@@ -94,4 +94,20 @@ public final class FacilityDtos {
             int roomCount,
             int bedCount
     ) {}
+
+    /** What a floor/room/bed delete actually removed, so the caller can report it. */
+    public record DeleteFacilityResult(
+            String facilityTypeId,
+            int deletedRooms,
+            int deletedBeds
+    ) {}
+
+    /** Dry-run of the same rules: what a delete would remove, and why it can't. */
+    public record DeleteFacilityCheck(
+            String facilityTypeId,
+            boolean deletable,
+            String reason,
+            int rooms,
+            int beds
+    ) {}
 }
