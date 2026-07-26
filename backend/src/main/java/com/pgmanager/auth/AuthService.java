@@ -16,6 +16,7 @@ import com.pgmanager.security.AppUserDetailsService;
 import com.pgmanager.security.AppUserPrincipal;
 import com.pgmanager.security.JwtService;
 import com.pgmanager.security.RoleType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +35,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -49,6 +51,7 @@ public class AuthService {
     private final JwtService jwtService;
     private final AuditService auditService;
     private final OrganizationStatusGuard organizationStatusGuard;
+    private final JdbcTemplate jdbc;
     private final SecureRandom secureRandom = new SecureRandom();
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
@@ -154,15 +157,15 @@ public class AuthService {
     }
 
     private AppUserPrincipal authenticate(LoginRequest request) {
+        String username = resolveStaffMobile(request.username());
         try {
 
             authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(
-                            request.username(),
+                            username,
                             request.password()));
 
-            return (AppUserPrincipal) userDetailsService.loadUserByUsername(
-                    request.username());
+            return (AppUserPrincipal) userDetailsService.loadUserByUsername(username);
 
         } catch (BadCredentialsException e) {
 
@@ -184,6 +187,43 @@ public class AuthService {
                     HttpStatus.INTERNAL_SERVER_ERROR,
                     "Login failed");
         }
+    }
+
+    /**
+     * Lets a property manager sign in with just their <b>mobile number</b>.
+     *
+     * <p>{@code user_login.username} is globally unique, so a manager's login is stored as
+     * {@code {mobile}@m{orgId}} — necessary, but not something an owner should have to dictate over
+     * the phone. This resolves a bare 10-digit entry to that stored username, so the credential the
+     * owner hands over is simply the mobile number.
+     *
+     * <p>Order is load-bearing: an <b>exact</b> username match always wins, so an owner whose chosen
+     * username happens to be ten digits is unaffected and authenticates exactly as before. Only
+     * PROPERTY_MANAGER logins are resolved this way — the narrowest blast radius, since they are the
+     * only ones minted with the suffixed scheme.
+     *
+     * <p>Ambiguity (the same person managing properties for two different organizations) is left
+     * alone rather than guessed at: the input passes through unchanged and fails, and the message
+     * below tells them to use the full username. Guessing an organization at the login boundary
+     * would be the wrong kind of helpful.
+     */
+    private String resolveStaffMobile(String input) {
+        String candidate = input == null ? "" : input.trim();
+        if (!candidate.matches("\\d{10}")) return input;
+        if (userLoginRepository.existsByUsername(candidate)) return input;
+
+        List<String> matches = jdbc.queryForList(
+                "SELECT ul.username FROM user_login ul " +
+                "JOIN person p ON p.party_id = ul.party_id " +
+                "WHERE ul.role_type_id = ? AND ul.status = 'ACTIVE' AND p.mobile_number = ?",
+                String.class, RoleType.PROPERTY_MANAGER, candidate);
+        if (matches.size() == 1) return matches.get(0);
+        if (matches.size() > 1) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                    "This mobile number has manager logins in more than one organization. "
+                            + "Sign in with the full username your owner gave you.");
+        }
+        return input;
     }
 
 

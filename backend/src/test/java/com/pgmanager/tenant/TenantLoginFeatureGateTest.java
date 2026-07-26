@@ -6,6 +6,7 @@ import com.pgmanager.common.exception.GlobalExceptionHandler;
 import com.pgmanager.security.CurrentUser;
 import com.pgmanager.selfcheckin.SelfCheckinTokenService;
 import org.junit.jupiter.api.BeforeEach;
+import com.pgmanager.security.PropertyAccessGuard;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -16,6 +17,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -61,7 +63,7 @@ class TenantLoginFeatureGateTest {
         lenient().when(owner.userLoginId()).thenReturn(7L);
         ownerMvc = MockMvcBuilders.standaloneSetup(new TenantController(
                         mock(TenantService.class), mock(TenantArchiveService.class), owner,
-                        mock(SelfCheckinTokenService.class), policy, mock(TenantLoginService.class)))
+                        mock(SelfCheckinTokenService.class), policy, mock(TenantLoginService.class), passThroughGuard()))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -138,5 +140,17 @@ class TenantLoginFeatureGateTest {
         adminMvc.perform(get("/api/super-admin/organizations/42/tenant-login"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.enabled").value(true));
+    }
+
+    /**
+     * Pass-through guard: these tests exercise owner behaviour, and an owner is unrestricted, so
+     * the guard must return the propertyId it was handed. A bare mock would return null and
+     * silently turn every scoped request into an org-wide one, quietly changing what is asserted.
+     */
+    private static PropertyAccessGuard passThroughGuard() {
+        PropertyAccessGuard guard = mock(PropertyAccessGuard.class);
+        lenient().when(guard.resolvePropertyId(any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(guard.unrestricted()).thenReturn(true);
+        return guard;
     }
 }

@@ -16,6 +16,7 @@ import com.pgmanager.party.Person;
 import com.pgmanager.party.PersonRepository;
 import com.pgmanager.tenant.dto.TenantDtos.TenantCreateRequest;
 import com.pgmanager.tenant.dto.TenantDtos.TenantResponse;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -52,6 +53,17 @@ class TenantServiceTest {
     @Mock com.pgmanager.notification.NotificationService notificationService;
     @Mock TenantLoginService tenantLoginService;
     @Mock TenantArchiveService tenantArchiveService;
+    @Mock com.pgmanager.security.PropertyAccessGuard propertyAccessGuard;
+
+    /**
+     * These tests exercise owner behaviour, so the guard must report unrestricted. A bare mock
+     * returns {@code false} here — the production-safe default (fail closed) — which would send
+     * every list down the property-scoped branch and quietly change what is being asserted.
+     */
+    @BeforeEach
+    void unrestrictedOwner() {
+        lenient().when(propertyAccessGuard.unrestricted()).thenReturn(true);
+    }
 
     @InjectMocks TenantService service;
 

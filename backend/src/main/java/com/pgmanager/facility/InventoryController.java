@@ -3,6 +3,7 @@ package com.pgmanager.facility;
 import com.pgmanager.common.api.ApiResponse;
 import com.pgmanager.common.exception.NotFoundException;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.security.PropertyAccessGuard;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,9 +24,11 @@ import java.util.Map;
 public class InventoryController {
     private final CurrentUser currentUser;
     private final JdbcTemplate jdbc;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     @GetMapping("/properties/{propertyId}")
     ApiResponse<Map<String, Object>> property(@PathVariable Long propertyId) {
+        propertyAccessGuard.assertCanAccess(propertyId);
         Map<String, Object> property = facility(propertyId, "PROPERTY");
         Map<String, Object> result = new LinkedHashMap<>(property);
         result.put("counts", jdbc.queryForMap("SELECT " +
@@ -44,6 +47,7 @@ public class InventoryController {
 
     @GetMapping("/rooms/{roomId}")
     ApiResponse<Map<String, Object>> room(@PathVariable Long roomId) {
+        propertyAccessGuard.assertFacilityInScope(roomId);
         Map<String, Object> room = facility(roomId, "ROOM");
         Map<String, Object> result = new LinkedHashMap<>(room);
         result.put("beds", jdbc.queryForList("SELECT b.facility_id,b.facility_name,b.status,b.monthly_rent,b.security_deposit," +

@@ -4,6 +4,7 @@ import com.pgmanager.common.exception.GlobalExceptionHandler;
 import com.pgmanager.occupancy.dto.OccupancyDtos.OccupancyResponse;
 import com.pgmanager.security.CurrentUser;
 import org.junit.jupiter.api.BeforeEach;
+import com.pgmanager.security.PropertyAccessGuard;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -47,7 +48,7 @@ class OccupancyControllerTest {
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
         mvc = MockMvcBuilders.standaloneSetup(new OccupancyController(occupancyService, currentUser, jdbc,
-                        moveInBillingService, checkoutInvoiceService))
+                        moveInBillingService, checkoutInvoiceService, passThroughGuard()))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setValidator(validator)
                 .build();
@@ -113,5 +114,17 @@ class OccupancyControllerTest {
                         .content("{}"))
                 .andExpect(status().isBadRequest());
         verify(occupancyService, never()).checkout(anyLong(), anyLong(), any());
+    }
+
+    /**
+     * Pass-through guard: these tests exercise owner behaviour, and an owner is unrestricted, so
+     * the guard must return the propertyId it was handed. A bare mock would return null and
+     * silently turn every scoped request into an org-wide one, quietly changing what is asserted.
+     */
+    private static PropertyAccessGuard passThroughGuard() {
+        PropertyAccessGuard guard = mock(PropertyAccessGuard.class);
+        lenient().when(guard.resolvePropertyId(any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(guard.unrestricted()).thenReturn(true);
+        return guard;
     }
 }

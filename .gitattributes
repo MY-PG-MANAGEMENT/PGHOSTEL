@@ -1,0 +1,60 @@
+# =============================================================================
+# Line-ending policy.
+#
+# This repository is developed on Windows (core.autocrlf=true) and deployed to
+# Ubuntu. Without the rules below, a file committed with CRLF breaks on the server
+# in ways that are hard to read from the error message:
+#
+#   bash: ./deploy.sh: /usr/bin/env: bad interpreter: No such file or directory
+#
+# ...which is the shell choking on the trailing \r, not a missing interpreter.
+# nginx, MySQL and Redis are more forgiving of CRLF but not uniformly so, and a
+# Dockerfile ENTRYPOINT with a stray \r fails the same way as the script above.
+#
+# `text eol=lf` forces LF in the working tree regardless of the local autocrlf
+# setting, for every file that is read by Linux at runtime.
+# =============================================================================
+
+# Default: let git normalise text in the repository, platform-native on checkout.
+* text=auto
+
+# --- Anything executed or parsed on the Linux host: LF, always ---------------
+*.sh            text eol=lf
+*.bash          text eol=lf
+Dockerfile      text eol=lf
+Dockerfile.*    text eol=lf
+*.conf          text eol=lf
+*.cnf           text eol=lf
+# Mounted into the MySQL container's /docker-entrypoint-initdb.d
+*.sql           text eol=lf
+*.template      text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+.env.example    text eol=lf
+.dockerignore   text eol=lf
+gradlew         text eol=lf
+
+# --- Windows-only ------------------------------------------------------------
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf
+
+# --- Binary: never touch -----------------------------------------------------
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.pdf           binary
+*.jar           binary
+*.zip           binary
+*.woff          binary
+*.woff2         binary
+*.ttf           binary
+*.otf           binary
+*.keystore      binary
+*.jks           binary
+
+# --- Generated / vendored: keep out of diffs and language statistics ---------
+docs/schema.html    linguist-documentation
+gradle/wrapper/**   linguist-vendored

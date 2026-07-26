@@ -1,0 +1,59 @@
+# ---------------------------------------------------------------------------
+# Docker build context filter.
+#
+# The build context is the REPOSITORY ROOT (see docker-compose.yml -> build.context: ..),
+# because the Dockerfile lives in deployment/ but needs backend/ sources. Everything
+# below is either build output, an IDE artefact, a secret, or the Flutter app — none of
+# which belong in a backend image. Keeping the context small is not cosmetic: every byte
+# here is tarred and shipped to the daemon on every build, and any file that changes
+# invalidates the COPY layer that includes it.
+# ---------------------------------------------------------------------------
+
+# --- VCS / CI -------------------------------------------------------------
+.git
+.gitignore
+.github
+
+# --- Gradle & Java build output ------------------------------------------
+# backend/bin is Eclipse/Buildship output (see CLAUDE.md); never ship it.
+**/build/
+**/bin/
+**/.gradle/
+**/out/
+**/*.class
+**/*.jar
+!gradle/wrapper/gradle-wrapper.jar
+**/*.war
+
+# --- IDE ------------------------------------------------------------------
+**/.idea/
+**/.settings/
+**/.classpath
+**/.project
+**/*.iml
+**/.vscode/
+
+# --- Secrets: must never enter an image layer ----------------------------
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.key
+**/*.p12
+**/*.jks
+
+# --- The Flutter app is not part of the backend image --------------------
+owner_app/
+
+# --- Deployment assets are bind-mounted at runtime, not baked in ---------
+deployment/
+
+# --- Docs, logs, scratch --------------------------------------------------
+docs/
+*.md
+!README.md
+**/*.log
+**/logs/
+**/backups/
+**/.DS_Store
+**/Thumbs.db

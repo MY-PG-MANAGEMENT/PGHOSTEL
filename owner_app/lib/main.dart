@@ -58,6 +58,14 @@ class PgManagerOwnerApp extends StatelessWidget {
               // Non-tenants must never land on tenant routes.
               if (state.isLoggedIn && !isTenant && onTenantRoute) return home();
 
+              // A property-manager login is created with a temporary password, exactly like a
+              // tenant's, so the same forced change applies. Previously only the tenant branch
+              // enforced it, which would have left every new manager running on abc@123.
+              if (state.isLoggedIn && !isTenant && !isSuper &&
+                  state.mustChangePassword && loc != '/settings/password') {
+                return '/settings/password';
+              }
+
               if (state.isLoggedIn && isSuper && loc != '/admin') return '/admin';
               // Non-super-admins must never land on the admin console (every call 403s).
               if (state.isLoggedIn && !isSuper && loc == '/admin') return '/dashboard';

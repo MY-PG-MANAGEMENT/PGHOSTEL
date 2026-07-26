@@ -2,6 +2,7 @@ package com.pgmanager.notice;
 
 import com.pgmanager.common.api.ApiResponse;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.security.PropertyAccessGuard;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
@@ -30,9 +31,13 @@ public class NoticeController {
 
     private final NoticeService noticeService;
     private final CurrentUser currentUser;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     @GetMapping
     ApiResponse<List<Map<String, Object>>> list(@RequestParam(required = false) Long propertyId) {
+        // Scope to what this login may see: unchanged for an owner; a property-scoped
+        // login gets their own property substituted in, or a 403/400.
+        propertyId = propertyAccessGuard.resolvePropertyId(propertyId);
         return ApiResponse.ok(noticeService.listForOwner(currentUser.organizationId(), propertyId));
     }
 

@@ -6,6 +6,7 @@ import com.pgmanager.common.exception.BadRequestException;
 import com.pgmanager.common.exception.NotFoundException;
 import com.pgmanager.notification.NotificationService;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.security.PropertyAccessGuard;
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
@@ -44,9 +45,13 @@ public class BillingController {
     private final InvoiceGenerationService invoiceGenerationService;
     private final BillingConfigService billingConfigService;
     private final AuditService auditService;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     @GetMapping("/dashboard")
     ApiResponse<Map<String, Object>> dashboard(@RequestParam(required = false) Long propertyId) {
+        // Scope to what this login may see: unchanged for an owner; a property-scoped
+        // login gets their own property substituted in, or a 403/400.
+        propertyId = propertyAccessGuard.resolvePropertyId(propertyId);
         Long org = currentUser.organizationId();
         String payProp       = partyPropFilter(null, propertyId);
         String payAliasProp  = partyPropFilter("p",  propertyId);
@@ -105,6 +110,8 @@ public class BillingController {
                                                @RequestParam(required = false) Long propertyId,
                                                @RequestParam(defaultValue = "0") int page,
                                                @RequestParam(defaultValue = "25") int size) {
+        // Scope to what this login may see (see PropertyAccessGuard).
+        propertyId = propertyAccessGuard.resolvePropertyId(propertyId);
         Long org = currentUser.organizationId();
         int safeSize = Math.min(Math.max(size, 1), 100);
         String statusFilter = (status == null || status.isBlank()) ? "" : " AND i.status=?";
@@ -145,6 +152,8 @@ public class BillingController {
                                                @RequestParam(required = false) Long propertyId,
                                                @RequestParam(defaultValue = "0") int page,
                                                @RequestParam(defaultValue = "200") int size) {
+        // Scope to what this login may see (see PropertyAccessGuard).
+        propertyId = propertyAccessGuard.resolvePropertyId(propertyId);
         Long org = currentUser.organizationId();
         int safeSize = Math.min(Math.max(size, 1), 500);
         String partyFilter = (partyId != null) ? " AND p.party_id=?" : "";
@@ -221,6 +230,9 @@ public class BillingController {
      */
     @PostMapping("/generate-invoices")
     ApiResponse<Map<String, Object>> generateInvoices(@RequestParam(required = false) Long propertyId) {
+        // Scope to what this login may see: unchanged for an owner; a property-scoped
+        // login gets their own property substituted in, or a 403/400.
+        propertyId = propertyAccessGuard.resolvePropertyId(propertyId);
         Long org = currentUser.organizationId();
         java.time.LocalDate today = java.time.LocalDate.now();
         InvoiceGenerationService.GenerationResult result =

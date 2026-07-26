@@ -23,6 +23,7 @@ import com.pgmanager.party.Person;
 import com.pgmanager.party.PersonRepository;
 import com.pgmanager.pricing.PropertySharingPrice;
 import com.pgmanager.pricing.PropertySharingPriceRepository;
+import com.pgmanager.security.PropertyAccessGuard;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +52,7 @@ public class OccupancyService {
     private final com.pgmanager.tenant.TenantLoginService tenantLoginService;
     private final com.pgmanager.tenant.TenantArchiveService tenantArchiveService;
     private final com.pgmanager.billing.CheckoutInvoiceService checkoutInvoiceService;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     @Transactional
     @EvictOccupancyCaches
@@ -477,15 +479,22 @@ public class OccupancyService {
     private void validateTenant(Long organizationId, Long partyId) {
         facilityPartyRepository.findOrgMembership(organizationId, partyId, OccupancyRole.TENANT)
                 .orElseThrow(() -> new NotFoundException("Tenant not found in current organization"));
+        propertyAccessGuard.assertTenantInScope(partyId);
         tenantArchiveService.unarchive(organizationId, null, partyId); // no-op when not archived
     }
 
+    /**
+     * Every bed-targeting operation goes through here, so this is where property scope is enforced
+     * for occupancy: without it a property-scoped login could assign a tenant into, or check a
+     * tenant out of, a bed in a property it was never given.
+     */
     private void validateBed(Long organizationId, Long bedFacilityId) {
         Facility bed = facilityRepository.findByFacilityIdAndOrganizationId(bedFacilityId, organizationId)
                 .orElseThrow(() -> new NotFoundException("Bed not found"));
         if (!FacilityType.BED.equals(bed.getFacilityTypeId())) {
             throw new BadRequestException("Selected facility is not a bed");
         }
+        propertyAccessGuard.assertFacilityInScope(bedFacilityId);
     }
 
     /** Throws if the bed is already occupied (permanent or temporary) or reserved by a pending transfer. */

@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app_state.dart';
+import 'managers_screen.dart';
 import '../theme/app_theme.dart';
 import '../widgets/animations.dart';
 import '../widgets/app_toast.dart';
@@ -482,6 +483,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       builder: (_) => const _InvoiceAutomationSheet(),
                     )),
           ]),
+          // Owner-only: /api/managers is guarded to OWNER, so showing this to a
+          // property-scoped login would offer an action that always 403s.
+          if (context.read<AppState>().roleTypeId == 'OWNER')
+            _SettingsGroup(title: 'Team', children: [
+              _SettingTile(
+                icon: Icons.badge_outlined,
+                title: 'Managers',
+                subtitle: 'Logins limited to specific properties',
+                onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ManagersScreen())),
+              ),
+            ]),
           // Renders nothing unless the org has Tenant Login switched on.
           const _TenantPortalSettingsGroup(),
           _SettingsGroup(title: 'Data & Storage', children: [

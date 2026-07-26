@@ -6,6 +6,7 @@ import com.pgmanager.common.exception.BadRequestException;
 import com.pgmanager.common.exception.NotFoundException;
 import com.pgmanager.expense.ExpenseWriter;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.security.PropertyAccessGuard;
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
@@ -50,6 +51,7 @@ public class StaffController {
     private final JdbcTemplate jdbc;
     private final AuditService auditService;
     private final ExpenseWriter expenseWriter;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     static final Set<String> PAYMENT_METHODS = Set.of("CASH", "UPI", "CARD", "BANK_TRANSFER");
 
@@ -58,6 +60,9 @@ public class StaffController {
     @GetMapping
     ApiResponse<Map<String, Object>> list(@RequestParam(required = false) Long propertyId,
                                           @RequestParam(required = false) String month) {
+        // Scope to what this login may see: unchanged for an owner; a property-scoped
+        // login gets their own property substituted in, or a 403/400.
+        propertyId = propertyAccessGuard.resolvePropertyId(propertyId);
         Long org = currentUser.organizationId();
         YearMonth ym = parseMonth(month);
         StringBuilder sql = new StringBuilder(

@@ -19,6 +19,7 @@ import com.pgmanager.tenant.dto.TenantDtos.TenantCreateRequest;
 import com.pgmanager.tenant.dto.TenantDtos.TenantPatchRequest;
 import com.pgmanager.tenant.dto.TenantDtos.TenantResponse;
 import com.pgmanager.tenant.dto.TenantDtos.TenantUpdateRequest;
+import com.pgmanager.security.PropertyAccessGuard;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,6 +53,7 @@ public class TenantService {
     private final NotificationService notificationService;
     private final TenantLoginService tenantLoginService;
     private final TenantArchiveService tenantArchiveService;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     // Creating a tenant writes facility_party (bed occupant + property membership),
     // so it changes bed occupancy → drop the occupancy read models.
@@ -226,6 +228,14 @@ public class TenantService {
 
     @Transactional(readOnly = true)
     public List<TenantResponse> list(Long organizationId) {
+        // A property-scoped login has no business seeing the organization-wide roster, so this
+        // becomes their own property's list instead. Redirecting rather than filtering the org-level
+        // rows matters: a tenant's property is recorded on a *separate* property-level membership
+        // row, so the org-level rows carry no property to filter on in the first place.
+        if (!propertyAccessGuard.unrestricted()) {
+            Long sole = propertyAccessGuard.resolvePropertyId(null);   // 403/400 when ambiguous
+            return listByProperty(organizationId, sole);
+        }
         // Query only org-level TENANT rows (facilityId = organizationId) so that
         // property-scoped TENANT rows don't produce duplicate entries.
         List<FacilityParty> tenantRows = facilityPartyRepository
@@ -480,9 +490,19 @@ public class TenantService {
         return toResponse(person, null, null, null, null, false, null, null, null, null);
     }
 
+    /**
+     * The single gate for every by-id tenant operation (get, update, patch, archive, restore and the
+     * lifecycle sub-resources all funnel through here).
+     *
+     * <p>Org membership was always checked; the property-scope check is what stops a
+     * property-scoped login from reading or editing a tenant belonging to a property it was not
+     * assigned. Enforcing it here rather than in each controller means a new tenant endpoint is
+     * scoped by default instead of by remembering.
+     */
     private void assertTenantInOrganization(Long organizationId, Long partyId) {
         facilityPartyRepository.findOrgMembership(organizationId, partyId, OccupancyRole.TENANT)
                 .orElseThrow(() -> new NotFoundException("Tenant not found in current organization"));
+        propertyAccessGuard.assertTenantInScope(partyId);
     }
 
     private void applyFields(Person person, TenantCreateRequest r) {

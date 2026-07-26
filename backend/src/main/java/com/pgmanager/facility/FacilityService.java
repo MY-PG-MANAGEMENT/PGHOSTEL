@@ -11,6 +11,7 @@ import com.pgmanager.occupancy.ScheduledBedTransfer;
 import com.pgmanager.occupancy.ScheduledBedTransferRepository;
 import com.pgmanager.party.Person;
 import com.pgmanager.party.PersonRepository;
+import com.pgmanager.security.PropertyAccessGuard;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -29,6 +30,7 @@ public class FacilityService {
     private final FacilityPartyRepository facilityPartyRepository;
     private final PersonRepository personRepository;
     private final ScheduledBedTransferRepository scheduledBedTransferRepository;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     // A structural change (new/updated/deleted node, or a re-parenting link) invalidates
     // the tree and every occupancy read model derived from it. Evict wholesale — cheap
@@ -198,9 +200,19 @@ public class FacilityService {
         Set<Long> visited = new HashSet<>();
         visited.add(org.getFacilityId());
         List<Long> frontier = List.of(org.getFacilityId());
+        // This tree is what the app's property switcher is built from, so it is where a
+        // property-scoped login would otherwise see - and be able to name - every property in the
+        // organization. Pruning the org's direct children to the permitted set is enough: the BFS
+        // never descends into a property it did not keep.
+        boolean scoped = !propertyAccessGuard.unrestricted();
+        Set<Long> permitted = scoped ? propertyAccessGuard.scope().propertyIds() : Set.of();
         while (!frontier.isEmpty()) {
             List<Long> next = new ArrayList<>();
             for (FacilityGroupMember m : groupMemberRepository.findByParentFacilityIdInAndThruDateIsNull(frontier)) {
+                if (scoped && m.getParentFacilityId().equals(org.getFacilityId())
+                        && !permitted.contains(m.getChildFacilityId())) {
+                    continue;
+                }
                 childrenByParent.computeIfAbsent(m.getParentFacilityId(), k -> new ArrayList<>())
                         .add(m.getChildFacilityId());
                 if (visited.add(m.getChildFacilityId())) {

@@ -1,0 +1,390 @@
+# =============================================================================
+# Production profile — activated by SPRING_PROFILES_ACTIVE=prod
+#
+# Overlays application.yml. Only what must differ in production is repeated here;
+# everything else (the logging.api.* block, springdoc paths, JWT lifetimes) is
+# inherited unchanged.
+#
+# Two rules this file follows throughout:
+#   1. Secrets are ${PLACEHOLDERS} with NO default. A missing value must fail the
+#      context at startup, loudly, rather than fall back to the development value
+#      that is committed in application.yml.
+#   2. Non-secret tuning gets a default, so the app still boots on a host where an
+#      optional variable was not set.
+# =============================================================================
+
+server:
+  port: ${SERVER_PORT:8080}
+
+  # Stop accepting new connections, let in-flight requests finish, then shut down.
+  # Paired with spring.lifecycle.timeout-per-shutdown-phase below and the 45s
+  # stop_grace_period in docker-compose.yml (which must be the larger of the two, or
+  # Docker SIGKILLs the JVM mid-drain).
+  shutdown: graceful
+
+  # Trust X-Forwarded-* from nginx. Without this Tomcat believes every request
+  # arrived over plain HTTP on port 8080, so any absolute URL the app builds comes
+  # out as http://api:8080/... and request.getRemoteAddr() returns the proxy.
+  #
+  # Safe ONLY because nothing reaches this port except nginx — the container
+  # publishes no ports and sits on an internal Docker network. Exposing 8080
+  # directly would let a client forge these headers.
+  forward-headers-strategy: native
+
+  error:
+    # Never leak a stack trace or an internal exception message to an API client.
+    # GlobalExceptionHandler already returns a proper ApiResponse for the exceptions
+    # the app throws; this covers what escapes it.
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+    whitelabel:
+      enabled: false
+
+  tomcat:
+    threads:
+      # 200 worker threads against a 30-connection database pool is intentional, not
+      # a mismatch: most request time is spent outside the database (JSON
+      # serialisation, BCrypt, the response write to a slow mobile client), so
+      # threads outnumbering connections keeps the pool saturated. Raising the pool
+      # to match the threads would just move the queue into MySQL.
+      max: 200
+      min-spare: 20
+    max-connections: 8192
+    accept-count: 200
+    connection-timeout: 20s
+    # Cap the URI + query length. Defence against a request-header overflow probe.
+    max-http-form-post-size: 25MB
+    max-swallow-size: 25MB
+
+  compression:
+    # nginx already gzips (see nginx.conf). Doing it twice wastes CPU on the JVM
+    # side and gains nothing, so it stays off here.
+    enabled: false
+
+spring:
+  lifecycle:
+    # Maximum drain time for graceful shutdown. Must be under the container's
+    # stop_grace_period (45s).
+    timeout-per-shutdown-phase: 30s
+
+  # ---------------------------------------------------------------------------
+  # Database
+  # ---------------------------------------------------------------------------
+  datasource:
+    # createDatabaseIfNotExist is deliberately ABSENT (it is present in the dev URL).
+    # In production the schema is created by the MySQL container's init, and an app
+    # that can create databases is an app that can silently create the wrong one
+    # after a typo in DB_NAME — then run Flyway into it and look healthy.
+    url: jdbc:mysql://${DB_HOST:mysql}:${DB_PORT:3306}/${DB_NAME:pg_manager}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=${TZ:Asia/Kolkata}&characterEncoding=UTF-8&useUnicode=true&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048&useServerPrepStmts=true
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+    hikari:
+      pool-name: pgm-pool
+      maximum-pool-size: ${DB_POOL_MAX:30}
+      minimum-idle: ${DB_POOL_MIN:10}
+
+      # Fail a request that cannot get a connection in 20s rather than letting
+      # Tomcat threads pile up behind an exhausted pool.
+      connection-timeout: 20000
+      validation-timeout: 5000
+      idle-timeout: 300000
+
+      # MUST be lower than MySQL's wait_timeout (600s in mysql/my.cnf). If the server
+      # closes an idle connection the pool still considers valid, the next query on it
+      # fails with "communications link failure". 540s leaves a 60s margin.
+      max-lifetime: 540000
+
+      # Log a warning when a connection is held for over 30s. Almost always an
+      # @Transactional method doing I/O — or a JdbcTemplate loop that should be a
+      # single batched query.
+      leak-detection-threshold: 30000
+
+      # Cheap liveness probe. Connector/J implements JDBC4 isValid(), so no query is
+      # actually sent; this is here as an explicit fallback.
+      connection-test-query: SELECT 1
+
+  jpa:
+    hibernate:
+      # Unchanged from dev and must stay `validate`. The schema belongs to Flyway;
+      # `update` in production would let Hibernate silently alter live tables.
+      ddl-auto: validate
+    open-in-view: false
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false          # dev-only pretty printing; pure overhead here
+        generate_statistics: false
+        jdbc:
+          batch_size: 50
+          time_zone: ${TZ:Asia/Kolkata}
+        order_inserts: true
+        order_updates: true
+        query:
+          in_clause_parameter_padding: true   # better statement-cache reuse
+
+  # ---------------------------------------------------------------------------
+  # Flyway
+  # ---------------------------------------------------------------------------
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+    # TRUE in production, unlike the dev default of false.
+    #
+    # Checksum validation is what catches an already-applied migration having been
+    # edited after the fact — which silently leaves production on a different schema
+    # from the one the code expects. If this fails on deploy, do NOT set it back to
+    # false: work out which file changed, and run `flyway repair` only once you are
+    # certain the applied schema is correct.
+    validate-on-migrate: true
+
+    # Refuse to run against a non-empty database with no history table. Turning this
+    # on would let Flyway "adopt" an unknown schema and skip every earlier migration.
+    baseline-on-migrate: false
+
+    # `flyway clean` drops every object in the schema. There is no situation in which
+    # that should be reachable in production.
+    clean-disabled: true
+
+    # NOTE on rolling back across a migration: Flyway's default
+    # ignore-migration-patterns is `*:future`, so deploying an OLDER jar over a
+    # database that has newer migrations applied does not fail here — it fails a
+    # moment later, in Hibernate's ddl-auto=validate, with a less obvious message.
+    # scripts/rollback.sh detects and warns about this case before you hit it.
+
+  # ---------------------------------------------------------------------------
+  # Redis
+  # ---------------------------------------------------------------------------
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      # Short timeouts on purpose. The cache is fail-open, so a slow Redis must
+      # degrade to a direct database read quickly rather than adding its latency to
+      # every request on top of the query it was meant to avoid.
+      timeout: 2000ms
+      connect-timeout: 2000ms
+      lettuce:
+        pool:
+          enabled: true
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+          max-wait: 1000ms
+        shutdown-timeout: 200ms
+
+  # ---------------------------------------------------------------------------
+  # Mail — inherited from application.yml; only the pool timeouts differ.
+  # An unreachable SMTP host must not hang the outbox dispatcher indefinitely.
+  # ---------------------------------------------------------------------------
+  mail:
+    properties:
+      mail:
+        smtp:
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
+  # Cuts a little startup time and a lot of memory; nothing here exposes JMX beans.
+  jmx:
+    enabled: false
+
+  threads:
+    virtual:
+      # Left OFF. Virtual threads pin to their carrier inside synchronized blocks,
+      # which both Hikari's connection acquisition path and BCrypt hit. Enabling this
+      # without load-testing the pool behaviour is a good way to make throughput worse.
+      enabled: false
+
+# =============================================================================
+# Actuator — on a SEPARATE PORT. This is the single most important choice in
+# this file, and it is doing three jobs at once:
+#
+#   1. api_request_log stays clean. ApiLogFilter has no path exclusions
+#      (shouldNotFilter only consults logging.api.enabled), so a health probe on the
+#      main port would be persisted like any other request. At a 15s interval that is
+#      ~5,700 rows a day per probe source, on the fastest-growing table in the schema.
+#      Spring Boot puts management endpoints in a child context, and filter beans from
+#      the parent are not registered there — so probes never reach the filter.
+#
+#   2. It is unreachable from the internet. The port is not published by
+#      docker-compose.yml, and nginx proxies exactly one path to it
+#      (/actuator/health/readiness) rather than the prefix.
+#
+#   3. It needs no change to SecurityConfig. The parent context's filter chain does
+#      not apply to the management port either — which is the flip side of the same
+#      coin, and precisely WHY points 1 and 2 are load-bearing: everything below is
+#      unauthenticated to anyone who can reach the port.
+# =============================================================================
+management:
+  server:
+    port: ${MANAGEMENT_PORT:9091}
+    # Bind to all interfaces within the container network namespace so the nginx
+    # container can reach it; the port is not published to the host.
+    address: 0.0.0.0
+
+  endpoints:
+    web:
+      exposure:
+        # Minimum viable set. `env`, `configprops`, `beans`, `mappings` and
+        # `heapdump` are all left off — on an unauthenticated port, `env` alone
+        # would hand over the datasource password and the JWT secret.
+        include: health,info,metrics
+      base-path: /actuator
+
+  endpoint:
+    health:
+      # Never expose component detail. Aggregated UP/DOWN only, so the public
+      # /health endpoint cannot be used to fingerprint the infrastructure.
+      show-details: never
+      show-components: never
+      probes:
+        enabled: true
+      group:
+        # Liveness = "is this JVM still functioning". Deliberately does NOT include
+        # the database: a MySQL outage must not cause the container to be reported
+        # dead and restarted, because restarting the API does not fix MySQL and a
+        # crash-loop makes recovery slower.
+        liveness:
+          include: livenessState,ping
+        # Readiness = "can this instance serve requests". Includes the database,
+        # because it cannot. Used by the Docker HEALTHCHECK, by
+        # `depends_on: service_healthy`, and by deploy.sh's rollout gate.
+        #
+        # Redis is EXCLUDED on purpose: the cache is fail-open (CacheErrorHandler
+        # swallows failures and falls through to a direct DB read), so a Redis
+        # outage degrades latency but not correctness. Including it would take a
+        # perfectly serviceable instance out of rotation and, during a deploy, would
+        # make deploy.sh roll back a healthy release.
+        readiness:
+          include: readinessState,db
+    info:
+      enabled: true
+
+  health:
+    # Explicitly off rather than merely excluded from the groups above — this also
+    # keeps it out of the aggregate status reported at /actuator/health.
+    redis:
+      enabled: false
+    mail:
+      # Would open an SMTP connection on every probe, and is meaningless when
+      # EMAIL_ENABLED is false.
+      enabled: false
+    diskspace:
+      enabled: true
+      threshold: 500MB
+
+  info:
+    env:
+      enabled: true
+    java:
+      enabled: true
+    os:
+      enabled: true
+
+  metrics:
+    tags:
+      application: pg-manager-backend
+      environment: production
+
+# =============================================================================
+# Application settings
+# =============================================================================
+app:
+  security:
+    # NO DEFAULT. A missing JWT_SECRET fails the context at startup.
+    #
+    # This is the whole point of the prod profile: application.yml carries a
+    # committed development secret, and inheriting it in production would mean every
+    # deployment of this codebase signs tokens with a value that is public in the
+    # repository — trivially forgeable admin tokens for any organization.
+    #
+    # Changing it later invalidates all issued tokens AND every printed tenant
+    # self check-in QR code (SelfCheckinTokenService signs the URL with the same key).
+    jwt-secret: ${JWT_SECRET}
+    access-token-minutes: ${ACCESS_TOKEN_MINUTES:30}
+    refresh-token-days: ${REFRESH_TOKEN_DAYS:14}
+
+  cache:
+    enabled: ${CACHE_ENABLED:true}
+
+  # Origin embedded in the tenant self check-in QR. Must be the public HTTPS domain:
+  # a tenant scans this on a phone that is not on the LAN, and the dev default is a
+  # private 192.168.x.x address that would simply not resolve for them.
+  public-base-url: ${APP_PUBLIC_BASE_URL}
+
+  messaging:
+    email:
+      enabled: ${EMAIL_ENABLED:false}
+      from: ${EMAIL_FROM:no-reply@pgmanager.app}
+      from-name: ${EMAIL_FROM_NAME:PG Manager}
+
+# =============================================================================
+# API docs
+#
+# Off by default. The OpenAPI document enumerates every endpoint, every role guard
+# and every DTO field in the system — a complete map for anyone probing the API.
+# nginx also returns 403 for these paths, so enabling this alone does not expose
+# them; both locks have to be opened.
+# =============================================================================
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}
+    path: /swagger-ui.html
+
+# =============================================================================
+# Logging
+#
+# Two destinations: stdout (captured by Docker's json-file driver, rotated at
+# 10m x 5 by docker-compose.yml) and a rolling file on the api_logs volume for
+# anything that needs to outlive the container.
+#
+# Note this is application logging only. The per-request audit trail is the
+# separate `apilog` framework writing to api_request_log — its configuration is
+# inherited from application.yml and is not repeated here.
+# =============================================================================
+logging:
+  level:
+    root: INFO
+    com.pgmanager: ${LOG_LEVEL_APP:INFO}
+
+    # Explicitly pinned rather than left to inherit, because each of these is a
+    # known source of production noise or a known leak:
+    org.springframework: WARN
+    org.hibernate: WARN
+    # WARN, not INFO: at INFO this logs every statement's bind parameters, which for
+    # this schema means tenant mobile numbers and payment amounts in plain text.
+    org.hibernate.SQL: WARN
+    org.hibernate.orm.jdbc.bind: WARN
+    com.zaxxer.hikari: WARN
+    # INFO so migration application is visible in the deploy log — it is the single
+    # most useful line when a release fails to start.
+    org.flywaydb: INFO
+    # WARN: at INFO, Spring Security logs an entry per authentication attempt.
+    org.springframework.security: WARN
+    org.springframework.web: WARN
+
+  file:
+    name: /app/logs/pg-manager.log
+
+  logback:
+    rollingpolicy:
+      file-name-pattern: /app/logs/pg-manager.%d{yyyy-MM-dd}.%i.log.gz
+      max-file-size: 50MB
+      # Hard ceiling across all files. The volume is not unlimited, and an
+      # unbounded log directory eventually stops the container from writing at all.
+      total-size-cap: 1GB
+      max-history: 14
+      clean-history-on-start: true
+
+  pattern:
+    # Console: no timestamp. Docker's json-file driver already records one per line,
+    # and two timestamps per entry makes `docker compose logs` hard to read.
+    console: "%-5level [%thread] %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{40} - %msg%n"
