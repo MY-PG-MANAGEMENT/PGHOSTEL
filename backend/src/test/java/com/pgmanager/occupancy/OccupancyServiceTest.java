@@ -16,6 +16,7 @@ import com.pgmanager.occupancy.dto.OccupancyDtos.OccupancyResponse;
 import com.pgmanager.occupancy.dto.OccupancyDtos.TransferResult;
 import com.pgmanager.pricing.PropertySharingPrice;
 import com.pgmanager.pricing.PropertySharingPriceRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -55,6 +56,14 @@ class OccupancyServiceTest {
     @Mock com.pgmanager.tenant.TenantLoginService tenantLoginService;
     @Mock com.pgmanager.tenant.TenantArchiveService tenantArchiveService;
     @Mock com.pgmanager.billing.CheckoutInvoiceService checkoutInvoiceService;
+    // The assert* methods are void, so a default mock already behaves like an unrestricted
+    // owner for them. unrestricted() is stubbed explicitly because its default is false.
+    @Mock com.pgmanager.security.PropertyAccessGuard propertyAccessGuard;
+
+    @BeforeEach
+    void unrestrictedOwner() {
+        lenient().when(propertyAccessGuard.unrestricted()).thenReturn(true);
+    }
 
     @InjectMocks OccupancyService service;
 

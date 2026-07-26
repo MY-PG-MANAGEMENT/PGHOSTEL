@@ -2,6 +2,7 @@ package com.pgmanager.tenant;
 
 import com.pgmanager.common.api.ApiResponse;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.security.PropertyAccessGuard;
 import com.pgmanager.selfcheckin.SelfCheckinTokenService;
 import com.pgmanager.tenant.dto.TenantDtos.TenantArchiveRequest;
 import com.pgmanager.tenant.dto.TenantDtos.TenantCreateRequest;
@@ -40,6 +41,7 @@ public class TenantController {
     private final SelfCheckinTokenService selfCheckinTokenService;
     private final TenantLoginPolicy tenantLoginPolicy;
     private final TenantLoginService tenantLoginService;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     @PostMapping
     ApiResponse<TenantResponse> create(@Valid @RequestBody TenantCreateRequest request) {

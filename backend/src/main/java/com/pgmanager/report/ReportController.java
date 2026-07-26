@@ -2,6 +2,7 @@ package com.pgmanager.report;
 
 import com.pgmanager.common.api.ApiResponse;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.security.PropertyAccessGuard;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,6 +30,7 @@ import java.util.Map;
 public class ReportController {
     private final CurrentUser currentUser;
     private final JdbcTemplate jdbc;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     /**
      * Rent Collection — one row per invoice raised for the given month, with what was
@@ -50,6 +52,9 @@ public class ReportController {
     @GetMapping("/rent-collection")
     ApiResponse<Map<String, Object>> rentCollection(@RequestParam(required = false) Long propertyId,
                                                     @RequestParam(required = false) String month) {
+        // Scope to what this login may see: unchanged for an owner; a property-scoped
+        // login gets their own property substituted in, or a 403/400.
+        propertyId = propertyAccessGuard.resolvePropertyId(propertyId);
         Long org = currentUser.organizationId();
         YearMonth ym = parseMonth(month);
         LocalDate start = ym.atDay(1), end = ym.atEndOfMonth();
@@ -173,6 +178,9 @@ public class ReportController {
     ApiResponse<Map<String, Object>> outstandingDues(@RequestParam(required = false) Long propertyId,
                                                      @RequestParam(required = false) String month,
                                                      @RequestParam(required = false) Long partyId) {
+        // Scope to what this login may see: unchanged for an owner; a property-scoped
+        // login gets their own property substituted in, or a 403/400.
+        propertyId = propertyAccessGuard.resolvePropertyId(propertyId);
         Long org = currentUser.organizationId();
         YearMonth ym = parseMonth(month);
         LocalDate monthEnd = ym.atEndOfMonth();
@@ -272,6 +280,9 @@ public class ReportController {
     ApiResponse<Map<String, Object>> expenses(@RequestParam(required = false) Long propertyId,
                                               @RequestParam(required = false) String month,
                                               @RequestParam(required = false) String category) {
+        // Scope to what this login may see: unchanged for an owner; a property-scoped
+        // login gets their own property substituted in, or a 403/400.
+        propertyId = propertyAccessGuard.resolvePropertyId(propertyId);
         Long org = currentUser.organizationId();
         YearMonth ym = parseMonth(month);
 
@@ -341,6 +352,9 @@ public class ReportController {
     ApiResponse<Map<String, Object>> profitLoss(@RequestParam(required = false) Long propertyId,
                                                 @RequestParam(required = false) String from,
                                                 @RequestParam(required = false) String to) {
+        // Scope to what this login may see: unchanged for an owner; a property-scoped
+        // login gets their own property substituted in, or a 403/400.
+        propertyId = propertyAccessGuard.resolvePropertyId(propertyId);
         Long org = currentUser.organizationId();
         LocalDate today = LocalDate.now();
         LocalDate start = parseDate(from, YearMonth.from(today).atDay(1));

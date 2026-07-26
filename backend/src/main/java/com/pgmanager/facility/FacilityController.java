@@ -15,6 +15,7 @@ import com.pgmanager.pricing.PropertySharingPriceService;
 import com.pgmanager.pricing.dto.SharingPriceDtos.SharingPriceResponse;
 import com.pgmanager.pricing.dto.SharingPriceDtos.SharingPriceUpsertRequest;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.security.PropertyAccessGuard;
 import com.pgmanager.tenant.TenantService;
 import com.pgmanager.tenant.dto.TenantDtos.TenantResponse;
 import jakarta.validation.Valid;
@@ -44,6 +45,7 @@ public class FacilityController {
     private final PropertySharingPriceService sharingPriceService;
     private final CurrentUser currentUser;
     private final JdbcTemplate jdbc;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     @GetMapping("/facilities/tree")
     ApiResponse<FacilityTreeResponse> tree() {
@@ -57,6 +59,7 @@ public class FacilityController {
 
     @PutMapping("/facilities/{facilityId}")
     ApiResponse<FacilityResponse> update(@PathVariable Long facilityId, @Valid @RequestBody FacilityUpdateRequest request) {
+        propertyAccessGuard.assertFacilityInScope(facilityId);
         return ApiResponse.ok(facilityService.toResponse(facilityService.update(currentUser.organizationId(), facilityId, request)));
     }
 
@@ -64,6 +67,7 @@ public class FacilityController {
     // confirmation and then failing.
     @GetMapping("/facilities/{facilityId}/delete-check")
     ApiResponse<DeleteFacilityCheck> deleteCheck(@PathVariable Long facilityId) {
+        propertyAccessGuard.assertFacilityInScope(facilityId);
         return ApiResponse.ok(facilityService.checkDelete(currentUser.organizationId(), facilityId));
     }
 
@@ -71,6 +75,8 @@ public class FacilityController {
     @DeleteMapping("/facilities/{facilityId}")
     @PreAuthorize("hasAnyRole('OWNER','PROPERTY_MANAGER','MANAGER')")
     ApiResponse<DeleteFacilityResult> deleteFacility(@PathVariable Long facilityId) {
+        // A destructive operation, so scope is checked before anything is read or removed.
+        propertyAccessGuard.assertFacilityInScope(facilityId);
         DeleteFacilityResult result = facilityService.deleteNode(currentUser.organizationId(), facilityId);
         String what = switch (result.facilityTypeId()) {
             case FacilityType.FLOOR -> "Floor";
@@ -82,16 +88,23 @@ public class FacilityController {
 
     @GetMapping("/properties/{propertyId}/floors")
     ApiResponse<List<FacilityResponse>> floors(@PathVariable Long propertyId) {
+        propertyAccessGuard.assertCanAccess(propertyId);
         return ApiResponse.ok(facilityService.children(currentUser.organizationId(), propertyId));
     }
 
     @GetMapping("/floors/{floorId}/rooms")
     ApiResponse<List<FacilityResponse>> rooms(@PathVariable Long floorId) {
+        // Floor/room ids identify a node inside a property, so scope is resolved by walking
+        // up the tree rather than from a propertyId the caller supplies.
+        propertyAccessGuard.assertFacilityInScope(floorId);
         return ApiResponse.ok(facilityService.children(currentUser.organizationId(), floorId));
     }
 
     @GetMapping("/rooms/{roomId}/beds")
     ApiResponse<List<FacilityResponse>> beds(@PathVariable Long roomId) {
+        // Floor/room ids identify a node inside a property, so scope is resolved by walking
+        // up the tree rather than from a propertyId the caller supplies.
+        propertyAccessGuard.assertFacilityInScope(roomId);
         return ApiResponse.ok(facilityService.bedsWithOccupancy(currentUser.organizationId(), roomId));
     }
 
@@ -102,6 +115,7 @@ public class FacilityController {
             key = "@currentUser.organizationId() + ':' + #propertyId")
     @GetMapping("/properties/{propertyId}/vacant-beds")
     ApiResponse<List<Map<String, Object>>> vacantBeds(@PathVariable Long propertyId) {
+        propertyAccessGuard.assertCanAccess(propertyId);
         Long org = currentUser.organizationId();
         String base =
                 "bed.facility_id bed_id,bed.facility_name bed_name,bed.facility_code bed_code," +
@@ -136,6 +150,7 @@ public class FacilityController {
 
     @GetMapping("/properties/{propertyId}/report")
     ApiResponse<Map<String, Object>> propertyReport(@PathVariable Long propertyId) {
+        propertyAccessGuard.assertCanAccess(propertyId);
         Long org = currentUser.organizationId();
 
         String bedToProperty =
@@ -194,16 +209,19 @@ public class FacilityController {
 
     @GetMapping("/properties/{propertyId}/room-summary")
     ApiResponse<List<RoomSharingSummary>> roomSummary(@PathVariable Long propertyId) {
+        propertyAccessGuard.assertCanAccess(propertyId);
         return ApiResponse.ok(facilityService.getRoomSummary(currentUser.organizationId(), propertyId));
     }
 
     @GetMapping("/properties/{propertyId}/stats")
     ApiResponse<PropertyStatsResponse> propertyStats(@PathVariable Long propertyId) {
+        propertyAccessGuard.assertCanAccess(propertyId);
         return ApiResponse.ok(facilityService.propertyStats(currentUser.organizationId(), propertyId));
     }
 
     @GetMapping("/properties/{propertyId}/tenants")
     ApiResponse<List<TenantResponse>> tenantsByProperty(@PathVariable Long propertyId) {
+        propertyAccessGuard.assertCanAccess(propertyId);
         List<TenantResponse> tenants = tenantService.listByProperty(currentUser.organizationId(), propertyId);
         org.slf4j.LoggerFactory.getLogger(FacilityController.class)
                 .info("GET /api/properties/{}/tenants: org={} returned {} tenants",
@@ -213,6 +231,7 @@ public class FacilityController {
 
     @GetMapping("/properties/{propertyId}/sharing-prices")
     ApiResponse<List<SharingPriceResponse>> sharingPrices(@PathVariable Long propertyId) {
+        propertyAccessGuard.assertCanAccess(propertyId);
         return ApiResponse.ok(sharingPriceService.list(currentUser.organizationId(), propertyId));
     }
 

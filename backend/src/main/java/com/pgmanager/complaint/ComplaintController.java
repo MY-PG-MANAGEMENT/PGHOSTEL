@@ -2,6 +2,7 @@ package com.pgmanager.complaint;
 
 import com.pgmanager.common.api.ApiResponse;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.security.PropertyAccessGuard;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
@@ -29,10 +30,14 @@ public class ComplaintController {
 
     private final ComplaintService complaintService;
     private final CurrentUser currentUser;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     @GetMapping
     ApiResponse<List<Map<String, Object>>> list(@RequestParam(required = false) Long propertyId,
                                                  @RequestParam(required = false) String status) {
+        // Scope to what this login may see: unchanged for an owner; a property-scoped
+        // login gets their own property substituted in, or a 403/400.
+        propertyId = propertyAccessGuard.resolvePropertyId(propertyId);
         return ApiResponse.ok(complaintService.listForOwner(currentUser.organizationId(), propertyId, status));
     }
 

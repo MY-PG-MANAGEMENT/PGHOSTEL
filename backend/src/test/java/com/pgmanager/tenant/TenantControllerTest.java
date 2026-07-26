@@ -6,6 +6,7 @@ import com.pgmanager.security.CurrentUser;
 import com.pgmanager.selfcheckin.SelfCheckinTokenService;
 import com.pgmanager.tenant.dto.TenantDtos.TenantResponse;
 import org.junit.jupiter.api.BeforeEach;
+import com.pgmanager.security.PropertyAccessGuard;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -44,7 +45,7 @@ class TenantControllerTest {
         TenantLoginPolicy tenantLoginPolicy = mock(TenantLoginPolicy.class);
         TenantLoginService tenantLoginService = mock(TenantLoginService.class);
         tenantArchiveService = mock(TenantArchiveService.class);
-        mvc = MockMvcBuilders.standaloneSetup(new TenantController(tenantService, tenantArchiveService, currentUser, selfCheckinTokenService, tenantLoginPolicy, tenantLoginService))
+        mvc = MockMvcBuilders.standaloneSetup(new TenantController(tenantService, tenantArchiveService, currentUser, selfCheckinTokenService, tenantLoginPolicy, tenantLoginService, passThroughGuard()))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setValidator(validator)
                 .build();
@@ -83,5 +84,17 @@ class TenantControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false));
         verify(tenantService, never()).create(anyLong(), anyLong(), any());
+    }
+
+    /**
+     * Pass-through guard: these tests exercise owner behaviour, and an owner is unrestricted, so
+     * the guard must return the propertyId it was handed. A bare mock would return null and
+     * silently turn every scoped request into an org-wide one, quietly changing what is asserted.
+     */
+    private static PropertyAccessGuard passThroughGuard() {
+        PropertyAccessGuard guard = mock(PropertyAccessGuard.class);
+        lenient().when(guard.resolvePropertyId(any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(guard.unrestricted()).thenReturn(true);
+        return guard;
     }
 }

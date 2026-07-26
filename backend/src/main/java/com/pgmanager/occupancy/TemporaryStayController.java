@@ -3,6 +3,7 @@ package com.pgmanager.occupancy;
 import com.pgmanager.common.api.ApiResponse;
 import com.pgmanager.common.cache.CacheConfig;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.security.PropertyAccessGuard;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -37,6 +38,7 @@ public class TemporaryStayController {
 
     private final JdbcTemplate jdbc;
     private final CurrentUser currentUser;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     private static final String LIST_SQL = """
             SELECT fp.facility_party_id, fp.party_id, fp.facility_id AS bed_id,
@@ -73,6 +75,7 @@ public class TemporaryStayController {
     ApiResponse<Map<String, Object>> list(@RequestParam Long propertyId,
                                           @RequestParam(required = false) String status,
                                           @RequestParam(required = false) String q) {
+        propertyAccessGuard.assertCanAccess(propertyId);
         Long org = currentUser.organizationId();
         LocalDate today = LocalDate.now();
         List<Map<String, Object>> rows = jdbc.queryForList(LIST_SQL, org, propertyId);

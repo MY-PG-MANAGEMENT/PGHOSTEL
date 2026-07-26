@@ -5,6 +5,7 @@ import com.pgmanager.common.api.ApiResponse;
 import com.pgmanager.common.exception.BadRequestException;
 import com.pgmanager.common.exception.NotFoundException;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.security.PropertyAccessGuard;
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
@@ -49,6 +50,7 @@ public class ExpenseController {
     private final JdbcTemplate jdbc;
     private final AuditService auditService;
     private final ExpenseWriter expenseWriter;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     // String constants, no master table (see docs/EXPENSES_SCHEMA_MAPPING.md). Categories are
     // only ever added — an existing row's category must keep resolving, and DEPOSIT_REFUND is
@@ -64,6 +66,9 @@ public class ExpenseController {
     @GetMapping("/dashboard")
     ApiResponse<Map<String, Object>> dashboard(@RequestParam(required = false) Long propertyId,
                                                @RequestParam(required = false) String month) {
+        // Scope to what this login may see: unchanged for an owner; a property-scoped
+        // login gets their own property substituted in, or a 403/400.
+        propertyId = propertyAccessGuard.resolvePropertyId(propertyId);
         Long org = currentUser.organizationId();
         YearMonth ym = parseMonth(month);
         LocalDate start = ym.atDay(1), end = ym.atEndOfMonth();
@@ -149,6 +154,9 @@ public class ExpenseController {
                                           @RequestParam(required = false) String category,
                                           @RequestParam(defaultValue = "0") int page,
                                           @RequestParam(defaultValue = "25") int size) {
+        // Scope to what this login may see: unchanged for an owner; a property-scoped
+        // login gets their own property substituted in, or a 403/400.
+        propertyId = propertyAccessGuard.resolvePropertyId(propertyId);
         Long org = currentUser.organizationId();
         int safeSize = Math.min(Math.max(size, 1), 100);
         StringBuilder sql = new StringBuilder(

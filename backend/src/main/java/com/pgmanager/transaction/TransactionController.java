@@ -3,6 +3,7 @@ package com.pgmanager.transaction;
 import com.pgmanager.common.api.ApiResponse;
 import com.pgmanager.common.exception.BadRequestException;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.security.PropertyAccessGuard;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,10 +35,14 @@ import java.util.Map;
 public class TransactionController {
     private final CurrentUser currentUser;
     private final JdbcTemplate jdbc;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     @GetMapping
     ApiResponse<Map<String, Object>> ledger(@RequestParam(required = false) Long propertyId,
                                             @RequestParam(required = false) String month) {
+        // Scope the request to what this login may see: an owner keeps the org-wide view, a
+        // property-scoped login gets their own property substituted in (or a 403/400).
+        propertyId = propertyAccessGuard.resolvePropertyId(propertyId);
         Long org = currentUser.organizationId();
         YearMonth ym = parseMonth(month);
         LocalDate start = ym.atDay(1), end = ym.atEndOfMonth();

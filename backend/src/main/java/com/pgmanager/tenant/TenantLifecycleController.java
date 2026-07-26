@@ -7,6 +7,7 @@ import com.pgmanager.occupancy.OccupancyService;
 import com.pgmanager.occupancy.dto.OccupancyDtos.BedAssignRequest;
 import com.pgmanager.occupancy.dto.OccupancyDtos.CheckoutRequest;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.security.PropertyAccessGuard;
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
@@ -35,6 +36,7 @@ public class TenantLifecycleController {
     private final CurrentUser currentUser;
     private final JdbcTemplate jdbc;
     private final OccupancyService occupancyService;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     @GetMapping("/emergency-contacts")
     ApiResponse<List<Map<String, Object>>> contacts(@PathVariable Long partyId) {

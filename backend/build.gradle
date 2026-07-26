@@ -23,6 +23,12 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-mail'
 	implementation 'org.springframework.boot:spring-boot-starter-cache'
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	// Health probes for the container HEALTHCHECK and the nginx /health endpoint.
+	// Exposed on a SEPARATE management port in the prod profile (see application-prod.yml):
+	// the management child context does not inherit ApiLogFilter, so probes are not
+	// written to api_request_log, and it sits outside SecurityConfig's filter chain —
+	// which is exactly why that port must never be published or proxied wholesale.
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0'
 
 

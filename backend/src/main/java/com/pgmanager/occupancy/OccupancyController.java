@@ -14,6 +14,7 @@ import com.pgmanager.occupancy.dto.OccupancyDtos.TransferResult;
 import com.pgmanager.billing.MoveInBillingService;
 import com.pgmanager.common.cache.EvictOccupancyCaches;
 import com.pgmanager.security.CurrentUser;
+import com.pgmanager.security.PropertyAccessGuard;
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
@@ -44,6 +45,7 @@ public class OccupancyController {
     private final JdbcTemplate jdbc;
     private final MoveInBillingService moveInBillingService;
     private final com.pgmanager.billing.CheckoutInvoiceService checkoutInvoiceService;
+    private final PropertyAccessGuard propertyAccessGuard;
 
     @PostMapping("/assign-bed")
     @Transactional

@@ -1,0 +1,329 @@
+# =============================================================================
+# Production CI/CD — build, test, publish, deploy
+#
+#   push to main   -> test, build arm64 image, publish to GHCR, deploy to Oracle Cloud
+#   pull request   -> test only (never builds or deploys)
+#   manual         -> workflow_dispatch, with an option to skip tests for a hotfix
+#
+# ---------------------------------------------------------------------------
+# REQUIRED REPOSITORY SECRETS  (Settings -> Secrets and variables -> Actions)
+#
+#   SSH_HOST          public IP or hostname of the Oracle Cloud instance
+#   SSH_USER          ubuntu   (the default user on Oracle's Ubuntu 24.04 image)
+#   SSH_PRIVATE_KEY   full private key, including the BEGIN/END lines
+#   SSH_PORT          22       (optional; defaults to 22)
+#
+# GHCR needs no secret — GITHUB_TOKEN authenticates it, scoped by the `packages:
+# write` permission declared below.
+#
+# REQUIRED REPOSITORY VARIABLES (Settings -> Secrets and variables -> Variables)
+#
+#   DEPLOY_PATH       /opt/pgmanager/deployment
+# ---------------------------------------------------------------------------
+# =============================================================================
+
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      # Documentation changes must not trigger a production deploy.
+      - '**.md'
+      - 'docs/**'
+      - 'owner_app/**'          # the Flutter app ships separately
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests (emergency hotfix only)'
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}-backend
+
+# Serialise deploys. Two concurrent runs would race on `docker compose up` and on
+# the .env rewrite in deploy.sh, and could leave the host pinned to the older image.
+#
+# cancel-in-progress is FALSE on purpose: cancelling a run mid-deploy is far worse
+# than queuing behind it — it can abort between `compose up` and the health gate,
+# skipping the automatic rollback and leaving a broken container serving.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+
+  # ===========================================================================
+  # 1. Test
+  #
+  # Runs on the GitHub runner, not inside the image build. The runner has a Docker
+  # daemon, so the Testcontainers-based integration tests actually execute here —
+  # unlike a local developer machine, where TEST_PLAN.md notes they auto-skip.
+  # This is therefore the only place they run, which is exactly why the deploy
+  # depends on it.
+  # ===========================================================================
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    if: ${{ !inputs.skip_tests }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # Only write the dependency cache from the default branch, so a PR cannot
+          # poison the cache every later build reads.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Run tests
+        working-directory: backend
+        run: ./gradlew test --no-daemon --stacktrace
+
+      - name: Publish test report
+        # `always()`: a failing build is precisely when the report is needed.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            backend/build/reports/tests/
+            backend/build/test-results/
+          retention-days: 14
+
+  # ===========================================================================
+  # 2. Build and publish
+  #
+  # Target platform is linux/arm64 ONLY — the Oracle Cloud Always Free shape is
+  # Ampere A1. Building amd64 as well would double the build time for an image
+  # nothing runs.
+  #
+  # PERFORMANCE NOTE: this emulates arm64 through QEMU, which makes a Gradle build
+  # roughly 3-5x slower (expect ~15 min cold, ~4 min warm with the cache below).
+  # If native ARM runners are available to this repository — free for public repos,
+  # billed for private — change `runs-on` to `ubuntu-24.04-arm` and DELETE the QEMU
+  # step. Everything else works unchanged, and the build drops to a few minutes.
+  # ===========================================================================
+  build:
+    name: Build and push image
+    runs-on: ubuntu-24.04
+    needs: [test]
+    # `always()` combined with the explicit result checks lets this run when the test
+    # job was SKIPPED (the hotfix path) but not when it FAILED.
+    if: |
+      always() &&
+      github.event_name != 'pull_request' &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped')
+    timeout-minutes: 45
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.short_sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image metadata
+        id: meta
+        run: |
+          echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # Registers binfmt handlers so the arm64 build steps can execute.
+      # DELETE THIS STEP if you switch runs-on to a native ARM runner.
+      - name: Set up QEMU (arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .                              # repository root — see .dockerignore
+          file: deployment/Dockerfile
+          platforms: linux/arm64
+          push: true
+          provenance: false                       # keeps the registry listing clean
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.short_sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          build-args: |
+            BUILD_VERSION=${{ steps.meta.outputs.short_sha }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}
+          # GitHub Actions cache backend. `mode=max` caches intermediate stages too,
+          # which is what makes the Gradle dependency layer reusable across runs —
+          # the single biggest saving under QEMU.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### Image published"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Tag | \`${{ steps.meta.outputs.short_sha }}\` |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Platform | linux/arm64 |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ===========================================================================
+  # 3. Deploy
+  #
+  # The heavy lifting is in deployment/scripts/deploy.sh on the host, not inlined
+  # here. That is deliberate: the deploy logic — health gating, automatic rollback,
+  # log ownership, pruning — must be runnable by hand during an incident when
+  # GitHub Actions is not the tool you want to be reaching for.
+  # ===========================================================================
+  deploy:
+    name: Deploy to Oracle Cloud
+    runs-on: ubuntu-24.04
+    needs: [build]
+    if: github.ref == 'refs/heads/main' && needs.build.result == 'success'
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: https://${{ vars.DOMAIN_NAME }}
+
+    steps:
+      # ---------------------------------------------------------------------
+      # Back up BEFORE deploying.
+      #
+      # Flyway migrations are forward-only. If a release ships a migration that
+      # corrupts or drops data, this dump is the only way back — and it has to have
+      # been taken before the migration ran, not after someone noticed.
+      # ---------------------------------------------------------------------
+      - name: Pre-deploy database backup
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            cd ${{ vars.DEPLOY_PATH }}
+            ./scripts/backup.sh
+
+      - name: Pull image and roll out
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            cd ${{ vars.DEPLOY_PATH }}
+
+            # GITHUB_TOKEN is short-lived and scoped to this run, which is why the
+            # registry login happens here per-deploy rather than storing a long-lived
+            # personal access token on the host.
+            echo "${{ secrets.GITHUB_TOKEN }}" \
+              | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+            # deploy.sh pulls, recreates only the api service, waits on the readiness
+            # healthcheck, and rolls back to the previous image if it does not come up.
+            # A non-zero exit here means the rollback already happened.
+            ./scripts/deploy.sh ${{ needs.build.outputs.image_tag }}
+
+            docker logout ${{ env.REGISTRY }}
+
+      # ---------------------------------------------------------------------
+      # Independent verification.
+      #
+      # From outside the host, through Cloudflare, DNS, TLS and nginx — the path a
+      # real user takes. deploy.sh's internal container probe cannot see a broken
+      # certificate or a bad nginx config.
+      # ---------------------------------------------------------------------
+      - name: Verify public endpoint
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 10); do
+            CODE=$(curl -fsS -o /dev/null -w '%{http_code}' --max-time 15 \
+                   "https://${{ vars.DOMAIN_NAME }}/health" || echo 000)
+            if [ "$CODE" = "200" ]; then
+              echo "Public health check passed"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $CODE — retrying in 10s"
+            sleep 10
+          done
+          echo "::error::Public endpoint did not return 200 after the deploy."
+          echo "::error::The container may be healthy while nginx/TLS/DNS is not."
+          echo "::error::Investigate on the host: ./scripts/healthcheck.sh"
+          exit 1
+
+      - name: Post-deploy stack report
+        if: always()
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            cd ${{ vars.DEPLOY_PATH }}
+            ./scripts/healthcheck.sh || true
+
+      # ---------------------------------------------------------------------
+      # Failure notice.
+      #
+      # deploy.sh has already rolled back by the time this runs — this step reports,
+      # it does not remediate. Rolling back again from here would risk fighting the
+      # script's own recovery.
+      # ---------------------------------------------------------------------
+      - name: Report failure
+        if: failure()
+        run: |
+          {
+            echo "### Deploy failed"
+            echo ""
+            echo "Attempted tag: \`${{ needs.build.outputs.image_tag }}\`"
+            echo ""
+            echo "\`deploy.sh\` rolls back automatically when the new container fails"
+            echo "its readiness check, so the previous version is most likely already"
+            echo "serving. Confirm on the host:"
+            echo ""
+            echo '```'
+            echo "cd ${{ vars.DEPLOY_PATH }}"
+            echo "./scripts/healthcheck.sh"
+            echo "docker compose logs --tail=100 api"
+            echo '```'
+            echo ""
+            echo "To roll back by hand: \`./scripts/rollback.sh <previous-tag>\`"
+            echo ""
+            echo "If the release included a Flyway migration, read the scope warning"
+            echo "at the top of \`rollback.sh\` before rolling back — migrations are"
+            echo "forward-only and an older image may fail schema validation."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1

@@ -24,3 +24,42 @@ owner_app/.metadata
 *.class
 /bin/
 backend/bin/
+
+# =============================================================================
+# Deployment
+#
+# `.env` above already matches deployment/.env (a pattern with no slash matches at
+# any depth), but it is restated here because getting it wrong publishes the
+# database password, the Redis password and the JWT signing key — and the JWT key
+# also signs every tenant self check-in QR link.
+#
+# Verify at any time with:  git check-ignore -v deployment/.env
+# =============================================================================
+deployment/.env
+deployment/.env.local
+deployment/.env.*
+!deployment/.env.example
+
+# Backups contain every tenant's personal data. Never in git.
+deployment/backups/*
+!deployment/backups/.gitkeep
+
+# Bind-mounted container logs.
+deployment/logs/*
+!deployment/logs/.gitkeep
+
+# Written by deploy.sh to record the last known-good image for rollback.
+deployment/.last-good-image
+
+# TLS material, in case anything is ever staged outside the certbot volume.
+deployment/nginx/certbot/*
+!deployment/nginx/certbot/.gitkeep
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+
+# Flutter web build output, if it is rsynced into the nginx document root.
+deployment/nginx/www/*
+!deployment/nginx/www/index.html
