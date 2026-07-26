@@ -743,12 +743,6 @@ erDiagram
     date    end_date
     varchar status
   }
-  SUBSCRIPTION_PLAN {
-    bigint  plan_id PK
-    varchar plan_code UK
-    decimal price_monthly
-    int     property_limit
-  }
   SYSTEM_SETTING {
     varchar setting_key PK
     varchar setting_value
@@ -756,14 +750,13 @@ erDiagram
   }
       </pre>
     </div>
-    <p class="cap">Fig. 09 — Platform. <code>subscription.plan_code</code> ↔ <code>subscription_plan.plan_code</code> is a logical link.</p>
+    <p class="cap">Fig. 09 — Platform. <code>subscription.plan_code</code> is a bare string: the <code>subscription_plan</code> catalogue it used to point at was dropped in V29 along with the Plans admin screen.</p>
     <div class="tbl-wrap"><table>
       <thead><tr><th>Table</th><th>PK</th><th>Key FKs</th><th>Purpose</th></tr></thead>
       <tbody>
         <tr><td class="tname"><code>feature_master</code></td><td class="mono">feature_id</td><td class="fk">—</td><td>Feature catalog incl. channel codes EMAIL/WHATSAPP and <code>TENANT_LOGIN</code>.</td></tr>
         <tr><td class="tname"><code>organization_feature</code></td><td class="mono">organization_feature_id</td><td class="fk">→ org, → feature_master</td><td>Which features/channels an org has enabled (opt-in; unique per org+feature).</td></tr>
-        <tr><td class="tname"><code>subscription</code></td><td class="mono">subscription_id</td><td class="fk">→ org</td><td>Active plan window for an org.</td></tr>
-        <tr><td class="tname"><code>subscription_plan</code></td><td class="mono">plan_id</td><td class="fk">—</td><td>BASIC/STANDARD/PREMIUM/ENTERPRISE + <code>price_monthly</code>, <code>property_limit</code>.</td></tr>
+        <tr><td class="tname"><code>subscription</code></td><td class="mono">subscription_id</td><td class="fk">→ org</td><td>Active plan window for an org. <code>plan_code</code> is now unvalidated free text (see caption).</td></tr>
         <tr><td class="tname"><code>system_setting</code></td><td class="mono">setting_key</td><td class="fk">→ user_login</td><td>Platform-wide key/value; <code>encrypted</code> flag (masked as <code>****</code> in admin API).</td></tr>
       </tbody>
     </table></div>
@@ -821,7 +814,7 @@ flowchart TB
     </div>
     <p class="cap">Fig. → — The organization anchors everything; billing &amp; expenses converge in the unified transactions ledger.</p>
 
-    <div class="note warn"><h4>Schema currency — what V24 removed</h4><p>This map reflects the <b>live</b> schema. Migration <b>V24</b> dropped 15 provisioned-but-unwired tables + 4 views: the <code>contact_mech</code> cluster, <code>room_photo</code>, <code>content_reference</code>, <code>recurring_charge</code>, <code>plan_feature</code>, <code>party_role</code>, <code>status_type</code>, <code>login_history</code>, <code>analytics_cache</code>, <code>activity_log</code>, <code>payment_receipt</code>, <code>payment_method_type</code>, and the four reporting views. They are intentionally absent above.</p></div>
+    <div class="note warn"><h4>Schema currency — what V24 and V29 removed</h4><p>This map reflects the <b>live</b> schema. Migration <b>V24</b> dropped 15 provisioned-but-unwired tables + 4 views: the <code>contact_mech</code> cluster, <code>room_photo</code>, <code>content_reference</code>, <code>recurring_charge</code>, <code>plan_feature</code>, <code>party_role</code>, <code>status_type</code>, <code>login_history</code>, <code>analytics_cache</code>, <code>activity_log</code>, <code>payment_receipt</code>, <code>payment_method_type</code>, and the four reporting views. <b>V29</b> then dropped <code>subscription_plan</code> with the Plans admin screen and its endpoints. They are intentionally absent above.</p></div>
     <div class="note"><h4>FK vs. logical relationship</h4><p>Newer JdbcTemplate-based modules (expenses, staff, complaints/notices, scheduled transfers) enforce their cross-module links — <code>property_facility_id</code>, <code>vendor_party_id</code>, <code>expense_id</code> — <b>in application code</b>, not as declared FK constraints. Rows marked <span class="badge">logical</span> above are those.</p></div>
   </section>
 </div>

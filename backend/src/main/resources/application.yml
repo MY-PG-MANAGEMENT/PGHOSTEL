@@ -63,6 +63,33 @@ app:
     access-token-minutes: 30
     refresh-token-days: 14
 
+logging:
+  # Centralised API request/response logging (com.pgmanager.apilog).
+  # Every hit is persisted to api_request_log — no sampling, no path exclusions — and rows are
+  # purged after retention-days by ApiLogCleanupScheduler.
+  api:
+    enabled: ${API_LOG_ENABLED:true}
+    store-request-body: ${API_LOG_STORE_REQUEST_BODY:true}
+    store-response-body: ${API_LOG_STORE_RESPONSE_BODY:true}
+    # Leave on. Off means raw passwords/tokens land in the database in plain text.
+    mask-sensitive-data: ${API_LOG_MASK:true}
+    # Persist off the request thread. false makes the insert inline (handy in tests).
+    async: ${API_LOG_ASYNC:true}
+    retention-days: ${API_LOG_RETENTION_DAYS:10}
+    # Per-payload cap in characters, applied after masking. Keep <= ~16000 for TEXT columns.
+    max-payload-chars: ${API_LOG_MAX_PAYLOAD_CHARS:8000}
+    # Off-peak, and clear of the 01:00 invoice sweep and 00:05 bed-transfer job.
+    cleanup-cron: ${API_LOG_CLEANUP_CRON:0 15 3 * * *}
+    cleanup-batch-size: ${API_LOG_CLEANUP_BATCH_SIZE:5000}
+    cleanup-max-batches-per-run: ${API_LOG_CLEANUP_MAX_BATCHES:200}
+    executor:
+      core-size: ${API_LOG_EXECUTOR_CORE:2}
+      max-size: ${API_LOG_EXECUTOR_MAX:8}
+      # Bounded on purpose: overflow falls back to the caller (backpressure) rather than
+      # discarding rows or growing until the heap dies. See ApiLogAsyncConfig.
+      queue-capacity: ${API_LOG_EXECUTOR_QUEUE:10000}
+      await-termination-seconds: ${API_LOG_EXECUTOR_AWAIT:20}
+
 springdoc:
   swagger-ui:
     path: /swagger-ui.html

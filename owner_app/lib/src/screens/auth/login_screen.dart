@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../app_state.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/app_exception.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/async_action_button.dart';
@@ -52,7 +53,8 @@ class _LoginScreenState extends State<LoginScreen> {
       await state.login(id, _password.text);
       if (mounted) context.go('/dashboard');
     } catch (e) {
-      if (RegExp(r'^\d{10}$').hasMatch(id)) {
+      Object error = e;
+      if (RegExp(r'^\d{10}$').hasMatch(id) && error is! AccessDeniedException) {
         try {
           var result = await state.tenantLogin(id, _password.text);
           if (result['needsOrgSelection'] == true) {
@@ -64,9 +66,14 @@ class _LoginScreenState extends State<LoginScreen> {
           }
           if (mounted) context.go('/tenant');
           return;
-        } catch (_) {/* fall through to the original error */}
+        } catch (tenantError) {
+          // A tenant mobile always fails the username login with a generic credentials error, so
+          // "your organization is deactivated" only ever arrives from the tenant attempt — show it
+          // instead of the misleading original. (The owner attempt's own 403 skips this path above.)
+          if (tenantError is AccessDeniedException) error = tenantError;
+        }
       }
-      if (mounted) AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
+      if (mounted) AppToast.error(context, error.toString().replaceFirst('Exception: ', ''));
     }
   }
 

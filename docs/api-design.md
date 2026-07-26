@@ -36,7 +36,7 @@ V1 accepts cash only. A payment cannot exceed an invoice balance; excess money i
 - `GET /notifications`, `/notifications/{id}`, `/notifications/preferences`
 - `PATCH /notifications/{id}/read`, `/archive`, `/notifications/preferences`
 - `DELETE /notifications/archives`, `POST /notifications`
-- `/super-admin/dashboard`, `/organizations`, `/properties`, `/users`, `/roles`, `/plans`, `/reports/revenue`, `/audit-logs`, `/system-settings`
+- `/super-admin/dashboard`, `/organizations`, `/organizations/{id}/{users,tenants}`, `/users/{id}/reset-password`, `/properties`, `/roles`, `/reports/active-tenants`, `/tenant-rates`, `/audit-logs`, `/system-settings`
 
 Interactive OpenAPI documentation is served at `/swagger-ui.html`.
 

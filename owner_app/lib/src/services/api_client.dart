@@ -13,8 +13,7 @@ class ApiClient {
   final FlutterSecureStorage storage;
    static const String _configuredBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://192.168.1.17'
-        ':8080/api',
+    defaultValue: 'http://192.168.1.17:8080/api',
   );
   final String baseUrl = _configuredBaseUrl;
 
@@ -170,11 +169,13 @@ class ApiClient {
       print('SERVER ERROR');
       print(response.body);
 
-      throw Exception(
-        body is Map
-            ? body['message'] ?? 'Request failed'
-            : 'Request failed',
-      );
+      final message = body is Map
+          ? body['message'] ?? 'Request failed'
+          : 'Request failed';
+      if (response.statusCode == 403) {
+        throw AccessDeniedException(message as String);
+      }
+      throw Exception(message);
     }
 
     if (body is Map<String, dynamic>) {

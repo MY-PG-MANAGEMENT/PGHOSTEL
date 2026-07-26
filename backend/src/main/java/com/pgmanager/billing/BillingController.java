@@ -1,5 +1,6 @@
 package com.pgmanager.billing;
 
+import com.pgmanager.audit.AuditService;
 import com.pgmanager.common.api.ApiResponse;
 import com.pgmanager.common.exception.BadRequestException;
 import com.pgmanager.common.exception.NotFoundException;
@@ -42,6 +43,7 @@ public class BillingController {
     private final NotificationService notificationService;
     private final InvoiceGenerationService invoiceGenerationService;
     private final BillingConfigService billingConfigService;
+    private final AuditService auditService;
 
     @GetMapping("/dashboard")
     ApiResponse<Map<String, Object>> dashboard(@RequestParam(required = false) Long propertyId) {
@@ -354,9 +356,13 @@ public class BillingController {
         return ApiResponse.ok("Invoice written off", null);
     }
 
-    // Soft-cancel an invoice. Only invoices with no collected payment can be
-    // cancelled — anything already paid must be written off / refunded first so
-    // we never orphan a payment_allocation row.
+    // Delete = soft-cancel, and it is reversible via /restore below. Only a PENDING
+    // invoice qualifies: a PARTIAL/OVERDUE/PAID one carries money or a chase history, so
+    // it must go through write-off / refund instead — that keeps every payment_allocation
+    // row attached to a live invoice. The row is never removed, so the
+    // (billing_account_id, invoice_month) idempotency guard in
+    // InvoiceGenerationService.createRecurringInvoice still sees it and will not
+    // re-raise the month the owner just deleted.
     @DeleteMapping("/invoices/{invoiceId}")
     @Transactional
     ApiResponse<Void> deleteInvoice(@PathVariable Long invoiceId) {
@@ -367,15 +373,51 @@ public class BillingController {
                 invoiceId, org);
         if (rows.isEmpty()) throw new NotFoundException("Invoice not found");
         Map<String, Object> inv = rows.getFirst();
-        if ("CANCELLED".equals(inv.get("status"))) {
+        String status = String.valueOf(inv.get("status"));
+        if ("CANCELLED".equals(status)) {
             return ApiResponse.ok("Invoice already cancelled", null);
         }
+        if (!"PENDING".equals(status)) {
+            throw new BadRequestException("Only a pending invoice can be deleted. This one is "
+                    + status.toLowerCase() + " — write it off or refund it instead.");
+        }
+        // Belt and braces: PENDING should always mean nothing collected (a part-paid
+        // invoice is PARTIAL), but never cancel money out from under an allocation.
         if (decimal(inv.get("paid_amount")).compareTo(BigDecimal.ZERO) > 0) {
             throw new BadRequestException("Cannot delete an invoice with collected payments — write it off instead");
         }
         jdbc.update("UPDATE invoice SET status='CANCELLED',updated_at=NOW(),version=version+1 " +
                 "WHERE invoice_id=? AND organization_id=?", invoiceId, org);
+        auditService.log(org, currentUser.userLoginId(), "INVOICE_CANCELLED", "INVOICE", invoiceId,
+                "Pending invoice deleted (soft-cancelled)");
         return ApiResponse.ok("Invoice deleted", null);
+    }
+
+    // Undo of the delete above: CANCELLED → PENDING, putting the invoice back in the
+    // dues lists. It returns to PENDING rather than OVERDUE even when the due date has
+    // passed — every overdue read derives lateness from due_date < CURRENT_DATE over
+    // status IN ('PENDING','PARTIAL','OVERDUE'), so a stale restored invoice shows as
+    // overdue immediately with no status juggling here.
+    @PostMapping("/invoices/{invoiceId}/restore")
+    @Transactional
+    ApiResponse<Map<String, Object>> restoreInvoice(@PathVariable Long invoiceId) {
+        Long org = currentUser.organizationId();
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT status FROM invoice WHERE invoice_id=? AND organization_id=? FOR UPDATE",
+                invoiceId, org);
+        if (rows.isEmpty()) throw new NotFoundException("Invoice not found");
+        String status = String.valueOf(rows.getFirst().get("status"));
+        if ("PENDING".equals(status)) {
+            return ApiResponse.ok("Invoice already active", Map.of("invoiceId", invoiceId, "status", "PENDING"));
+        }
+        if (!"CANCELLED".equals(status)) {
+            throw new BadRequestException("Only a deleted invoice can be restored. This one is " + status.toLowerCase() + ".");
+        }
+        jdbc.update("UPDATE invoice SET status='PENDING',updated_at=NOW(),version=version+1 " +
+                "WHERE invoice_id=? AND organization_id=?", invoiceId, org);
+        auditService.log(org, currentUser.userLoginId(), "INVOICE_RESTORED", "INVOICE", invoiceId,
+                "Cancelled invoice restored to pending");
+        return ApiResponse.ok("Invoice restored", Map.of("invoiceId", invoiceId, "status", "PENDING"));
     }
 
     // Override the charge breakdown of THIS month's invoice only — it never

@@ -1825,34 +1825,12 @@ All responses follow standard envelope:
 
 ---
 
-### 5. Manage Plans & Pricing
+### 5. Manage Plans & Pricing — **REMOVED**
 
-**Screen:** Super Admin Module - Plans & Pricing
-
-#### Endpoint: GET /api/admin/plans
-
-**Response:**
-```json
-{
-  "status": "SUCCESS",
-  "data": {
-    "plans": [
-      {
-        "planId": 1,
-        "planCode": "BASIC",
-        "name": "Basic Plan",
-        "priceMonthly": 999,
-        "propertyLimit": 10,
-        "status": "ACTIVE",
-        "features": [
-          { "feature": "DASHBOARD_VIEW", "enabled": true },
-          { "feature": "PROPERTY_MANAGE", "enabled": true }
-        ]
-      }
-    ]
-  }
-}
-```
+The Plans & Pricing screen, its `/plans` endpoints and the `subscription_plan` table were all
+deleted in **V29**. Nothing consumed the catalogue: billing prices come from
+`property_sharing_price`, and `subscription.plan_code` is a plain string. Do not re-add these
+endpoints without a fresh migration recreating the table.
 
 ---
 

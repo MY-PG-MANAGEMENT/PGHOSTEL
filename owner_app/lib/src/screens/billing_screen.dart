@@ -731,7 +731,9 @@ class _InvoicesTabState extends State<_InvoicesTab> {
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
-                  children: ['ALL', 'PENDING', 'PAID', 'PARTIAL'].map((f) {
+                  // CANCELLED is the deleted-invoice bucket — it is the only way to find
+                  // one again to restore it.
+                  children: ['ALL', 'PENDING', 'PAID', 'PARTIAL', 'CANCELLED'].map((f) {
                     final selected = _filter == f;
                     return Padding(
                       padding: const EdgeInsets.only(right: 8),
@@ -1018,11 +1020,17 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
   // invoice detail endpoint so the sheet can explain how the total is made up.
   List<Map<String, dynamic>>? _items;
   bool _itemsLoading = true;
-  bool _deleting = false;
+  bool _busy = false;
+
+  // Status is held locally, not read from widget.invoice, because deleting and
+  // restoring flip it while the sheet stays open — the parent list only catches up
+  // on the next refresh.
+  late String _status;
 
   @override
   void initState() {
     super.initState();
+    _status = '${invoice['status'] ?? 'PENDING'}';
     _loadItems();
   }
 
@@ -1032,7 +1040,9 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Invoice'),
         content: Text(
-            'Are you sure you want to delete the ${_fmtMonth(invoice['invoice_month'])} invoice for ${invoice['full_name'] ?? 'this tenant'}? This action cannot be undone.'),
+            'Delete the ${_fmtMonth(invoice['invoice_month'])} invoice for ${invoice['full_name'] ?? 'this tenant'}?\n\n'
+            'It stops counting towards dues, and this month will not be raised again automatically. '
+            'You can restore it from here or from the Cancelled filter.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -1047,20 +1057,45 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    setState(() => _deleting = true);
-    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
     try {
       await context
           .read<AppState>()
           .apiClient
           .delete('/billing/invoices/${invoice['invoice_id']}');
       if (!mounted) return;
-      Navigator.pop(context);
+      // Deliberately keep the sheet open on the now-cancelled invoice, so Restore is
+      // right where the owner just deleted it.
+      setState(() {
+        _status = 'CANCELLED';
+        _busy = false;
+      });
       widget.onRefresh();
-      AppToast.successOf(messenger, 'Invoice deleted');
+      AppToast.success(context, 'Invoice deleted — you can restore it below');
     } catch (e) {
       if (!mounted) return;
-      setState(() => _deleting = false);
+      setState(() => _busy = false);
+      AppToast.error(context, '$e'.replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<void> _restore() async {
+    setState(() => _busy = true);
+    try {
+      await context
+          .read<AppState>()
+          .apiClient
+          .post('/billing/invoices/${invoice['invoice_id']}/restore', const {});
+      if (!mounted) return;
+      setState(() {
+        _status = 'PENDING';
+        _busy = false;
+      });
+      widget.onRefresh();
+      AppToast.success(context, 'Invoice restored');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
       AppToast.error(context, '$e'.replaceFirst('Exception: ', ''));
     }
   }
@@ -1326,12 +1361,16 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
     final total = invoice['total_amount'];
     final paid = invoice['paid_amount'];
     final balance = invoice['balance'];
-    final status = '${invoice['status'] ?? 'PENDING'}';
+    final status = _status;
     final color = _statusColor(status);
     final canPay = status == 'PENDING' || status == 'PARTIAL' || status == 'OVERDUE';
     // Only a fresh, unpaid invoice can be re-priced — anything already paid or
     // cancelled keeps its amount.
     final canEdit = status == 'PENDING' && (paid is num ? paid == 0 : true);
+    // Delete is pending-only and reversible; an overdue or part-paid invoice must be
+    // written off instead, so the server rejects it and the icon is not offered.
+    final canDelete = canEdit;
+    final canRestore = status == 'CANCELLED';
 
     return Padding(
       padding: const EdgeInsets.all(24),
@@ -1350,10 +1389,10 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
                 style: IconButton.styleFrom(
                   backgroundColor: PgColors.primary.withValues(alpha: 0.1),
                 ),
-                onPressed: _deleting ? null : _editAmount,
+                onPressed: _busy ? null : _editAmount,
               ),
             if (canEdit) const SizedBox(width: 8),
-            if (status != 'CANCELLED')
+            if (canDelete)
               IconButton(
                 icon: const Icon(Icons.delete_outline),
                 color: PgColors.danger,
@@ -1361,7 +1400,7 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
                 style: IconButton.styleFrom(
                   backgroundColor: PgColors.danger.withValues(alpha: 0.1),
                 ),
-                onPressed: _deleting ? null : _confirmDelete,
+                onPressed: _busy ? null : _confirmDelete,
               ),
             const SizedBox(width: 8),
             IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
@@ -1375,6 +1414,37 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
           _DetailRow('Paid', _rupees(paid)),
           _DetailRow('Balance', _rupees(balance), color: (balance is num && balance > 0) ? PgColors.danger : PgColors.success),
           const SizedBox(height: 20),
+          if (canRestore) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, size: 18, color: PgColors.textSecondary),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'This invoice is deleted, so it is not counted in dues or collections. '
+                      'Nothing was erased — restoring puts it back as pending.',
+                      style: TextStyle(
+                          fontSize: 12, height: 1.3, color: PgColors.textSecondary),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              icon: const Icon(Icons.restore),
+              label: const Text('Restore Invoice'),
+              onPressed: _busy ? null : _restore,
+            ),
+          ],
           if (canPay)
             FilledButton.icon(
               icon: const Icon(Icons.payments_outlined),
