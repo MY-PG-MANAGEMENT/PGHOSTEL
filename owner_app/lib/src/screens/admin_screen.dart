@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../app_state.dart';
+import '../reports/active_tenants_pdf.dart';
+import '../reports/report_ui.dart';
 import '../theme/app_theme.dart';
 import '../utils/money.dart';
 import '../utils/validators.dart';
@@ -28,24 +30,22 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
     (Icons.dashboard_outlined,   Icons.dashboard,    'Dashboard'),
     (Icons.business_outlined,    Icons.business,     'Organizations'),
     (Icons.upload_file_outlined, Icons.upload_file,  'Data Upload'),
-    (Icons.people_outline,       Icons.people,       'Users'),
-    (Icons.sell_outlined,        Icons.sell,         'Plans'),
     (Icons.bar_chart_outlined,   Icons.bar_chart,    'Reports'),
     (Icons.history_outlined,     Icons.history,      'Audit Logs'),
     (Icons.settings_outlined,    Icons.settings,     'System Settings'),
     (Icons.forum_outlined,       Icons.forum,        'Messaging'),
   ];
 
+  // Users live under Organizations → Users / Tenants (that is where passwords are reset),
+  // so there is no top-level Users section. Plans is gone entirely — see V29.
   Widget get _body => switch (_sel) {
     0 => const _AdminDashboard(),
     1 => const _AdminOrganizations(),
     2 => const _AdminDataUpload(),
-    3 => const _AdminUsers(),
-    4 => const _AdminPlans(),
-    5 => const _AdminReports(),
-    6 => const _AdminAuditLogs(),
-    7 => const _AdminSettings(),
-    8 => const _AdminMessaging(),
+    3 => const _AdminReports(),
+    4 => const _AdminAuditLogs(),
+    5 => const _AdminSettings(),
+    6 => const _AdminMessaging(),
     _ => const SizedBox.shrink(),
   };
 
@@ -102,10 +102,18 @@ class _Sidebar extends StatelessWidget {
               child: const Icon(Icons.admin_panel_settings_outlined, color: Colors.white, size: 20),
             ),
             const SizedBox(width: 10),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Admin Console', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: PgColors.ink)),
-              Text('Super Admin', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
-            ]),
+            // Expanded + ellipsis: the sidebar is a fixed 220px, so an
+            // unconstrained Column here overflows as soon as the text gets wider
+            // than the leftover space — which it does under a large system font
+            // scale (and in widget tests, where the test font is wider).
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Admin Console',
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: PgColors.ink)),
+              Text('Super Admin',
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+            ])),
           ]),
         ),
         const Divider(height: 1),
@@ -133,11 +141,16 @@ class _Sidebar extends StatelessWidget {
                       Icon(active ? selIcon : unsel, size: 18,
                           color: active ? PgColors.primary : const Color(0xFF9CA3AF)),
                       const SizedBox(width: 10),
-                      Text(label, style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: active ? FontWeight.w600 : FontWeight.normal,
-                        color: active ? PgColors.primary : PgColors.ink,
-                      )),
+                      // Same reason as the header above: fixed-width sidebar, so
+                      // the longest label ('System Settings') must be allowed to
+                      // ellipsize rather than overflow the row.
+                      Expanded(child: Text(label,
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: active ? FontWeight.w600 : FontWeight.normal,
+                          color: active ? PgColors.primary : PgColors.ink,
+                        ))),
                     ]),
                   ),
                 ),
@@ -1109,6 +1122,75 @@ class _OrgCard extends StatelessWidget {
   }
 }
 
+/// Super-admin password reset, shared by the organization sheet's Users and Tenants tabs.
+/// There is no cross-organization user list any more — a reset always starts from the org
+/// that owns the login, so both callers hand this the `user_login_id` they already have.
+void _showResetPasswordDialog(
+  BuildContext context, {
+  required Object userLoginId,
+  required String name,
+  required String username,
+}) {
+  final api = context.read<AppState>().apiClient;
+  final pwdCtrl = TextEditingController();
+  final confirmCtrl = TextEditingController();
+  final formKey = GlobalKey<FormState>();
+  bool busy = false;
+  showDialog(context: context, builder: (ctx) => StatefulBuilder(
+    builder: (ctx, setDialog) => AlertDialog(
+      title: const Text('Reset Password', style: TextStyle(fontWeight: FontWeight.w700)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      content: Form(
+        key: formKey,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('$name • @$username',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: pwdCtrl,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: 'New password', isDense: true),
+            validator: (v) => (v == null || v.length < 8) ? 'At least 8 characters' : null,
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: confirmCtrl,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: 'Confirm password', isDense: true),
+            validator: (v) => v != pwdCtrl.text ? 'Passwords do not match' : null,
+          ),
+          const SizedBox(height: 8),
+          const Text('The user will be signed out of all active sessions.',
+              style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: busy ? null : () => Navigator.pop(ctx), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: busy ? null : () async {
+            if (!formKey.currentState!.validate()) return;
+            setDialog(() => busy = true);
+            try {
+              await api.post(
+                '/super-admin/users/$userLoginId/reset-password',
+                {'newPassword': pwdCtrl.text},
+              );
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (context.mounted) AppToast.success(context, 'Password reset for @$username');
+            } catch (e) {
+              setDialog(() => busy = false);
+              if (ctx.mounted) AppToast.error(ctx, e.toString().replaceFirst('Exception: ', ''));
+            }
+          },
+          child: busy
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Text('Reset'),
+        ),
+      ],
+    ),
+  ));
+}
+
 class _OrgDetailSheet extends StatefulWidget {
   const _OrgDetailSheet({required this.org, required this.onStatusChanged});
   final Map<String, dynamic> org;
@@ -1120,12 +1202,13 @@ class _OrgDetailSheet extends StatefulWidget {
 class _OrgDetailSheetState extends State<_OrgDetailSheet> with SingleTickerProviderStateMixin {
   late TabController _tabs;
   Map<String, dynamic>? _detail;
+  List<Map<String, dynamic>> _users = [];
   List<Map<String, dynamic>> _tenants = [];
   bool _loading = true;
   Object? _error;
 
   @override
-  void initState() { super.initState(); _tabs = TabController(length: 2, vsync: this); _load(); }
+  void initState() { super.initState(); _tabs = TabController(length: 3, vsync: this); _load(); }
   @override
   void dispose() { _tabs.dispose(); super.dispose(); }
 
@@ -1137,10 +1220,12 @@ class _OrgDetailSheetState extends State<_OrgDetailSheet> with SingleTickerProvi
     setState(() { _loading = true; _error = null; });
     try {
       final detail = await api.get('/super-admin/organizations/$orgId');
+      final users = await api.get('/super-admin/organizations/$orgId/users');
       final tenants = await api.get('/super-admin/organizations/$orgId/tenants');
       if (!mounted) return;
       setState(() {
         _detail = detail;
+        _users = (users['items'] as List? ?? []).cast<Map<String, dynamic>>();
         _tenants = (tenants['items'] as List? ?? []).cast<Map<String, dynamic>>();
         _loading = false;
       });
@@ -1217,7 +1302,11 @@ class _OrgDetailSheetState extends State<_OrgDetailSheet> with SingleTickerProvi
             labelColor: PgColors.primary,
             unselectedLabelColor: const Color(0xFF6B7280),
             indicatorColor: PgColors.primary,
-            tabs: const [Tab(text: 'Overview'), Tab(text: 'Tenants')],
+            tabs: [
+              const Tab(text: 'Overview'),
+              Tab(text: 'Users (${_users.length})'),
+              Tab(text: 'Tenants (${_tenants.length})'),
+            ],
           ),
           const Divider(height: 1),
           Expanded(child: TabBarView(controller: _tabs, children: [
@@ -1242,14 +1331,58 @@ class _OrgDetailSheetState extends State<_OrgDetailSheet> with SingleTickerProvi
                 ),
               ),
             ]),
+            _users.isEmpty
+                ? _EmptyState(icon: Icons.badge_outlined, message: 'No logins in this organization')
+                : ListView.separated(
+                    itemCount: _users.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1, indent: 56),
+                    itemBuilder: (_, i) {
+                      final u = _users[i];
+                      final name = '${u['full_name'] ?? u['username'] ?? '—'}';
+                      final role = '${u['role_type_id'] ?? ''}';
+                      final roleColor = role == 'OWNER' ? PgColors.primary : PgColors.warning;
+                      return ListTile(
+                        leading: Container(
+                          width: 36, height: 36,
+                          decoration: BoxDecoration(color: PgColors.lavender, borderRadius: BorderRadius.circular(10)),
+                          child: Center(child: Text(
+                            name.isNotEmpty ? name[0].toUpperCase() : '?',
+                            style: const TextStyle(color: PgColors.primary, fontWeight: FontWeight.w700, fontSize: 14),
+                          )),
+                        ),
+                        title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                        subtitle: Text('@${u['username']}  •  ${u['mobile_number'] ?? '—'}',
+                            style: const TextStyle(fontSize: 12)),
+                        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                          _RolePill(role, roleColor),
+                          if (role != 'SUPER_ADMIN')
+                            PopupMenuButton<String>(
+                              icon: const Icon(Icons.more_vert, size: 18, color: Color(0xFF9CA3AF)),
+                              tooltip: 'User actions',
+                              padding: EdgeInsets.zero,
+                              onSelected: (v) {
+                                if (v == 'reset') {
+                                  _showResetPasswordDialog(context,
+                                      userLoginId: u['user_login_id'] as Object,
+                                      name: name,
+                                      username: '${u['username']}');
+                                }
+                              },
+                              itemBuilder: (_) => [
+                                const PopupMenuItem(value: 'reset', child: Text('Reset password')),
+                              ],
+                            ),
+                        ]),
+                      );
+                    }),
             _tenants.isEmpty
                 ? _EmptyState(icon: Icons.people_outline, message: 'No active tenants')
                 : ListView.separated(
-                    controller: ctrl,
                     itemCount: _tenants.length,
                     separatorBuilder: (_, __) => const Divider(height: 1, indent: 56),
                     itemBuilder: (_, i) {
                       final t = _tenants[i];
+                      final loginId = t['user_login_id'];
                       return ListTile(
                         leading: Container(
                           width: 36, height: 36,
@@ -1259,6 +1392,29 @@ class _OrgDetailSheetState extends State<_OrgDetailSheet> with SingleTickerProvi
                         title: Text('${t['full_name'] ?? '—'}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                         subtitle: Text('${t['mobile_number'] ?? '—'}  •  Bed: ${t['bed_name'] ?? 'Unassigned'}',
                             style: const TextStyle(fontSize: 12)),
+                        // A tenant only has a login when the org has Tenant Login enabled, so the
+                        // item is disabled rather than hidden — otherwise the missing menu reads
+                        // as a bug instead of "this org has no tenant portal".
+                        trailing: PopupMenuButton<String>(
+                          icon: const Icon(Icons.more_vert, size: 18, color: Color(0xFF9CA3AF)),
+                          tooltip: 'Tenant actions',
+                          padding: EdgeInsets.zero,
+                          onSelected: (v) {
+                            if (v == 'reset' && loginId != null) {
+                              _showResetPasswordDialog(context,
+                                  userLoginId: loginId as Object,
+                                  name: '${t['full_name'] ?? t['username'] ?? '—'}',
+                                  username: '${t['username']}');
+                            }
+                          },
+                          itemBuilder: (_) => [
+                            PopupMenuItem(
+                              value: 'reset',
+                              enabled: loginId != null,
+                              child: Text(loginId != null ? 'Reset password' : 'No portal login'),
+                            ),
+                          ],
+                        ),
                       );
                     }),
           ])),
@@ -1266,6 +1422,23 @@ class _OrgDetailSheetState extends State<_OrgDetailSheet> with SingleTickerProvi
       ]),
     );
   }
+}
+
+class _RolePill extends StatelessWidget {
+  const _RolePill(this.role, this.color);
+  final String role;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: color.withValues(alpha: 0.2)),
+    ),
+    child: Text(role, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color)),
+  );
 }
 
 class _StatPill extends StatelessWidget {
@@ -1992,339 +2165,6 @@ class _ResultStat extends StatelessWidget {
   ]);
 }
 
-// ─── Users ────────────────────────────────────────────────────────────────────
-
-class _AdminUsers extends StatefulWidget {
-  const _AdminUsers();
-  @override
-  State<_AdminUsers> createState() => _AdminUsersState();
-}
-
-class _AdminUsersState extends State<_AdminUsers> {
-  late Future<Map<String, dynamic>> _future;
-  String _query = '';
-
-  @override
-  void initState() { super.initState(); _fetch(); }
-
-  void _fetch() => setState(() {
-    _future = context.read<AppState>().apiClient.get('/super-admin/users');
-  });
-
-  void _resetPassword(Map<String, dynamic> user) {
-    final pwdCtrl = TextEditingController();
-    final confirmCtrl = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-    bool busy = false;
-    showDialog(context: context, builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setDialog) => AlertDialog(
-        title: const Text('Reset Password', style: TextStyle(fontWeight: FontWeight.w700)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        content: Form(
-          key: formKey,
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${user['full_name'] ?? user['username']} • @${user['username']}',
-                style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: pwdCtrl,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'New password', isDense: true),
-              validator: (v) => (v == null || v.length < 8) ? 'At least 8 characters' : null,
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: confirmCtrl,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Confirm password', isDense: true),
-              validator: (v) => v != pwdCtrl.text ? 'Passwords do not match' : null,
-            ),
-            const SizedBox(height: 8),
-            const Text('The user will be signed out of all active sessions.',
-                style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
-          ]),
-        ),
-        actions: [
-          TextButton(onPressed: busy ? null : () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: busy ? null : () async {
-              if (!formKey.currentState!.validate()) return;
-              setDialog(() => busy = true);
-              try {
-                await context.read<AppState>().apiClient.post(
-                  '/super-admin/users/${user['user_login_id']}/reset-password',
-                  {'newPassword': pwdCtrl.text},
-                );
-                if (ctx.mounted) Navigator.pop(ctx);
-                if (mounted) AppToast.success(context, 'Password reset for @${user['username']}');
-              } catch (e) {
-                setDialog(() => busy = false);
-                if (ctx.mounted) AppToast.error(ctx, e.toString().replaceFirst('Exception: ', ''));
-              }
-            },
-            child: busy
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Text('Reset'),
-          ),
-        ],
-      ),
-    ));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(children: [
-      const _PageHeader(title: 'Users', subtitle: 'All registered users across organizations'),
-      const Divider(height: 1),
-      Expanded(child: FutureBuilder<Map<String, dynamic>>(
-        future: _future,
-        builder: (ctx, snap) {
-          if (snap.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-          if (snap.hasError) return ErrorRetryView(error: snap.error!, onRetry: _fetch);
-          final users = (snap.data?['items'] as List? ?? []).cast<Map<String, dynamic>>();
-          final filtered = users.where((u) {
-            final str = '${u['full_name'] ?? ''} ${u['username'] ?? ''}'.toLowerCase();
-            return _query.isEmpty || str.contains(_query.toLowerCase());
-          }).toList();
-          return Column(children: [
-            Container(
-              color: Colors.white,
-              padding: const EdgeInsets.fromLTRB(24, 12, 24, 14),
-              child: TextField(
-                decoration: InputDecoration(
-                  prefixIcon: const Icon(Icons.search, size: 18),
-                  hintText: 'Search users…',
-                  isDense: true,
-                  filled: true, fillColor: const Color(0xFFF9F9FD),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: PgColors.border)),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: PgColors.border)),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: PgColors.primary)),
-                ),
-                onChanged: (v) => setState(() => _query = v),
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(child: filtered.isEmpty
-                ? _EmptyState(icon: Icons.people_outline, message: 'No users found')
-                : ListView.builder(
-                    padding: const EdgeInsets.all(20),
-                    itemCount: filtered.length,
-                    itemBuilder: (_, i) {
-                      final u = filtered[i];
-                      final role = '${u['role_type_id'] ?? ''}';
-                      final roleColor = role == 'SUPER_ADMIN' ? PgColors.danger
-                          : role == 'OWNER' ? PgColors.primary
-                          : PgColors.warning;
-                      return FadeSlideIn(
-                        delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
-                        child: Card(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                          leading: Container(
-                            width: 40, height: 40,
-                            decoration: BoxDecoration(color: PgColors.lavender, borderRadius: BorderRadius.circular(10)),
-                            child: Center(child: Text(
-                              '${u['full_name'] ?? u['username'] ?? '?'}'.isNotEmpty
-                                  ? '${u['full_name'] ?? u['username']}'[0].toUpperCase() : '?',
-                              style: const TextStyle(color: PgColors.primary, fontWeight: FontWeight.w700, fontSize: 15),
-                            )),
-                          ),
-                          title: Text('${u['full_name'] ?? u['username'] ?? '—'}',
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                          subtitle: Text('@${u['username']}  •  ${u['mobile_number'] ?? '—'}',
-                              style: const TextStyle(fontSize: 12)),
-                          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: roleColor.withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: roleColor.withValues(alpha: 0.2)),
-                              ),
-                              child: Text(role, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: roleColor)),
-                            ),
-                            if (role != 'SUPER_ADMIN')
-                              PopupMenuButton<String>(
-                                icon: const Icon(Icons.more_vert, size: 18, color: Color(0xFF9CA3AF)),
-                                tooltip: 'User actions',
-                                padding: EdgeInsets.zero,
-                                onSelected: (v) {
-                                  if (v == 'reset') _resetPassword(u);
-                                },
-                                itemBuilder: (_) => [
-                                  const PopupMenuItem(value: 'reset', child: Text('Reset password')),
-                                ],
-                              ),
-                          ]),
-                        ),
-                      ));
-                    },
-                  )),
-          ]);
-        },
-      )),
-    ]);
-  }
-}
-
-// ─── Plans ────────────────────────────────────────────────────────────────────
-
-class _AdminPlans extends StatefulWidget {
-  const _AdminPlans();
-  @override
-  State<_AdminPlans> createState() => _AdminPlansState();
-}
-
-class _AdminPlansState extends State<_AdminPlans> {
-  late Future<Map<String, dynamic>> _future;
-
-  @override
-  void initState() { super.initState(); _fetch(); }
-
-  void _fetch() => setState(() {
-    _future = context.read<AppState>().apiClient.get('/super-admin/plans');
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(children: [
-      _PageHeader(
-        title: 'Plans',
-        subtitle: 'Subscription plans and pricing',
-        action: FilledButton.icon(
-          icon: const Icon(Icons.add, size: 18),
-          label: const Text('New Plan'),
-          onPressed: _showCreateDialog,
-        ),
-      ),
-      const Divider(height: 1),
-      Expanded(child: FutureBuilder<Map<String, dynamic>>(
-        future: _future,
-        builder: (ctx, snap) {
-          if (snap.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-          if (snap.hasError) return ErrorRetryView(error: snap.error!, onRetry: _fetch);
-          final plans = (snap.data?['items'] as List? ?? []).cast<Map<String, dynamic>>();
-          if (plans.isEmpty) return _EmptyState(icon: Icons.sell_outlined, message: 'No plans configured yet');
-          return GridView.builder(
-            padding: const EdgeInsets.all(20),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 260, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 1.1),
-            itemCount: plans.length,
-            itemBuilder: (_, i) => FadeSlideIn(
-              delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
-              child: _PlanCard(plan: plans[i], onToggle: () => _togglePlan(plans[i])),
-            ),
-          );
-        },
-      )),
-    ]);
-  }
-
-  Future<void> _togglePlan(Map<String, dynamic> plan) async {
-    final id = plan['plan_id'];
-    final next = !(plan['active'] == true);
-    final api = context.read<AppState>().apiClient;
-    try {
-      await api.patch('/super-admin/plans/$id', {'active': next});
-      if (!mounted) return;
-      _fetch();
-    } catch (e) {
-      if (mounted) {
-        AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
-      }
-    }
-  }
-
-  void _showCreateDialog() {
-    final codeCtrl = TextEditingController();
-    final nameCtrl = TextEditingController();
-    final priceCtrl = TextEditingController();
-    final limitCtrl = TextEditingController();
-    showDialog(context: context, builder: (ctx) => AlertDialog(
-      title: const Text('New Plan', style: TextStyle(fontWeight: FontWeight.w700)),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      content: SingleChildScrollView(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-        TextField(controller: codeCtrl, decoration: const InputDecoration(labelText: 'Plan Code', isDense: true)),
-        const SizedBox(height: 12),
-        TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Plan Name', isDense: true)),
-        const SizedBox(height: 12),
-        TextField(controller: priceCtrl, decoration: const InputDecoration(labelText: 'Monthly Price (₹)', isDense: true), keyboardType: TextInputType.number),
-        const SizedBox(height: 12),
-        TextField(controller: limitCtrl, decoration: const InputDecoration(labelText: 'Property Limit (optional)', isDense: true), keyboardType: TextInputType.number),
-      ]),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-        FilledButton(
-          onPressed: () async {
-            try {
-              await context.read<AppState>().apiClient.post('/super-admin/plans', {
-                'planCode': codeCtrl.text.trim(),
-                'name': nameCtrl.text.trim(),
-                'priceMonthly': double.tryParse(priceCtrl.text) ?? 0,
-                if (limitCtrl.text.isNotEmpty) 'propertyLimit': int.tryParse(limitCtrl.text),
-              });
-              if (ctx.mounted) Navigator.pop(ctx);
-              _fetch();
-            } catch (e) {
-              if (ctx.mounted) {
-                AppToast.error(ctx, e.toString().replaceFirst('Exception: ', ''));
-              }
-            }
-          },
-          child: const Text('Create'),
-        ),
-      ],
-    ));
-  }
-}
-
-class _PlanCard extends StatelessWidget {
-  const _PlanCard({required this.plan, this.onToggle});
-  final Map<String, dynamic> plan;
-  final VoidCallback? onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    final active = plan['active'] == true;
-    return Card(
-      child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Container(
-            width: 36, height: 36,
-            decoration: BoxDecoration(color: PgColors.lavender, borderRadius: BorderRadius.circular(8)),
-            child: const Icon(Icons.sell, size: 18, color: PgColors.primary),
-          ),
-          const Spacer(),
-          _StatusBadge(active ? 'ACTIVE' : 'INACTIVE'),
-          if (onToggle != null)
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, size: 18, color: Color(0xFF9CA3AF)),
-              tooltip: 'Plan actions',
-              padding: EdgeInsets.zero,
-              onSelected: (_) => onToggle!(),
-              itemBuilder: (_) => [
-                PopupMenuItem(value: 'toggle', child: Text(active ? 'Deactivate plan' : 'Activate plan')),
-              ],
-            ),
-        ]),
-        const SizedBox(height: 12),
-        Text('${plan['name']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: PgColors.ink)),
-        const SizedBox(height: 4),
-        Text('${inr(plan['price_monthly'] ?? 0)}/month',
-            style: const TextStyle(color: PgColors.success, fontWeight: FontWeight.w800, fontSize: 18)),
-        const Spacer(),
-        Text(
-          plan['property_limit'] != null ? 'Up to ${plan['property_limit']} properties' : 'Unlimited properties',
-          style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
-        ),
-      ])),
-    );
-  }
-}
-
 // ─── Reports ──────────────────────────────────────────────────────────────────
 
 class _AdminReports extends StatefulWidget {
@@ -2333,50 +2173,69 @@ class _AdminReports extends StatefulWidget {
   State<_AdminReports> createState() => _AdminReportsState();
 }
 
+/// Download-only, like the owner-side Reports tab: nothing is fetched until a
+/// download is requested. The read-only revenue `DataTable` that used to live
+/// here is gone — an on-screen table nobody could export was the wrong shape for
+/// a screen whose job is producing the monthly billing sheet.
 class _AdminReportsState extends State<_AdminReports> {
-  late Future<Map<String, dynamic>> _future;
+  DateTime _month = reportThisMonth();
+  bool _busy = false;
 
-  @override
-  void initState() { super.initState(); _fetch(); }
-  void _fetch() => setState(() {
-    _future = context.read<AppState>().apiClient.get('/super-admin/reports/revenue');
-  });
+  Future<void> _download() async {
+    await runReportDownload(
+      context,
+      setBusy: (v) => setState(() => _busy = v),
+      run: () => downloadReport(
+        context,
+        path: '/super-admin/reports/active-tenants?month=${reportMonthParam(_month)}',
+        build: buildActiveTenantsPdf,
+        filename: 'active-tenants-${reportFileMonth(_month)}.pdf',
+      ),
+      emptyMessage: 'No organizations for ${reportMonthLabel(_month)}',
+      okMessage: (n) => 'Active Tenants Report ready · $n organisation${n == 1 ? '' : 's'}',
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Column(children: [
-      const _PageHeader(title: 'Reports', subtitle: 'Revenue and usage statistics'),
+      const _PageHeader(
+        title: 'Reports',
+        subtitle: 'Downloadable platform reports',
+      ),
       const Divider(height: 1),
-      Expanded(child: FutureBuilder<Map<String, dynamic>>(
-        future: _future,
-        builder: (ctx, snap) {
-          if (snap.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-          if (snap.hasError) return ErrorRetryView(error: snap.error!, onRetry: _fetch);
-          final rows = (snap.data?['items'] as List? ?? []).cast<Map<String, dynamic>>();
-          if (rows.isEmpty) return _EmptyState(icon: Icons.bar_chart, message: 'No revenue data yet');
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: FadeSlideIn(child: Card(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  headingRowColor: WidgetStateProperty.all(const Color(0xFFF9F9FD)),
-                  columns: const [
-                    DataColumn(label: Text('Period', style: TextStyle(fontWeight: FontWeight.w600))),
-                    DataColumn(label: Text('Organization', style: TextStyle(fontWeight: FontWeight.w600))),
-                    DataColumn(label: Text('Amount', style: TextStyle(fontWeight: FontWeight.w600))),
-                  ],
-                  rows: rows.map((r) => DataRow(cells: [
-                    DataCell(Text('${r['period'] ?? '—'}')),
-                    DataCell(Text('${r['organization_name'] ?? 'Org #${r['organization_id'] ?? '—'}'}')),
-                    DataCell(Text(inr(r['amount'] ?? 0),
-                        style: const TextStyle(fontWeight: FontWeight.w600, color: PgColors.success))),
-                  ])).toList(),
-                ),
+      Expanded(child: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          FadeSlideIn(child: ReportCard(
+            icon: Icons.groups_rounded,
+            iconBg: const Color(0xFFEDE9FE),
+            iconColor: const Color(0xFF6D28D9),
+            title: 'Active Tenants Report',
+            subtitle: 'Per-organization active tenants, properties and billable amount',
+            busy: _busy,
+            onDownload: _busy ? null : _download,
+            filters: [
+              ReportMonthField(
+                label: 'Month',
+                value: _month,
+                enabled: !_busy,
+                onChanged: (m) => setState(() => _month = m),
               ),
+            ],
+          )),
+          const SizedBox(height: 12),
+          // The rate is set elsewhere, so say so here rather than letting an
+          // unexpected total send the admin hunting for the pricing screen.
+          Row(children: [
+            const Icon(Icons.info_outline, size: 14, color: Color(0xFF9CA3AF)),
+            const SizedBox(width: 6),
+            Expanded(child: Text(
+              'Amounts use the per-tenant price from System Settings → Per-Tenant Pricing.',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
             )),
-          );
-        },
+          ]),
+        ],
       )),
     ]);
   }
@@ -2573,39 +2432,322 @@ class _AdminSettingsState extends State<_AdminSettings> {
       const Divider(height: 1),
       if (_loading) const Expanded(child: Center(child: CircularProgressIndicator()))
       else if (_error != null) Expanded(child: ErrorRetryView(error: _error!, onRetry: _load))
-      else if (_settings.isEmpty) Expanded(child: _EmptyState(icon: Icons.settings, message: 'No system settings configured'))
-      else Expanded(child: ListView.builder(
+      else Expanded(child: ListView(
           padding: const EdgeInsets.all(20),
-          itemCount: _settings.length,
-          itemBuilder: (_, i) {
-            final s = _settings[i];
-            final key = s['setting_key'] as String;
-            final encrypted = s['encrypted'] == true;
-            return FadeSlideIn(
-              delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
-              child: Card(
-              margin: const EdgeInsets.only(bottom: 10),
-              child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(key, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: PgColors.ink)),
-                const SizedBox(height: 8),
-                encrypted
-                    ? Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(color: const Color(0xFFF9F9FD), borderRadius: BorderRadius.circular(8)),
-                        child: const Row(children: [
-                          Icon(Icons.lock_outline, size: 14, color: Color(0xFF9CA3AF)),
-                          SizedBox(width: 6),
-                          Text('Encrypted value', style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
-                        ]),
-                      )
-                    : TextField(
-                        controller: _ctrls[key],
-                        decoration: const InputDecoration(isDense: true),
-                      ),
-              ])),
-            ));
-          },
+          children: [
+            // Pricing first: it is the setting an admin actually comes here to
+            // change, and it drives the Active Tenants report's totals.
+            const _TenantPricingSection(),
+            const SizedBox(height: 24),
+            const Text('Platform Settings',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: PgColors.ink)),
+            const SizedBox(height: 10),
+            if (_settings.isEmpty)
+              _EmptyState(icon: Icons.settings, message: 'No system settings configured')
+            else
+              for (int i = 0; i < _settings.length; i++)
+                _settingCard(_settings[i], i),
+          ],
         )),
     ]);
+  }
+
+  Widget _settingCard(Map<String, dynamic> s, int i) {
+    final key = s['setting_key'] as String;
+    final encrypted = s['encrypted'] == true;
+    return FadeSlideIn(
+      delay: Duration(milliseconds: 40 * (i.clamp(0, 8))),
+      child: Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(key, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: PgColors.ink)),
+        const SizedBox(height: 8),
+        encrypted
+            ? Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: const Color(0xFFF9F9FD), borderRadius: BorderRadius.circular(8)),
+                child: const Row(children: [
+                  Icon(Icons.lock_outline, size: 14, color: Color(0xFF9CA3AF)),
+                  SizedBox(width: 6),
+                  Text('Encrypted value', style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
+                ]),
+              )
+            : TextField(
+                controller: _ctrls[key],
+                decoration: const InputDecoration(isDense: true),
+              ),
+      ])),
+    ));
+  }
+}
+
+// ─── Per-tenant pricing ───────────────────────────────────────────────────────
+
+/// What the platform charges per active tenant per month: one default plus
+/// per-organization overrides.
+///
+/// Separate from the generic system-settings list above because the default is a
+/// typed money value with per-org exceptions, not one more untyped string — and
+/// because saving here is per row (immediate `PUT`), not part of the screen's
+/// bulk Save button. Backed by `GET/PUT /super-admin/tenant-rates`.
+class _TenantPricingSection extends StatefulWidget {
+  const _TenantPricingSection();
+  @override
+  State<_TenantPricingSection> createState() => _TenantPricingSectionState();
+}
+
+class _TenantPricingSectionState extends State<_TenantPricingSection> {
+  List<Map<String, dynamic>> _orgs = [];
+  num _defaultPrice = 0;
+  bool _loading = true;
+  Object? _error;
+  String _query = '';
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    final api = context.read<AppState>().apiClient;
+    setState(() { _loading = true; _error = null; });
+    try {
+      final data = await api.get('/super-admin/tenant-rates');
+      if (!mounted) return;
+      setState(() {
+        _defaultPrice = (data['defaultPricePerTenant'] as num?) ?? 0;
+        _orgs = (data['items'] as List? ?? []).cast<Map<String, dynamic>>();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _error = e; _loading = false; });
+    }
+  }
+
+  /// `organizationId: 0` is the sentinel the backend reads as "the default itself".
+  Future<void> _edit({required int organizationId, required String name, required num current, required bool isDefault}) async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => _RateDialog(
+        organizationId: organizationId,
+        title: isDefault ? 'Default Price' : name,
+        current: current,
+        // Clearing only makes sense for an override — the default has no fallback
+        // of its own to fall back to.
+        allowReset: !isDefault && current != _defaultPrice,
+        defaultPrice: _defaultPrice,
+      ),
+    );
+    if (saved == true) await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 28),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_error != null) {
+      return Card(child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(children: [
+          const Icon(Icons.error_outline, size: 18, color: PgColors.danger),
+          const SizedBox(width: 8),
+          Expanded(child: Text('Could not load pricing: ${_error.toString().replaceFirst('Exception: ', '')}',
+              style: const TextStyle(fontSize: 12))),
+          TextButton(onPressed: _load, child: const Text('Retry')),
+        ]),
+      ));
+    }
+
+    final filtered = _orgs.where((o) {
+      final name = '${o['facility_name'] ?? ''}'.toLowerCase();
+      return _query.isEmpty || name.contains(_query.toLowerCase());
+    }).toList();
+    final overrides = _orgs.where((o) => o['customRate'] == true).length;
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Per-Tenant Pricing',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: PgColors.ink)),
+      const SizedBox(height: 4),
+      Text('Charged per active tenant per month. Drives the Active Tenants report.',
+          style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+      const SizedBox(height: 10),
+
+      Card(child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        leading: Container(
+          width: 40, height: 40,
+          decoration: BoxDecoration(color: PgColors.lavender, borderRadius: BorderRadius.circular(10)),
+          child: const Icon(Icons.sell_outlined, size: 19, color: PgColors.primary),
+        ),
+        title: const Text('Default price', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        subtitle: Text(
+          overrides == 0
+              ? 'Applies to every organization'
+              : 'Applies to all but $overrides organization${overrides == 1 ? '' : 's'} on a custom rate',
+          style: const TextStyle(fontSize: 12),
+        ),
+        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text('${inr(_defaultPrice)} / tenant',
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: PgColors.primary)),
+          const SizedBox(width: 4),
+          const Icon(Icons.edit_outlined, size: 16, color: Color(0xFF9CA3AF)),
+        ]),
+        onTap: () => _edit(organizationId: 0, name: 'Default Price', current: _defaultPrice, isDefault: true),
+      )),
+
+      const SizedBox(height: 14),
+      Row(children: [
+        Text('Organization overrides', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.grey[700])),
+        const Spacer(),
+        SizedBox(width: 220, child: TextField(
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.search, size: 17),
+            hintText: 'Search organizations…',
+            isDense: true,
+            filled: true, fillColor: const Color(0xFFF9F9FD),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: PgColors.border)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: PgColors.border)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: PgColors.primary)),
+          ),
+          onChanged: (v) => setState(() => _query = v),
+        )),
+      ]),
+      const SizedBox(height: 8),
+
+      if (filtered.isEmpty)
+        _EmptyState(icon: Icons.business_outlined, message: 'No organizations found')
+      else
+        Card(child: Column(children: [
+          for (int i = 0; i < filtered.length; i++) ...[
+            if (i > 0) const Divider(height: 1, indent: 14, endIndent: 14),
+            _rateRow(filtered[i]),
+          ],
+        ])),
+    ]);
+  }
+
+  Widget _rateRow(Map<String, dynamic> org) {
+    final id = (org['organization_id'] as num).toInt();
+    final name = '${org['facility_name'] ?? 'Org #$id'}';
+    final price = (org['pricePerTenant'] as num?) ?? 0;
+    final custom = org['customRate'] == true;
+    return ListTile(
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+      title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+      subtitle: Text(custom ? 'Custom rate' : 'Default rate',
+          style: TextStyle(fontSize: 11, color: custom ? PgColors.primary : const Color(0xFF9CA3AF))),
+      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+        Text(inr(price), style: TextStyle(
+          fontWeight: custom ? FontWeight.w700 : FontWeight.w500,
+          fontSize: 13,
+          color: custom ? PgColors.primary : const Color(0xFF6B7280),
+        )),
+        const SizedBox(width: 4),
+        const Icon(Icons.edit_outlined, size: 15, color: Color(0xFF9CA3AF)),
+      ]),
+      onTap: () => _edit(organizationId: id, name: name, current: price, isDefault: false),
+    );
+  }
+}
+
+/// Edits one rate. Pops `true` when something was saved, so the caller reloads.
+class _RateDialog extends StatefulWidget {
+  const _RateDialog({
+    required this.organizationId,
+    required this.title,
+    required this.current,
+    required this.allowReset,
+    required this.defaultPrice,
+  });
+
+  final int organizationId;
+  final String title;
+  final num current;
+  final bool allowReset;
+  final num defaultPrice;
+
+  @override
+  State<_RateDialog> createState() => _RateDialogState();
+}
+
+class _RateDialogState extends State<_RateDialog> {
+  late final TextEditingController _ctrl =
+      TextEditingController(text: widget.current.toStringAsFixed(2));
+  final _formKey = GlobalKey<FormState>();
+  bool _busy = false;
+
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  /// A null body value clears the override; the backend reads that as "back to default".
+  Future<void> _submit({required bool reset}) async {
+    if (!reset && !_formKey.currentState!.validate()) return;
+    setState(() => _busy = true);
+    try {
+      await context.read<AppState>().apiClient.put(
+        '/super-admin/tenant-rates/${widget.organizationId}',
+        {'pricePerTenant': reset ? null : num.parse(_ctrl.text.trim())},
+      );
+      if (!mounted) return;
+      Navigator.pop(context, true);
+      AppToast.success(context, reset ? 'Reset to the default price' : 'Price updated');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      AppToast.error(context, e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Text(widget.title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+      content: Form(
+        key: _formKey,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Price per active tenant, per month',
+              style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+          const SizedBox(height: 14),
+          TextFormField(
+            controller: _ctrl,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(prefixText: '₹ ', isDense: true),
+            validator: (v) {
+              final n = num.tryParse((v ?? '').trim());
+              if (n == null) return 'Enter a valid amount';
+              if (n < 0) return 'Cannot be negative';
+              if (n > 100000) return 'Cannot exceed 100000';
+              return null;
+            },
+          ),
+          if (widget.organizationId != 0) ...[
+            const SizedBox(height: 8),
+            Text('Platform default is ${inr(widget.defaultPrice)}',
+                style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+          ],
+        ]),
+      ),
+      actions: [
+        if (widget.allowReset)
+          TextButton(
+            onPressed: _busy ? null : () => _submit(reset: true),
+            child: const Text('Use default', style: TextStyle(color: PgColors.danger)),
+          ),
+        TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: _busy ? null : () => _submit(reset: false),
+          child: _busy
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Text('Save'),
+        ),
+      ],
+    );
   }
 }

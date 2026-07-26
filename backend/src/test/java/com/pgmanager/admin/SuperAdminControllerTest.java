@@ -52,7 +52,8 @@ class SuperAdminControllerTest {
         tenantLoginPolicy = mock(com.pgmanager.tenant.TenantLoginPolicy.class);
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
-        mvc = MockMvcBuilders.standaloneSetup(new SuperAdminController(jdbc, currentUser, notificationService, authService, channelService, passwordEncoder, auditService, tenantLoginPolicy))
+        OrganizationTenantRateService tenantRateService = mock(OrganizationTenantRateService.class);
+        mvc = MockMvcBuilders.standaloneSetup(new SuperAdminController(jdbc, currentUser, notificationService, authService, channelService, passwordEncoder, auditService, tenantLoginPolicy, tenantRateService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setValidator(validator)
                 .build();
@@ -74,7 +75,20 @@ class SuperAdminControllerTest {
                         .content("{\"status\":\"INACTIVE\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
-        verify(jdbc).update(anyString(), any(Object[].class));
+        verify(jdbc).update(contains("UPDATE facility SET status"), any(Object[].class));
+        // Deactivating must also kill live sessions, or the org keeps refreshing its way back in.
+        verify(jdbc).update(contains("UPDATE refresh_token SET revoked"), any(Object[].class));
+        verify(auditService).log(eq(1L), any(), eq("ORGANIZATION_STATUS_CHANGED"), anyString(), eq(1L), anyString());
+    }
+
+    @Test
+    void reactivatingOrganizationDoesNotRevokeTokens() throws Exception {
+        when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
+
+        mvc.perform(patch("/api/super-admin/organizations/1/status").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"ACTIVE\"}"))
+                .andExpect(status().isOk());
+        verify(jdbc, never()).update(contains("UPDATE refresh_token SET revoked"), any(Object[].class));
     }
 
     @Test

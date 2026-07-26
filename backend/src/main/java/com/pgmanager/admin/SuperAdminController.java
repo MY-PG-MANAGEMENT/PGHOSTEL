@@ -2,6 +2,7 @@ package com.pgmanager.admin;
 
 import com.pgmanager.audit.AuditService;
 import com.pgmanager.auth.AuthService;
+import com.pgmanager.auth.OrganizationStatusGuard;
 import com.pgmanager.auth.dto.AuthDtos.RegisterOwnerRequest;
 import com.pgmanager.common.api.ApiResponse;
 import com.pgmanager.common.exception.BadRequestException;
@@ -11,7 +12,6 @@ import com.pgmanager.notification.OrganizationChannelService;
 import com.pgmanager.security.CurrentUser;
 import com.pgmanager.security.RoleType;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
@@ -22,13 +22,16 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -45,6 +48,7 @@ public class SuperAdminController {
     private final PasswordEncoder passwordEncoder;
     private final AuditService auditService;
     private final com.pgmanager.tenant.TenantLoginPolicy tenantLoginPolicy;
+    private final OrganizationTenantRateService tenantRateService;
 
     private static final Set<String> ALLOWED_ORG_STATUSES = Set.of("ACTIVE", "INACTIVE", "SUSPENDED");
 
@@ -87,6 +91,16 @@ public class SuperAdminController {
         int count = jdbc.update("UPDATE facility SET status=?,updated_at=? WHERE facility_id=? AND facility_type_id='ORGANIZATION'",
                 status, LocalDateTime.now(), organizationId);
         if (count == 0) throw new NotFoundException("Organization not found");
+        if (!OrganizationStatusGuard.ACTIVE.equals(status)) {
+            // Logging in is blocked by OrganizationStatusGuard, but anyone already signed in holds a
+            // refresh token. Revoke them so those sessions die with their access token instead of
+            // rolling on for the full refresh window.
+            jdbc.update("UPDATE refresh_token SET revoked=TRUE,updated_at=? " +
+                    "WHERE revoked=FALSE AND user_login_id IN (SELECT user_login_id FROM user_login WHERE organization_id=?)",
+                    LocalDateTime.now(), organizationId);
+        }
+        auditService.log(organizationId, currentUser.userLoginId(), "ORGANIZATION_STATUS_CHANGED", "FACILITY", organizationId,
+                "Super admin set organization status to " + status);
         return ApiResponse.ok(null);
     }
 
@@ -94,12 +108,6 @@ public class SuperAdminController {
     ApiResponse<List<Map<String, Object>>> properties() {
         return ApiResponse.ok(jdbc.queryForList("SELECT p.facility_id,p.facility_name,p.organization_id,o.facility_name organization_name,p.status " +
                 "FROM facility p JOIN facility o ON o.facility_id=p.organization_id WHERE p.facility_type_id='PROPERTY' ORDER BY p.created_at DESC"));
-    }
-
-    @GetMapping("/users")
-    ApiResponse<List<Map<String, Object>>> users() {
-        return ApiResponse.ok(jdbc.queryForList("SELECT u.user_login_id,u.username,u.role_type_id,u.organization_id,u.status,p.full_name,p.mobile_number " +
-                "FROM user_login u JOIN person p ON p.party_id=u.party_id ORDER BY u.created_at DESC"));
     }
 
     @PostMapping("/users/{userLoginId}/reset-password")
@@ -139,36 +147,161 @@ public class SuperAdminController {
                 "ORDER BY p.module_code,p.permission_id", roleTypeId));
     }
 
-    @GetMapping("/plans")
-    ApiResponse<List<Map<String, Object>>> plans() {
-        return ApiResponse.ok(jdbc.queryForList("SELECT plan_id,plan_code,name,price_monthly,property_limit,active FROM subscription_plan ORDER BY price_monthly"));
+    /**
+     * Active Tenants report — the platform's own monthly billing basis, one row per organization.
+     *
+     * <p>Returns data, not a file: the Flutter admin screen renders the PDF, so a layout change
+     * needs no backend release (same split as the owner-side {@code ReportController}).
+     *
+     * <p><b>"Active in the month" means overlapping the month, not active today.</b> A tenant who
+     * moved out on the 20th still consumed the service that month and is still billable, and a
+     * report for a past month must not silently change as tenants leave. So the count is
+     * {@code from_date <= month end AND (thru_date IS NULL OR thru_date >= month start)} over the
+     * org-level TENANT membership row — which is also why archived tenants are excluded explicitly:
+     * archiving deliberately leaves {@code thru_date} null (see the tenant archive notes), so
+     * without that filter a deleted tenant would keep being charged for.
+     *
+     * <p>Property count is likewise as-of month end, so a historical report is not inflated by
+     * properties added later.
+     */
+    @GetMapping("/reports/active-tenants")
+    ApiResponse<Map<String, Object>> activeTenantsReport(@RequestParam(required = false) String month) {
+        LocalDate monthStart = parseMonth(month);
+        LocalDate monthEnd = monthStart.withDayOfMonth(monthStart.lengthOfMonth());
+
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT o.facility_id organization_id, o.facility_name organization_name, o.status, " +
+                "(SELECT COUNT(DISTINCT fp.party_id) FROM facility_party fp " +
+                "   WHERE fp.organization_id = o.facility_id AND fp.facility_id = o.facility_id " +
+                "     AND fp.role_type_id = 'TENANT' " +
+                "     AND fp.from_date <= ? AND (fp.thru_date IS NULL OR fp.thru_date >= ?) " +
+                "     AND NOT EXISTS (SELECT 1 FROM tenant_archive ta " +
+                "                     WHERE ta.organization_id = o.facility_id AND ta.party_id = fp.party_id) " +
+                ") active_tenants, " +
+                "(SELECT COUNT(*) FROM facility p WHERE p.organization_id = o.facility_id " +
+                "   AND p.facility_type_id = 'PROPERTY' AND DATE(p.created_at) <= ?) property_count " +
+                "FROM facility o WHERE o.facility_type_id = 'ORGANIZATION' " +
+                "ORDER BY o.facility_name",
+                monthEnd, monthStart, monthEnd);
+
+        BigDecimal defaultRate = tenantRateService.defaultRate();
+        Map<Long, BigDecimal> overrides = tenantRateService.overrides();
+
+        long totalTenants = 0;
+        long totalProperties = 0;
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        List<Map<String, Object>> items = new java.util.ArrayList<>(rows.size());
+
+        for (Map<String, Object> row : rows) {
+            Long orgId = ((Number) row.get("organization_id")).longValue();
+            long activeTenants = ((Number) row.get("active_tenants")).longValue();
+            long propertyCount = ((Number) row.get("property_count")).longValue();
+            BigDecimal rate = overrides.getOrDefault(orgId, defaultRate);
+            BigDecimal amount = rate.multiply(BigDecimal.valueOf(activeTenants));
+
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("organizationId", orgId);
+            item.put("organizationName", row.get("organization_name"));
+            item.put("status", row.get("status"));
+            item.put("activeTenants", activeTenants);
+            item.put("propertyCount", propertyCount);
+            item.put("pricePerTenant", rate);
+            // Lets the report show which orgs are on a negotiated rate versus the platform default.
+            item.put("customRate", overrides.containsKey(orgId));
+            item.put("amount", amount);
+            items.add(item);
+
+            totalTenants += activeTenants;
+            totalProperties += propertyCount;
+            totalAmount = totalAmount.add(amount);
+        }
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("organizationCount", items.size());
+        // Orgs with no tenants that month still appear as rows (a zero line is information), but
+        // this counts the ones that actually generated a charge.
+        summary.put("billableOrganizations", items.stream().filter(i -> ((Number) i.get("activeTenants")).longValue() > 0).count());
+        summary.put("totalActiveTenants", totalTenants);
+        summary.put("totalProperties", totalProperties);
+        summary.put("defaultPricePerTenant", defaultRate);
+        summary.put("totalAmount", totalAmount);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("month", monthStart.toString().substring(0, 7));
+        payload.put("monthStart", monthStart.toString());
+        payload.put("monthEnd", monthEnd.toString());
+        payload.put("summary", summary);
+        payload.put("items", items);
+        return ApiResponse.ok(payload);
     }
 
-    @PostMapping("/plans")
-    ApiResponse<Map<String, Object>> createPlan(@Valid @RequestBody PlanRequest request) {
-        jdbc.update("INSERT INTO subscription_plan(plan_code,name,price_monthly,property_limit,active,created_at,updated_at) VALUES(?,?,?,?,TRUE,?,?)",
-                request.planCode(), request.name(), request.priceMonthly(), request.propertyLimit(), LocalDateTime.now(), LocalDateTime.now());
-        Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
-        return ApiResponse.ok(Map.of("planId", id, "planCode", request.planCode(), "active", true));
+    /** {@code yyyy-MM}, defaulting to the current month. Rejects a future month. */
+    private LocalDate parseMonth(String month) {
+        if (month == null || month.isBlank()) {
+            return LocalDate.now().withDayOfMonth(1);
+        }
+        LocalDate parsed;
+        try {
+            parsed = LocalDate.parse(month.trim() + "-01");
+        } catch (Exception ex) {
+            throw new BadRequestException("month must be in yyyy-MM format");
+        }
+        if (parsed.isAfter(LocalDate.now().withDayOfMonth(1))) {
+            throw new BadRequestException("month cannot be in the future");
+        }
+        return parsed;
     }
 
-    @PatchMapping("/plans/{planId}")
-    ApiResponse<Void> updatePlanStatus(@PathVariable Long planId, @RequestBody Map<String, Object> body) {
-        Object raw = body.get("active");
-        boolean active = Boolean.TRUE.equals(raw) || "true".equalsIgnoreCase(String.valueOf(raw));
-        int count = jdbc.update("UPDATE subscription_plan SET active=?,updated_at=? WHERE plan_id=?",
-                active, LocalDateTime.now(), planId);
-        if (count == 0) throw new NotFoundException("Plan not found");
-        return ApiResponse.ok("Plan updated", null);
+    /**
+     * Per-tenant pricing for the Admin → System Settings editor: every organization with its
+     * effective rate, plus the platform default that non-overridden orgs follow.
+     */
+    @GetMapping("/tenant-rates")
+    ApiResponse<Map<String, Object>> tenantRates() {
+        BigDecimal defaultRate = tenantRateService.defaultRate();
+        Map<Long, BigDecimal> overrides = tenantRateService.overrides();
+        List<Map<String, Object>> orgs = jdbc.queryForList(
+                "SELECT facility_id organization_id,facility_name,status FROM facility " +
+                "WHERE facility_type_id='ORGANIZATION' ORDER BY facility_name");
+        List<Map<String, Object>> items = new java.util.ArrayList<>(orgs.size());
+        for (Map<String, Object> org : orgs) {
+            Long orgId = ((Number) org.get("organization_id")).longValue();
+            Map<String, Object> item = new LinkedHashMap<>(org);
+            item.put("pricePerTenant", overrides.getOrDefault(orgId, defaultRate));
+            item.put("customRate", overrides.containsKey(orgId));
+            items.add(item);
+        }
+        return ApiResponse.ok(Map.of("defaultPricePerTenant", defaultRate, "items", items));
     }
 
-    @GetMapping("/reports/revenue")
-    ApiResponse<List<Map<String, Object>>> revenueReport() {
-        return ApiResponse.ok(jdbc.queryForList(
-                "SELECT DATE_FORMAT(p.payment_date,'%Y-%m') period,p.organization_id," +
-                "o.facility_name organization_name,SUM(p.amount) amount " +
-                "FROM payment p LEFT JOIN facility o ON o.facility_id=p.organization_id " +
-                "WHERE p.status='RECEIVED' GROUP BY period,p.organization_id,o.facility_name ORDER BY period DESC"));
+    /**
+     * Sets one org's rate, or clears it back to the default when {@code pricePerTenant} is null.
+     * {@code organizationId = 0} is the sentinel for "the platform default itself", so the editor
+     * can change the default through the same endpoint instead of round-tripping the generic
+     * system-settings screen (where it would be one untyped string among many).
+     */
+    @PutMapping("/tenant-rates/{organizationId}")
+    ApiResponse<Map<String, Object>> updateTenantRate(@PathVariable Long organizationId,
+                                                     @RequestBody TenantRateRequest request) {
+        if (organizationId == 0L) {
+            if (request.pricePerTenant() == null) throw new BadRequestException("Default price is required");
+            tenantRateService.setDefaultRate(request.pricePerTenant(), currentUser.userLoginId());
+            auditService.log(null, currentUser.userLoginId(), "PLATFORM_TENANT_RATE_CHANGED", "SYSTEM_SETTING", null,
+                    "Default price per active tenant set to " + request.pricePerTenant());
+            return ApiResponse.ok("Default price updated", Map.of("defaultPricePerTenant", tenantRateService.defaultRate()));
+        }
+        Integer exists = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM facility WHERE facility_id=? AND facility_type_id='ORGANIZATION'",
+                Integer.class, organizationId);
+        if (exists == null || exists == 0) throw new NotFoundException("Organization not found");
+
+        tenantRateService.setOverride(organizationId, request.pricePerTenant(), currentUser.userLoginId());
+        auditService.log(organizationId, currentUser.userLoginId(), "ORGANIZATION_TENANT_RATE_CHANGED",
+                "FACILITY", organizationId,
+                request.pricePerTenant() == null
+                        ? "Per-tenant rate reset to the platform default"
+                        : "Per-tenant rate set to " + request.pricePerTenant());
+        return ApiResponse.ok("Price updated", Map.of("pricePerTenant", tenantRateService.rateFor(organizationId)));
     }
 
     @GetMapping("/organizations/{organizationId}")
@@ -183,11 +316,37 @@ public class SuperAdminController {
         return ApiResponse.ok(org);
     }
 
+    /**
+     * The organization's staff logins — everyone but the tenants, owner first. Backs the
+     * Organizations → Users tab, which is where passwords are reset from (there is no
+     * cross-organization user list; a reset always starts from the org that owns the login).
+     */
+    @GetMapping("/organizations/{organizationId}/users")
+    ApiResponse<List<Map<String, Object>>> organizationUsers(@PathVariable Long organizationId) {
+        return ApiResponse.ok(jdbc.queryForList(
+                "SELECT u.user_login_id,u.username,u.role_type_id,u.status,u.last_login_at," +
+                "p.full_name,p.mobile_number " +
+                "FROM user_login u JOIN person p ON p.party_id=u.party_id " +
+                "WHERE u.organization_id=? AND u.role_type_id<>'TENANT' " +
+                "ORDER BY (u.role_type_id='OWNER') DESC,p.full_name",
+                organizationId));
+    }
+
     @GetMapping("/organizations/{organizationId}/tenants")
     ApiResponse<List<Map<String, Object>>> organizationTenants(@PathVariable Long organizationId) {
+        // The portal login is read through scalar subqueries rather than a join: a rejoining tenant
+        // can leave an older INACTIVE login behind, and joining would duplicate the tenant row.
+        // Prefer the ACTIVE login when both exist.
+        String login = "SELECT ul.%s FROM user_login ul " +
+                "WHERE ul.organization_id=fp.organization_id AND ul.party_id=fp.party_id " +
+                "  AND ul.role_type_id='TENANT' " +
+                "ORDER BY (ul.status='ACTIVE') DESC,ul.user_login_id DESC LIMIT 1";
         return ApiResponse.ok(jdbc.queryForList(
                 "SELECT p.party_id, p.full_name, p.mobile_number, p.email, " +
-                "occ.from_date move_in_date, f.facility_name bed_name " +
+                "occ.from_date move_in_date, f.facility_name bed_name, " +
+                "(" + login.formatted("user_login_id") + ") user_login_id, " +
+                "(" + login.formatted("username") + ") username, " +
+                "(" + login.formatted("status") + ") login_status " +
                 "FROM facility_party fp " +
                 "JOIN person p ON p.party_id = fp.party_id " +
                 "LEFT JOIN facility_party occ ON occ.organization_id = fp.organization_id " +
@@ -268,7 +427,13 @@ public class SuperAdminController {
     private Long scalar(String sql, Object... args) { Long value = jdbc.queryForObject(sql, Long.class, args); return value == null ? 0 : value; }
     private BigDecimal amount(String sql) { BigDecimal value = jdbc.queryForObject(sql, BigDecimal.class); return value == null ? BigDecimal.ZERO : value; }
 
-    public record PlanRequest(@NotBlank String planCode, @NotBlank String name, @DecimalMin("0") BigDecimal priceMonthly, Integer propertyLimit) {}
     public record BroadcastRequest(@NotBlank String title, @NotBlank String message, Long targetOrgId, Boolean important) {}
+
+    /**
+     * A null {@code pricePerTenant} is meaningful, not missing: it clears the org's override and
+     * puts it back on the platform default. Validation lives in
+     * {@link OrganizationTenantRateService} so the default-rate path is checked the same way.
+     */
+    public record TenantRateRequest(BigDecimal pricePerTenant) {}
     public record ResetPasswordRequest(@NotBlank @Size(min = 8, message = "Password must be at least 8 characters") String newPassword) {}
 }

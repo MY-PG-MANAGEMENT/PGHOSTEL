@@ -23,6 +23,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.authentication.LockedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -46,6 +48,7 @@ public class AuthService {
     private final AppUserDetailsService userDetailsService;
     private final JwtService jwtService;
     private final AuditService auditService;
+    private final OrganizationStatusGuard organizationStatusGuard;
     private final SecureRandom secureRandom = new SecureRandom();
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
@@ -133,7 +136,24 @@ public class AuthService {
 
     @Transactional
     public AuthResponse login(LoginRequest request) {
+        AppUserPrincipal principal = authenticate(request);
 
+        // Credentials are good, but a deactivated/suspended organization has no access at all.
+        // Deliberately outside authenticate()'s catch-all, which would mask the 403 as a 500.
+        organizationStatusGuard.assertActive(principal.organizationId());
+
+        auditService.log(
+                principal.organizationId(),
+                principal.userLoginId(),
+                "LOGIN",
+                "USER_LOGIN",
+                principal.userLoginId(),
+                "User logged in");
+
+        return issueTokens(principal);
+    }
+
+    private AppUserPrincipal authenticate(LoginRequest request) {
         try {
 
             authenticationManager.authenticate(
@@ -141,19 +161,8 @@ public class AuthService {
                             request.username(),
                             request.password()));
 
-            AppUserPrincipal principal =
-                    (AppUserPrincipal) userDetailsService.loadUserByUsername(
-                            request.username());
-
-            auditService.log(
-                    principal.organizationId(),
-                    principal.userLoginId(),
-                    "LOGIN",
-                    "USER_LOGIN",
-                    principal.userLoginId(),
-                    "User logged in");
-
-            return issueTokens(principal);
+            return (AppUserPrincipal) userDetailsService.loadUserByUsername(
+                    request.username());
 
         } catch (BadCredentialsException e) {
 
@@ -161,8 +170,16 @@ public class AuthService {
                     HttpStatus.UNAUTHORIZED,
                     "Invalid username or password");
 
+        } catch (DisabledException | LockedException e) {
+
+            // A non-ACTIVE user_login row: a real 401, not the 500 the catch-all used to return.
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED,
+                    "This account is inactive. Contact your administrator.");
+
         } catch (Exception e) {
 
+            log.error("Login failed for {}", request.username(), e);
             throw new ResponseStatusException(
                     HttpStatus.INTERNAL_SERVER_ERROR,
                     "Login failed");
@@ -183,6 +200,8 @@ public class AuthService {
                 .orElseThrow(() -> new BadRequestException("User not found"));
         refreshToken.setRevoked(true);
         AppUserPrincipal principal = (AppUserPrincipal) userDetailsService.loadUserByUsername(user.getUsername());
+        // Re-checked on every rotation, so deactivating an org also stops sessions already running.
+        organizationStatusGuard.assertActive(principal.organizationId());
         return issueTokens(principal);
     }
 

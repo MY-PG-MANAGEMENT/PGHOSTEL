@@ -45,7 +45,7 @@ public class TenantAuthService {
     public TenantAuthResult login(TenantLoginRequest request) {
         List<Map<String, Object>> candidates = jdbc.queryForList(
                 "SELECT ul.user_login_id, ul.username, ul.organization_id, ul.password_hash, " +
-                "ul.must_change_password, o.facility_name AS org_name " +
+                "ul.must_change_password, o.facility_name AS org_name, o.status AS org_status " +
                 "FROM user_login ul " +
                 "JOIN person pr ON pr.party_id = ul.party_id " +
                 "LEFT JOIN facility o ON o.facility_id = ul.organization_id " +
@@ -55,6 +55,18 @@ public class TenantAuthService {
         if (candidates.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid mobile number or password");
         }
+
+        // Drop logins in deactivated/suspended orgs before anything else, so such an org neither
+        // appears in the picker below nor can be logged into. Same rule as
+        // OrganizationStatusGuard.assertActive, applied to the candidate set.
+        List<Map<String, Object>> activeOrgCandidates = candidates.stream()
+                .filter(c -> OrganizationStatusGuard.ACTIVE.equals(c.get("org_status")))
+                .toList();
+        if (activeOrgCandidates.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    OrganizationStatusGuard.messageFor((String) candidates.get(0).get("org_status")));
+        }
+        candidates = activeOrgCandidates;
 
         // Narrow to the chosen org when supplied.
         if (request.organizationId() != null) {

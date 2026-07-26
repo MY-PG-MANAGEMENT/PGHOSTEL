@@ -279,7 +279,7 @@ PUT /api/settings/preferences
 - Properties (all properties, status management)
 - Users (team members, role assignment)
 - Roles & Permissions (RBAC management)
-- Plans & Pricing (subscription tiers)
+- ~~Plans & Pricing (subscription tiers)~~ — removed: screen, API and `subscription_plan` table dropped (V29)
 - Customers (organization accounts)
 - Reports (various reports with filters)
 - Audit Logs (system activity)
@@ -295,8 +295,6 @@ GET /api/admin/users
 POST /api/admin/users
 GET /api/admin/roles
 PUT /api/admin/roles/{id}
-GET /api/admin/plans
-PUT /api/admin/plans/{id}
 GET /api/admin/customers
 GET /api/admin/reports/*
 GET /api/admin/audit-logs
@@ -310,8 +308,8 @@ PUT /api/admin/settings
 | `role_type` | ✅ Exists | Role definitions |
 | `role_permission` | ✅ Exists | Permission assignment |
 | `permission` | ✅ Exists | Permission catalog |
-| `subscription_plan` | ✅ Exists | Plans |
-| `plan_feature` | ✅ Exists | Plan features |
+| `subscription_plan` | ❌ Dropped (V29) | Plans — screen, API and table removed |
+| `plan_feature` | ❌ Dropped (V24) | Plan features |
 | `feature_master` | ✅ Exists | Feature catalog |
 | `audit_log` | ✅ Exists | Activity tracking |
 | `user_login` | ✅ Exists | User management |

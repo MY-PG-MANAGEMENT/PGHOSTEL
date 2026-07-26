@@ -92,7 +92,7 @@ them only with a **short TTL** (30–60s), not fine-grained eviction:
    `facility_group_member` writes (would slot into `@EvictOccupancyCaches`).
 2. **Staff list** — `StaffController.list` (key includes `month`; evict on staff writes + pay).
 3. **Global reference tables** — `amenity_type`, `role_type`/`permission`,
-   `subscription_plan`, `feature_master`. Cross-org, effectively immutable at runtime →
+   `feature_master`. Cross-org, effectively immutable at runtime →
    cache globally (no org key), long TTL, lowest complexity.
 
 Avoid caching the super-admin `dashboard`/`revenueReport` with fine-grained eviction —

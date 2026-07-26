@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -14,22 +13,25 @@ import '../widgets/skeleton.dart';
 import '../widgets/async_action_button.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/error_retry_view.dart';
+import '../widgets/svg_path_icon.dart';
 import 'billing_screen.dart' show InvoiceDetailSheet;
 import 'checkout_sheet.dart' show CheckoutSheet, TransferBedScreen;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 // Official WhatsApp glyph (FontAwesome brand path) rendered inline — no asset/network needed.
-const String _kWhatsAppSvg =
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512">'
-    '<path fill="#25D366" d="M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 '
+// Just the `d` and `viewBox` of the source SVG; `SvgPathIcon` fills it.
+const Size _kWhatsAppViewBox = Size(448, 512);
+const Color _kWhatsAppFill = Color(0xFF25D366);
+const String _kWhatsAppPath =
+    'M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 '
     '10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 '
     '0-59.3-25.2-115-67.2-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 '
     '0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 '
     '2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 '
     '16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 '
     '0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 '
-    '83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/></svg>';
+    '83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z';
 
 String _initial(String name) {
   final parts = name.trim().split(' ').where((w) => w.isNotEmpty).toList();
@@ -566,7 +568,7 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
   void initState() {
     super.initState();
     _tenant = widget.tenant;
-    _tabs = TabController(length: 5, vsync: this);
+    _tabs = TabController(length: 3, vsync: this);
     _refreshTenant();
     _loadScheduled();
   }
@@ -601,20 +603,15 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
             onSelected: _onMenuAction,
             itemBuilder: (_) => [
               const PopupMenuItem(value: 'edit', child: Text('Edit Profile')),
-              const PopupMenuItem(value: 'emergency', child: Text('Emergency Contact')),
-              const PopupMenuItem(value: 'employment', child: Text('Employment')),
             ],
           ),
         ],
         bottom: TabBar(
           controller: _tabs,
-          isScrollable: true,
           tabs: const [
             Tab(text: 'Profile'),
             Tab(text: 'Payments'),
-            Tab(text: 'Emergency'),
-            Tab(text: 'Employment'),
-            Tab(text: 'Documents'),
+            Tab(text: 'Details'),
           ],
         ),
       ),
@@ -642,9 +639,10 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
                   onDelete: _deleteTenant,
                 ),
                 _TenantPaymentsTab(tenantId: (_tenant['tenantId'] as num).toInt()),
-                _EmergencyTab(tenant: _tenant),
-                _EmploymentTab(tenant: _tenant),
-                const _DocumentsTab(),
+                _OtherDetailsTab(
+                  tenant: _tenant,
+                  onEdit: () => _onMenuAction('edit'),
+                ),
               ],
             ),
           ),
@@ -679,26 +677,6 @@ class _TenantDetailScreenState extends State<TenantDetailScreen>
     if (action == 'edit') {
       changed = await Navigator.of(context).push<bool>(
         MaterialPageRoute(builder: (_) => EditTenantScreen(tenant: _tenant)),
-      );
-    } else if (action == 'emergency') {
-      changed = await showModalBottomSheet<bool>(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.white,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (_) => _EditEmergencyContactSheet(tenant: _tenant),
-      );
-    } else if (action == 'employment') {
-      changed = await showModalBottomSheet<bool>(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.white,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (_) => _EditEmploymentSheet(tenant: _tenant),
       );
     }
     if (changed == true && mounted) {
@@ -923,7 +901,12 @@ class _TenantHeader extends StatelessWidget {
                   label: 'WhatsApp',
                   bg: const Color(0xFFD9F7E3),
                   fg: const Color(0xFF25D366),
-                  iconChild: SvgPicture.string(_kWhatsAppSvg, width: 26, height: 26),
+                  iconChild: const SvgPathIcon(
+                    pathData: _kWhatsAppPath,
+                    color: _kWhatsAppFill,
+                    viewBox: _kWhatsAppViewBox,
+                    size: Size(26, 26),
+                  ),
                   onTap: hasMobile
                       ? () => _launch(context, Uri.parse('https://wa.me/${_waNumber(mobile)}'))
                       : null,
@@ -1531,69 +1514,76 @@ class _SetCheckoutDateDialogState extends State<_SetCheckoutDateDialog> {
   }
 }
 
-// ─── Emergency Tab ────────────────────────────────────────────────────────
+// ─── Details Tab (Emergency + Employment + Documents) ─────────────────────
 
-class _EmergencyTab extends StatelessWidget {
-  const _EmergencyTab({required this.tenant});
+/// The three secondary profile sections that used to be a tab each. They hold
+/// a handful of fields between them, so swiping through three near-empty tabs
+/// cost more than it showed — they are one scroll of cards now, and all of them
+/// are edited together in [EditTenantScreen].
+class _OtherDetailsTab extends StatelessWidget {
+  const _OtherDetailsTab({required this.tenant, required this.onEdit});
 
   final Map<String, dynamic> tenant;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _InfoSection(title: 'Emergency Contact', items: [
-          ('Name', '${tenant['emergencyContactName'] ?? '—'}', Icons.person_outline),
-          ('Mobile', '${tenant['emergencyContactMobile'] ?? '—'}', Icons.phone_outlined),
-          ('Relation', '${tenant['emergencyContactRelation'] ?? '—'}', Icons.family_restroom),
-        ]),
+        _InfoSection(
+          title: 'Emergency Contact',
+          onEdit: onEdit,
+          items: [
+            ('Name', '${tenant['emergencyContactName'] ?? '—'}', Icons.person_outline),
+            ('Mobile', '${tenant['emergencyContactMobile'] ?? '—'}', Icons.phone_outlined),
+            ('Relation', '${tenant['emergencyContactRelation'] ?? '—'}', Icons.family_restroom),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _InfoSection(
+          title: 'Employment Details',
+          onEdit: onEdit,
+          items: [
+            ('Employer', '${tenant['employerName'] ?? '—'}', Icons.business_outlined),
+            ('Designation', '${tenant['designation'] ?? '—'}', Icons.work_outline),
+            ('Work Address', '${tenant['workAddress'] ?? '—'}', Icons.location_on_outlined),
+          ],
+        ),
+        const SizedBox(height: 12),
+        const _DocumentsCard(),
       ],
     );
   }
 }
 
-// ─── Employment Tab ───────────────────────────────────────────────────────
-
-class _EmploymentTab extends StatelessWidget {
-  const _EmploymentTab({required this.tenant});
-
-  final Map<String, dynamic> tenant;
+class _DocumentsCard extends StatelessWidget {
+  const _DocumentsCard();
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        _InfoSection(title: 'Employment Details', items: [
-          ('Employer', '${tenant['employerName'] ?? '—'}', Icons.business_outlined),
-          ('Designation', '${tenant['designation'] ?? '—'}', Icons.work_outline),
-          ('Work Address', '${tenant['workAddress'] ?? '—'}', Icons.location_on_outlined),
-        ]),
-      ],
-    );
-  }
-}
-
-// ─── Documents Tab ────────────────────────────────────────────────────────
-
-class _DocumentsTab extends StatelessWidget {
-  const _DocumentsTab();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
+    return Card(
       child: Padding(
-        padding: EdgeInsets.all(32),
+        padding: const EdgeInsets.all(16),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.folder_outlined, size: 56, color: PgColors.primary),
-            SizedBox(height: 16),
-            Text('Documents', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-            SizedBox(height: 6),
-            Text('Document upload will be available soon.',
-                textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+            const Text('Documents',
+                style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                    color: PgColors.primary)),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Icon(Icons.folder_outlined, size: 18, color: Colors.grey),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text('Document upload will be available soon.',
+                      style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -2572,6 +2562,18 @@ class _EditTenantScreenState extends State<EditTenantScreen> {
       TextEditingController(text: '${widget.tenant['permanentAddress'] ?? ''}');
   late String? _gender = widget.tenant['gender'] as String?;
   late bool _hasVehicle = widget.tenant['hasVehicle'] == true;
+  late final _emName = TextEditingController(
+      text: '${widget.tenant['emergencyContactName'] ?? ''}');
+  late final _emMobile = TextEditingController(
+      text: '${widget.tenant['emergencyContactMobile'] ?? ''}');
+  late final _emRelation = TextEditingController(
+      text: '${widget.tenant['emergencyContactRelation'] ?? ''}');
+  late final _employer =
+      TextEditingController(text: '${widget.tenant['employerName'] ?? ''}');
+  late final _designation =
+      TextEditingController(text: '${widget.tenant['designation'] ?? ''}');
+  late final _workAddress =
+      TextEditingController(text: '${widget.tenant['workAddress'] ?? ''}');
 
   @override
   void dispose() {
@@ -2579,6 +2581,12 @@ class _EditTenantScreenState extends State<EditTenantScreen> {
     _mobile.dispose();
     _email.dispose();
     _address.dispose();
+    _emName.dispose();
+    _emMobile.dispose();
+    _emRelation.dispose();
+    _employer.dispose();
+    _designation.dispose();
+    _workAddress.dispose();
     super.dispose();
   }
 
@@ -2608,6 +2616,7 @@ class _EditTenantScreenState extends State<EditTenantScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  _FormSection(title: 'Personal Details', children: [
                   TextFormField(
                     controller: _fullName,
                     decoration: const InputDecoration(
@@ -2692,12 +2701,97 @@ class _EditTenantScreenState extends State<EditTenantScreen> {
                     value: _hasVehicle,
                     onChanged: (v) => setState(() => _hasVehicle = v),
                   ),
+                  ]),
+                  const SizedBox(height: 16),
+                  _FormSection(title: 'Emergency Contact', children: [
+                    TextFormField(
+                      controller: _emName,
+                      decoration: const InputDecoration(
+                          labelText: 'Contact Name',
+                          prefixIcon: Icon(Icons.person_outline)),
+                      textCapitalization: TextCapitalization.words,
+                      textInputAction: TextInputAction.next,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _emMobile,
+                      decoration: const InputDecoration(
+                          labelText: 'Mobile Number',
+                          prefixIcon: Icon(Icons.phone_outlined)),
+                      keyboardType: TextInputType.phone,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(10),
+                      ],
+                      textInputAction: TextInputAction.next,
+                      // Optional — but a partially typed number would be rejected
+                      // by the server, so catch it here.
+                      validator: (v) =>
+                          v == null || v.isEmpty || RegExp(r'^[0-9]{10}$').hasMatch(v)
+                              ? null
+                              : '10-digit mobile number required',
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _emRelation,
+                      decoration: const InputDecoration(
+                          labelText: 'Relation (e.g. Parent, Sibling)',
+                          prefixIcon: Icon(Icons.family_restroom)),
+                      textCapitalization: TextCapitalization.words,
+                      textInputAction: TextInputAction.next,
+                    ),
+                  ]),
+                  const SizedBox(height: 16),
+                  _FormSection(title: 'Employment Details', children: [
+                    TextFormField(
+                      controller: _employer,
+                      decoration: const InputDecoration(
+                          labelText: 'Employer Name',
+                          prefixIcon: Icon(Icons.business_outlined)),
+                      textCapitalization: TextCapitalization.words,
+                      textInputAction: TextInputAction.next,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _designation,
+                      decoration: const InputDecoration(
+                          labelText: 'Designation',
+                          prefixIcon: Icon(Icons.work_outline)),
+                      textCapitalization: TextCapitalization.words,
+                      textInputAction: TextInputAction.next,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _workAddress,
+                      decoration: const InputDecoration(
+                          labelText: 'Work Address',
+                          prefixIcon: Icon(Icons.location_on_outlined)),
+                      maxLines: 2,
+                      textCapitalization: TextCapitalization.sentences,
+                    ),
+                  ]),
+                  const SizedBox(height: 16),
+                  const _FormSection(title: 'Documents', children: [
+                    Row(children: [
+                      Icon(Icons.folder_outlined, size: 18, color: Colors.grey),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Text('Document upload will be available soon.',
+                            style: TextStyle(fontSize: 13, color: Colors.grey)),
+                      ),
+                    ]),
+                  ]),
                   const SizedBox(height: 24),
                   AsyncActionButton(
                     label: 'Save Changes',
                     onPressed: () async {
                       if (!_formKey.currentState!.validate()) return;
                       final id = widget.tenant['tenantId'];
+                      // PUT replaces the whole person record server-side, so every
+                      // field the form owns is always sent (blank clears it) and
+                      // Aadhaar — which this form does not edit — is echoed back so
+                      // saving a profile never wipes it.
+                      final aadhaar = '${widget.tenant['aadhaarNumber'] ?? ''}';
                       try {
                         await context.read<AppState>().apiClient.put(
                             '/tenants/$id', {
@@ -2707,8 +2801,16 @@ class _EditTenantScreenState extends State<EditTenantScreen> {
                           if (_email.text.isNotEmpty) 'email': _email.text.trim(),
                           if (_dob != null)
                             'dateOfBirth': '${_dob!.year}-${_dob!.month.toString().padLeft(2, '0')}-${_dob!.day.toString().padLeft(2, '0')}',
+                          if (RegExp(r'^[0-9]{12}$').hasMatch(aadhaar))
+                            'aadhaarNumber': aadhaar,
                           if (_address.text.isNotEmpty)
                             'permanentAddress': _address.text.trim(),
+                          'emergencyContactName': _emName.text.trim(),
+                          'emergencyContactMobile': _emMobile.text.trim(),
+                          'emergencyContactRelation': _emRelation.text.trim(),
+                          'employerName': _employer.text.trim(),
+                          'designation': _designation.text.trim(),
+                          'workAddress': _workAddress.text.trim(),
                           'hasVehicle': _hasVehicle,
                         });
                         if (mounted) Navigator.pop(context, true);
@@ -2730,112 +2832,35 @@ class _EditTenantScreenState extends State<EditTenantScreen> {
   }
 }
 
-// ─── Edit Emergency Contact Sheet ─────────────────────────────────────────
+// ─── Shared Widgets ───────────────────────────────────────────────────────
 
-class _EditEmergencyContactSheet extends StatefulWidget {
-  const _EditEmergencyContactSheet({required this.tenant});
+/// Titled card wrapping one group of form fields. The edit screen mirrors the
+/// card layout of the detail tabs, so a section reads the same whether it is
+/// being viewed or edited.
+class _FormSection extends StatelessWidget {
+  const _FormSection({required this.title, required this.children});
 
-  final Map<String, dynamic> tenant;
-
-  @override
-  State<_EditEmergencyContactSheet> createState() =>
-      _EditEmergencyContactSheetState();
-}
-
-class _EditEmergencyContactSheetState extends State<_EditEmergencyContactSheet> {
-  late final _name =
-      TextEditingController(text: '${widget.tenant['emergencyContactName'] ?? ''}');
-  late final _mobile = TextEditingController(
-      text: '${widget.tenant['emergencyContactMobile'] ?? ''}');
-  late final _relation = TextEditingController(
-      text: '${widget.tenant['emergencyContactRelation'] ?? ''}');
-  final _formKey = GlobalKey<FormState>();
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _mobile.dispose();
-    _relation.dispose();
-    super.dispose();
-  }
+  final String title;
+  final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
-    final padding = MediaQuery.viewInsetsOf(context).bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, 20, 20, padding + 20),
-      child: Form(
-        key: _formKey,
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(children: [
-              const Text('Emergency Contact',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-              const Spacer(),
-              IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context)),
-            ]),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _name,
-              decoration: const InputDecoration(
-                  labelText: 'Contact Name *',
-                  prefixIcon: Icon(Icons.person_outline)),
-              textCapitalization: TextCapitalization.words,
-              textInputAction: TextInputAction.next,
-              validator: (v) =>
-                  v == null || v.trim().isEmpty ? 'Required' : null,
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(title,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      color: PgColors.primary)),
             ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _mobile,
-              decoration: const InputDecoration(
-                  labelText: 'Mobile Number *',
-                  prefixIcon: Icon(Icons.phone_outlined)),
-              keyboardType: TextInputType.phone,
-              inputFormatters: [
-                FilteringTextInputFormatter.digitsOnly,
-                LengthLimitingTextInputFormatter(10),
-              ],
-              textInputAction: TextInputAction.next,
-              validator: (v) =>
-                  v == null || !RegExp(r'^[0-9]{10}$').hasMatch(v)
-                      ? '10-digit mobile number required'
-                      : null,
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _relation,
-              decoration: const InputDecoration(
-                  labelText: 'Relation (e.g. Parent, Sibling)',
-                  prefixIcon: Icon(Icons.family_restroom)),
-              textInputAction: TextInputAction.done,
-            ),
-            const SizedBox(height: 20),
-            AsyncActionButton(
-              label: 'Save',
-              onPressed: () async {
-                if (!_formKey.currentState!.validate()) return;
-                final id = widget.tenant['tenantId'];
-                try {
-                  await context.read<AppState>().apiClient.patch(
-                      '/tenants/$id', {
-                    'emergencyContactName': _name.text.trim(),
-                    'emergencyContactMobile': _mobile.text.trim(),
-                    'emergencyContactRelation': _relation.text.trim(),
-                  });
-                  if (mounted) Navigator.pop(context, true);
-                } catch (e) {
-                  if (mounted) {
-                    AppToast.error(context,
-                        e.toString().replaceFirst('Exception: ', ''));
-                  }
-                }
-              },
-            ),
+            const SizedBox(height: 14),
+            ...children,
           ],
         ),
       ),
@@ -2843,110 +2868,15 @@ class _EditEmergencyContactSheetState extends State<_EditEmergencyContactSheet> 
   }
 }
 
-// ─── Edit Employment Sheet ────────────────────────────────────────────────
-
-class _EditEmploymentSheet extends StatefulWidget {
-  const _EditEmploymentSheet({required this.tenant});
-
-  final Map<String, dynamic> tenant;
-
-  @override
-  State<_EditEmploymentSheet> createState() => _EditEmploymentSheetState();
-}
-
-class _EditEmploymentSheetState extends State<_EditEmploymentSheet> {
-  late final _employer =
-      TextEditingController(text: '${widget.tenant['employerName'] ?? ''}');
-  late final _designation =
-      TextEditingController(text: '${widget.tenant['designation'] ?? ''}');
-  late final _workAddress =
-      TextEditingController(text: '${widget.tenant['workAddress'] ?? ''}');
-
-  @override
-  void dispose() {
-    _employer.dispose();
-    _designation.dispose();
-    _workAddress.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final padding = MediaQuery.viewInsetsOf(context).bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, 20, 20, padding + 20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(children: [
-            const Text('Employment Details',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-            const Spacer(),
-            IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.pop(context)),
-          ]),
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: _employer,
-            decoration: const InputDecoration(
-                labelText: 'Employer Name',
-                prefixIcon: Icon(Icons.business_outlined)),
-            textCapitalization: TextCapitalization.words,
-            textInputAction: TextInputAction.next,
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _designation,
-            decoration: const InputDecoration(
-                labelText: 'Designation', prefixIcon: Icon(Icons.work_outline)),
-            textInputAction: TextInputAction.next,
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _workAddress,
-            decoration: const InputDecoration(
-                labelText: 'Work Address',
-                prefixIcon: Icon(Icons.location_on_outlined)),
-            maxLines: 2,
-            textCapitalization: TextCapitalization.sentences,
-          ),
-          const SizedBox(height: 20),
-          AsyncActionButton(
-            label: 'Save',
-            onPressed: () async {
-              final id = widget.tenant['tenantId'];
-              try {
-                await context.read<AppState>().apiClient.patch('/tenants/$id', {
-                  if (_employer.text.isNotEmpty) 'employerName': _employer.text.trim(),
-                  if (_designation.text.isNotEmpty)
-                    'designation': _designation.text.trim(),
-                  if (_workAddress.text.isNotEmpty)
-                    'workAddress': _workAddress.text.trim(),
-                });
-                if (mounted) Navigator.pop(context, true);
-              } catch (e) {
-                if (mounted) {
-                  AppToast.error(context,
-                      e.toString().replaceFirst('Exception: ', ''));
-                }
-              }
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Shared Widgets ───────────────────────────────────────────────────────
-
 class _InfoSection extends StatelessWidget {
-  const _InfoSection({required this.title, required this.items});
+  const _InfoSection({required this.title, required this.items, this.onEdit});
 
   final String title;
   final List<(String, String, IconData)> items;
+
+  /// When set, the card header carries an Edit action (used by the Details tab,
+  /// whose sections are all edited from the one tenant edit screen).
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -2956,11 +2886,37 @@ class _InfoSection extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                    color: PgColors.primary)),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(title,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                          color: PgColors.primary)),
+                ),
+                if (onEdit != null)
+                  InkWell(
+                    onTap: onEdit,
+                    borderRadius: BorderRadius.circular(8),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.edit_outlined, size: 14, color: PgColors.primary),
+                          SizedBox(width: 4),
+                          Text('Edit',
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: PgColors.primary)),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             const SizedBox(height: 12),
             ...items.map((item) => Padding(
                   padding: const EdgeInsets.only(bottom: 10),

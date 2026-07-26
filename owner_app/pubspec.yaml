@@ -9,6 +9,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Kept despite zero direct `CupertinoIcons.*` uses: Flutter's own Cupertino
+  # widgets reference the font, and dropping it makes the icon tree-shaker warn
+  # "Expected to find fonts for CupertinoIcons" — i.e. a glyph would render
+  # blank. Tree-shaking already reduces the font to 848 bytes in the APK.
   cupertino_icons: ^1.0.8
   http: ^1.2.2
   flutter_secure_storage: ^9.2.2
@@ -20,7 +24,10 @@ dependencies:
   shared_preferences: ^2.3.3
   file_selector: ^1.0.4
   url_launcher: ^6.3.0
-  flutter_svg: ^2.0.10+1
+  # Path grammar for the one inline SVG glyph (see widgets/svg_path_icon.dart).
+  # Replaces flutter_svg, whose vector_graphics compiler is far more machinery
+  # than a single static path needs.
+  path_parsing: ^1.1.0
   qr_flutter: ^4.1.0
   pdf: ^3.13.0
   printing: ^5.15.0

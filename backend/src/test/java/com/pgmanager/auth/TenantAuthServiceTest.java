@@ -39,8 +39,13 @@ class TenantAuthServiceTest {
     }
 
     private Map<String, Object> candidate(long id, long org, String orgName, int mustChange) {
+        return candidate(id, org, orgName, mustChange, "ACTIVE");
+    }
+
+    private Map<String, Object> candidate(long id, long org, String orgName, int mustChange, String orgStatus) {
         return Map.of("user_login_id", id, "username", "9876543210@" + org, "organization_id", org,
-                "password_hash", "HASH", "must_change_password", mustChange, "org_name", orgName);
+                "password_hash", "HASH", "must_change_password", mustChange, "org_name", orgName,
+                "org_status", orgStatus);
     }
 
     @Test
@@ -70,6 +75,35 @@ class TenantAuthServiceTest {
 
         assertThatThrownBy(() -> service.login(new TenantLoginRequest("9876543210", "pw", null)))
                 .isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
+    void deactivatedOrganizationRejectedWithForbidden() {
+        when(jdbc.queryForList(anyString(), any(Object[].class)))
+                .thenReturn(List.of(candidate(1L, 10L, "Org A", 0, "INACTIVE")));
+
+        assertThatThrownBy(() -> service.login(new TenantLoginRequest("9876543210", "pw", null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("deactivated");
+        verify(passwordEncoder, never()).matches(anyString(), anyString());
+    }
+
+    @Test
+    void deactivatedOrganizationDroppedFromOrgPicker() {
+        when(jdbc.queryForList(anyString(), any(Object[].class)))
+                .thenReturn(List.of(candidate(1L, 10L, "Org A", 0),
+                        candidate(2L, 20L, "Org B", 0, "SUSPENDED")));
+        when(passwordEncoder.matches(eq("pw"), anyString())).thenReturn(true);
+        AppUserPrincipal principal = new AppUserPrincipal(1L, 100L, 10L, "9876543210@10", "HASH", "TENANT", "ACTIVE", "Ravi");
+        when(userDetailsService.loadUserByUsername("9876543210@10")).thenReturn(principal);
+        when(authService.issueTokensFor(principal))
+                .thenReturn(new AuthResponse("access", "refresh", 10L, "TENANT", "Ravi", false, 100L));
+
+        // Only one org survives the status filter, so there is nothing to disambiguate.
+        var result = service.login(new TenantLoginRequest("9876543210", "pw", null));
+
+        assertThat(result.needsOrgSelection()).isFalse();
+        assertThat(result.auth().organizationId()).isEqualTo(10L);
     }
 
     @Test
