@@ -8,9 +8,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../app_state.dart';
 import 'managers_screen.dart';
 import '../theme/app_theme.dart';
+import '../utils/tenant_login_feature.dart';
 import '../widgets/animations.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/async_action_button.dart';
+import '../widgets/error_retry_view.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -152,7 +154,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/settings'),
+          // Matches the system back button now that Settings pushes rather than
+          // replaces; the go() keeps a deep link straight to this screen working.
+          onPressed: () => context.canPop() ? context.pop() : context.go('/settings'),
         ),
         title: const Text('Profile', style: TextStyle(fontWeight: FontWeight.w700)),
         bottom: PreferredSize(
@@ -255,7 +259,9 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/settings'),
+          // Matches the system back button now that Settings pushes rather than
+          // replaces; the go() keeps a deep link straight to this screen working.
+          onPressed: () => context.canPop() ? context.pop() : context.go('/settings'),
         ),
         title: const Text('Change Password', style: TextStyle(fontWeight: FontWeight.w700)),
         bottom: PreferredSize(
@@ -416,7 +422,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: TextStyle(fontWeight: FontWeight.w600)),
               subtitle: const Text('Personal and work information'),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.go('/settings/profile'),
+              // push, not go: these are drill-downs from Settings, so back must
+              // return here. go replaces the stack, which left nothing to pop.
+              onTap: () => context.push('/settings/profile'),
             ),
           ),
           const SizedBox(height: 8),
@@ -424,7 +432,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _SettingTile(
                 icon: Icons.lock_outline,
                 title: 'Change Password',
-                onTap: () => context.go('/settings/password')),
+                onTap: () => context.push('/settings/password')),
             FutureBuilder<String?>(
               future: context.read<AppState>().storage.read(key: 'biometricEnabled'),
               builder: (context, snapshot) => SwitchListTile(
@@ -695,10 +703,90 @@ class NotificationSettingsScreen extends StatefulWidget {
   @override
   State<NotificationSettingsScreen> createState() => _NotificationSettingsScreenState();
 }
+/// Per-category in-app notification toggles.
+///
+/// The list is held in [State] rather than driven straight off a `FutureBuilder`,
+/// because a toggle has to update *in place*. The previous version re-assigned the
+/// future after every PATCH, so tapping any switch blanked the whole list to a
+/// spinner and replayed the fade-in before the new value appeared — and if the
+/// PATCH failed it was swallowed, the refetch returned the old value, and the
+/// switch silently sprang back with no explanation.
 class _NotificationSettingsScreenState extends State<NotificationSettingsScreen> {
-  late Future<Map<String, dynamic>> future;
+  List<Map<String, dynamic>>? _items;
+  Object? _error;
+  /// Categories with a PATCH in flight — their row shows a spinner and ignores
+  /// further taps, so double-tapping cannot race two writes for one category.
+  final Set<String> _saving = {};
+
   @override
-  void initState() { super.initState(); future = context.read<AppState>().apiClient.get('/notifications/preferences'); }
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  /// `enabled` arrives as a JSON `1`/`0`, not `true`/`false`: the backend reads it
+  /// as `COALESCE(p.enabled, TRUE)` and MySQL Connector/J returns a Number for a
+  /// `TINYINT(1)` seen through `COALESCE` (see the JdbcValues note in CLAUDE.md).
+  /// Anything other than a recognised truthy form counts as off.
+  static bool _isEnabled(Object? raw) => raw == true || raw == 1;
+
+  static String _categoryId(Map<String, dynamic> item) => '${item['category_id']}';
+
+  Future<void> _load() async {
+    setState(() {
+      _items = null;
+      _error = null;
+    });
+    try {
+      final data = await context.read<AppState>().apiClient.get('/notifications/preferences');
+      if (!mounted) return;
+      setState(() => _items = _parse(data));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e);
+    }
+  }
+
+  List<Map<String, dynamic>> _parse(Map<String, dynamic> data) =>
+      ((data['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
+
+  Future<void> _toggle(Map<String, dynamic> item, bool value) async {
+    final id = _categoryId(item);
+    if (_saving.contains(id)) return;
+    final previous = item['enabled'];
+
+    // Optimistic: the switch moves under the finger, so the screen never goes
+    // blank waiting on the network.
+    setState(() {
+      item['enabled'] = value;
+      _saving.add(id);
+    });
+
+    try {
+      // PATCH already returns the full refreshed preference list, so there is no
+      // second GET to make — the extra round-trip was what forced the spinner.
+      final data = await context
+          .read<AppState>()
+          .apiClient
+          .patch('/notifications/preferences', {id: value});
+      if (!mounted) return;
+      final fresh = _parse(data);
+      setState(() {
+        _saving.remove(id);
+        if (fresh.isNotEmpty) _items = fresh;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      // Roll back to what the server still believes, so the UI never claims a
+      // setting was saved when it was not.
+      setState(() {
+        item['enabled'] = previous;
+        _saving.remove(id);
+      });
+      AppToast.error(context, 'Could not update ${item['name']}. Please try again.');
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: const Color(0xFFF5F6FA),
@@ -716,22 +804,47 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
         child: Container(height: 1, color: const Color(0xFFE5E7EB)),
       ),
     ),
-    body: FutureBuilder<Map<String, dynamic>>(future: future, builder: (context, snapshot) {
-      final items = snapshot.data?['items'] as List?;
-      if (items == null) return const Center(child: CircularProgressIndicator());
-      return FadeSlideIn(child: ListView(padding: const EdgeInsets.all(12), children: items.map((raw) {
-        final item = raw as Map<String, dynamic>;
-        final enabled = item['enabled'] == true || item['enabled'] == 1;
-        return Card(child: SwitchListTile(value: enabled, title: Text('${item['name']}', style: const TextStyle(fontWeight: FontWeight.w700)), subtitle: Text('${item['description'] ?? ''}'), onChanged: (value) async {
-          await context.read<AppState>().apiClient.patch('/notifications/preferences', {'${item['category_id']}': value});
-          if (!context.mounted) return;
-          // Block body: an arrow closure here would return the Future and trip
-          // setState's debug assert before the rebuild is scheduled.
-          setState(() { future = context.read<AppState>().apiClient.get('/notifications/preferences'); });
-        }));
-      }).toList()));
-    }),
+    body: _buildBody(),
   );
+
+  Widget _buildBody() {
+    // A failed load used to sit on an endless spinner, because only `data` was
+    // consulted and never `error`.
+    if (_error != null) return ErrorRetryView(error: _error!, onRetry: _load);
+    final items = _items;
+    if (items == null) return const Center(child: CircularProgressIndicator());
+    if (items.isEmpty) {
+      return const EmptyState(
+        icon: Icons.notifications_off_outlined,
+        title: 'No categories',
+        message: 'There are no notification categories to configure.',
+      );
+    }
+    // FadeSlideIn wraps the list once, on the initial build only: it used to be
+    // rebuilt on every toggle, replaying its animation each time.
+    return FadeSlideIn(
+      child: ListView(
+        padding: const EdgeInsets.all(12),
+        children: items.map((item) {
+          final id = _categoryId(item);
+          final saving = _saving.contains(id);
+          return Card(
+            child: SwitchListTile(
+              value: _isEnabled(item['enabled']),
+              title: Text('${item['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text('${item['description'] ?? ''}'),
+              secondary: saving
+                  ? const SizedBox(
+                      width: 20, height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : null,
+              onChanged: saving ? null : (value) => _toggle(item, value),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
 }
 
 // ─── Shared Widgets ───────────────────────────────────────────────────────────
@@ -841,12 +954,10 @@ class _TenantPortalSettingsGroupState extends State<_TenantPortalSettingsGroup> 
   }
 
   Future<void> _checkFeature() async {
-    try {
-      final data = await context.read<AppState>().apiClient.get('/tenants/login-feature');
-      if (mounted) setState(() => _enabled = data['enabled'] == true);
-    } catch (_) {
-      // Feature probe is best-effort — on failure the group simply stays hidden.
-    }
+    // Shared with the property-workspace Complaints quick action, which is gated
+    // on the same flag — the probe fails closed, so the group stays hidden.
+    final enabled = await fetchTenantLoginEnabled(context.read<AppState>().apiClient);
+    if (mounted) setState(() => _enabled = enabled);
   }
 
   Widget _summaryRow(String label, dynamic value) => Padding(

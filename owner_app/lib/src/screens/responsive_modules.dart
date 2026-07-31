@@ -35,10 +35,16 @@ class PgDashboardScreen extends StatefulWidget {
 class _PgDashboardScreenState extends State<PgDashboardScreen> {
   late Future<_DashData> _future;
 
+  /// Unread notifications, driving the red dot on the bell. The dot used to be an
+  /// unconditional Container — nothing measured it, so it was painted on every
+  /// build and could never clear, no matter how many notifications were read.
+  int _unread = 0;
+
   @override
   void initState() {
     super.initState();
     _load();
+    _loadUnread();
   }
 
   void _load() {
@@ -52,6 +58,33 @@ class _PgDashboardScreenState extends State<PgDashboardScreen> {
               ? (results[1]['items'] as List).cast<Map<String, dynamic>>()
               : <Map<String, dynamic>>[],
         ));
+  }
+
+  /// Deliberately its own request rather than a third leg of the `Future.wait`
+  /// above: a failed badge count must not take the whole dashboard down. There is
+  /// no dedicated count endpoint — the notifications list already reports `total`
+  /// for a filter, so `state=UNREAD&size=1` is the count with a one-row payload.
+  /// On failure the dot is hidden rather than left showing, since a badge nobody
+  /// can clear is exactly the bug being fixed.
+  Future<void> _loadUnread() async {
+    try {
+      final data = await context
+          .read<AppState>()
+          .apiClient
+          .get('/notifications?state=UNREAD&size=1');
+      if (!mounted) return;
+      setState(() => _unread = (data['total'] as num?)?.toInt() ?? 0);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _unread = 0);
+    }
+  }
+
+  /// Re-count on return from the notifications screen — reading one there is the
+  /// single most likely reason the badge should now be gone.
+  Future<void> _openNotifications() async {
+    await context.push('/notifications');
+    if (mounted) await _loadUnread();
   }
 
   void _openAddProperty() {
@@ -84,7 +117,10 @@ class _PgDashboardScreenState extends State<PgDashboardScreen> {
             final properties = data?.properties ?? [];
 
             return RefreshIndicator(
-              onRefresh: () async => setState(_load),
+              onRefresh: () async {
+                setState(_load);
+                await _loadUnread();
+              },
               child: CustomScrollView(
                 slivers: [
                   // ── Top bar ─────────────────────────────────────────────
@@ -108,26 +144,31 @@ class _PgDashboardScreenState extends State<PgDashboardScreen> {
                             ),
                           ),
                           const Spacer(),
-                          // Notification bell with badge
+                          // Notification bell — the dot appears only while
+                          // something is actually unread (see _loadUnread).
                           Stack(
                             children: [
                               IconButton(
                                 icon: const Icon(Icons.notifications_outlined,
                                     size: 26, color: PgColors.textPrimary),
-                                onPressed: () => context.push('/notifications'),
+                                tooltip: _unread > 0
+                                    ? '$_unread unread notifications'
+                                    : 'Notifications',
+                                onPressed: _openNotifications,
                               ),
-                              Positioned(
-                                top: 8,
-                                right: 8,
-                                child: Container(
-                                  width: 9,
-                                  height: 9,
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFFEF4444),
-                                    shape: BoxShape.circle,
+                              if (_unread > 0)
+                                Positioned(
+                                  top: 8,
+                                  right: 8,
+                                  child: Container(
+                                    width: 9,
+                                    height: 9,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFFEF4444),
+                                      shape: BoxShape.circle,
+                                    ),
                                   ),
                                 ),
-                              ),
                             ],
                           ),
                         ],

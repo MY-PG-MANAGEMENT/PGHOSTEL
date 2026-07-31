@@ -59,6 +59,25 @@ class BillingControllerTest {
                 .thenReturn(row == null ? List.of() : List.of(row));
     }
 
+    /**
+     * Stubs both {@code queryForList} calls {@code collectPayment} makes, discriminated
+     * by SQL: the idempotency replay lookup (stubbed to "no prior payment") and the
+     * invoice row.
+     *
+     * <p>They must be told apart. Both take two bind parameters, so a single
+     * {@code anyString()} stub matches either and would hand the invoice row to the
+     * replay check — making every payment look like a duplicate and returning
+     * "Payment already recorded" instead of collecting anything.
+     *
+     * @param row the invoice, or {@code null} for a not-found invoice
+     */
+    private void collectStubs(Map<String, Object> row) {
+        when(jdbc.queryForList(contains("FROM payment"), any(Object.class), any(Object.class)))
+                .thenReturn(List.of());
+        when(jdbc.queryForList(contains("FROM invoice"), any(Object.class), any(Object.class)))
+                .thenReturn(row == null ? List.of() : List.of(row));
+    }
+
     private Map<String, Object> invoice(String total, String paid) {
         return Map.of(
                 "invoice_id", 99L,
@@ -74,7 +93,7 @@ class BillingControllerTest {
 
     @Test
     void collectRejectsUnknownInvoice() throws Exception {
-        when(jdbc.queryForList(anyString(), any(Object.class), any(Object.class))).thenReturn(List.of());
+        collectStubs(null);
 
         mvc.perform(post("/api/billing/payments").contentType(MediaType.APPLICATION_JSON).content(body("5000")))
                 .andExpect(status().isNotFound())
@@ -83,7 +102,7 @@ class BillingControllerTest {
 
     @Test
     void collectRejectsAmountExceedingBalance() throws Exception {
-        when(jdbc.queryForList(anyString(), any(Object.class), any(Object.class))).thenReturn(List.of(invoice("5000", "0")));
+        collectStubs(invoice("5000", "0"));
 
         mvc.perform(post("/api/billing/payments").contentType(MediaType.APPLICATION_JSON).content(body("6000")))
                 .andExpect(status().isBadRequest())
@@ -107,7 +126,7 @@ class BillingControllerTest {
 
     @Test
     void collectFullPaymentMarksInvoicePaid() throws Exception {
-        when(jdbc.queryForList(anyString(), any(Object.class), any(Object.class))).thenReturn(List.of(invoice("5000", "0")));
+        collectStubs(invoice("5000", "0"));
         when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
         when(jdbc.queryForObject(eq("SELECT LAST_INSERT_ID()"), eq(Long.class))).thenReturn(500L);
 
@@ -119,13 +138,40 @@ class BillingControllerTest {
 
     @Test
     void collectPartialPaymentMarksInvoicePartial() throws Exception {
-        when(jdbc.queryForList(anyString(), any(Object.class), any(Object.class))).thenReturn(List.of(invoice("5000", "0")));
+        collectStubs(invoice("5000", "0"));
         when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
         when(jdbc.queryForObject(eq("SELECT LAST_INSERT_ID()"), eq(Long.class))).thenReturn(501L);
 
         mvc.perform(post("/api/billing/payments").contentType(MediaType.APPLICATION_JSON).content(body("2000")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("PARTIAL"));
+    }
+
+    /**
+     * A retried payment returns the original receipt instead of an error.
+     *
+     * <p>Regression test. The replay lookup used to sit *after* the exceeds-balance
+     * guard, so retrying a payment that had settled the invoice in full saw balance = 0
+     * and came back 400 "Payment exceeds invoice balance" — the opposite of what an
+     * idempotency key is for. It escaped notice because the only coverage was
+     * {@code BillingIntegrationTest}, which needs Docker and auto-skips locally, so this
+     * assertion is deliberately here in the unit tests where it always runs.
+     */
+    @Test
+    void replayedIdempotencyKeyReturnsTheOriginalPaymentInsteadOfExceedingBalance() throws Exception {
+        // The invoice is already fully paid, so the balance guard would reject any amount.
+        when(jdbc.queryForList(contains("FROM invoice"), any(Object.class), any(Object.class)))
+                .thenReturn(List.of(invoice("5000", "5000")));
+        when(jdbc.queryForList(contains("FROM payment"), any(Object.class), any(Object.class)))
+                .thenReturn(List.of(Map.of("payment_id", 500L, "amount", new BigDecimal("5000"), "status", "RECEIVED")));
+
+        mvc.perform(post("/api/billing/payments").contentType(MediaType.APPLICATION_JSON).content(body("5000")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").value("Payment already recorded"))
+                .andExpect(jsonPath("$.data.payment_id").value(500));
+
+        // No second payment row, and no invoice re-statement.
+        verify(jdbc, never()).update(contains("INSERT INTO payment"), any(Object[].class));
     }
 
     // ── Delete (soft-cancel) is pending-only, and restore is its undo ──────────

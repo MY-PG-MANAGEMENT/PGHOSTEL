@@ -56,14 +56,30 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
       setState(() => _sel = i);
       if (!wide) Navigator.pop(context);
     });
-    return Scaffold(
+    // The sidebar sections are local state, not routes, so on the root /admin
+    // route the system back button had nothing to pop and closed the app from
+    // whichever section the admin was in. Back now unwinds to Dashboard first,
+    // and only bubbles to the platform (exit / minimise) once already there.
+    // An open drawer is not a special case: Scaffold registers a
+    // LocalHistoryEntry for it, and local history is consulted before PopScope,
+    // so back closes the drawer and leaves the section untouched.
+    return PopScope(
+      canPop: _sel == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) setState(() => _sel = 0);
+      },
+      child: Scaffold(
       backgroundColor: const Color(0xFFF5F5FA),
       appBar: wide ? null : AppBar(
-        title: const Text('Admin Console', style: TextStyle(fontWeight: FontWeight.w700)),
+        title: Text(_sel == 0 ? 'Admin Console' : _nav[_sel].$3,
+            style: const TextStyle(fontWeight: FontWeight.w700)),
         backgroundColor: Colors.white,
         foregroundColor: PgColors.ink,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
+        // The leading slot stays the drawer hamburger — it is the only tap
+        // affordance for switching sections on mobile. Back to Dashboard is the
+        // system back button (see PopScope above).
         bottom: const PreferredSize(preferredSize: Size.fromHeight(1), child: Divider(height: 1)),
       ),
       drawer: wide ? null : Drawer(child: sidebar),
@@ -73,6 +89,7 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
               Expanded(child: _body),
             ])
           : _body,
+      ),
     );
   }
 }
