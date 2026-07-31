@@ -12,7 +12,7 @@
 #   4. runtime   — JRE only, non-root, no build toolchain, no source
 #
 # Base images are multi-arch (linux/amd64 + linux/arm64/v8), so this builds and runs
-# unchanged on an Oracle Cloud Ampere A1 instance. Deliberately NOT Alpine: musl's
+# unchanged on whichever architecture the platform gives you. Deliberately NOT Alpine: musl's
 # allocator and thread defaults have repeatedly caused latency outliers under G1 in
 # JVM workloads, and the arm64 Alpine JRE tags lag the Ubuntu ones.
 # =============================================================================
@@ -122,7 +122,8 @@ RUN groupadd --system --gid 10001 appgroup \
 WORKDIR /app
 
 # Writable directories. The container runs with a read-only root filesystem
-# (see docker-compose.yml), so these are the only paths the JVM may write to and
+# (the container filesystem is read-only where the platform allows it), so these are
+# the only paths the JVM may write to and
 # each is backed by a tmpfs or a named volume at runtime.
 RUN mkdir -p /app/logs /app/tmp \
  && chown -R appuser:appgroup /app
@@ -146,7 +147,7 @@ USER appuser:appgroup
 #                           direct buffers (Lettuce/Netty allocate off-heap). Setting
 #                           this to 90 is the classic way to get OOM-killed by the
 #                           kernel while the JVM still believes it has headroom.
-#   ExitOnOutOfMemoryError— die instead of limping. Compose restarts a dead container;
+#   ExitOnOutOfMemoryError— die instead of limping. The platform restarts a dead container;
 #                           nothing rescues a JVM thrashing on a full heap.
 #   HeapDumpOnOutOfMemory — dump to the mounted logs volume so the evidence outlives
 #                           the container.
@@ -174,13 +175,17 @@ ENV SPRING_PROFILES_ACTIVE=prod \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-# 8080 = API traffic (reached only through nginx).
+# 8080 = API traffic. On Koyeb this is the port with the public HTTP route.
 # 9091 = actuator. Deliberately a SEPARATE port: Spring Boot puts the management
 #        endpoints in a child context, so neither the app's security filter chain nor
-#        ApiLogFilter applies to it. That matters here because ApiLogFilter has no path
-#        exclusions — probing /actuator/health on 8080 every 15s would write ~5,700
-#        rows/day into api_request_log per probe source. This port is never published
-#        to the host; it is reachable only from inside the compose network.
+#        ApiLogFilter applies to it. Both halves of that matter:
+#          * ApiLogFilter has no path exclusions, so probing /actuator/health on 8080
+#            every 15s would write thousands of rows a day into api_request_log.
+#          * SecurityConfig ends with anyRequest().authenticated(), so a health check
+#            aimed at 8080 gets 401 and can NEVER pass — the deploy would hang and
+#            roll back on what looks like an auth error.
+#        Declare this port on the Koyeb service with NO route: everything it serves is
+#        unauthenticated, so routing it would publish /actuator/metrics publicly.
 EXPOSE 8080 9091
 
 # Readiness, not liveness: `depends_on: condition: service_healthy` should mean

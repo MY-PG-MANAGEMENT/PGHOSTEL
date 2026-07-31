@@ -1,466 +1,131 @@
 # =============================================================================
-# PG Manager — production stack
+# PG Manager — LOCAL DEVELOPMENT ONLY
 #
-#   Target host : Oracle Cloud Always Free, Ampere A1 (arm64), Ubuntu 24.04 LTS
-#   Compose     : v2 (the `docker compose` plugin, NOT the legacy `docker-compose`)
-#   Run         : docker compose --env-file .env up -d
+#   docker compose up -d                 # PostgreSQL + Redis, nothing else
+#   docker compose --profile app up -d   # ...plus the API in a container
+#   docker compose down                  # stop, keep data
+#   docker compose down -v               # stop and DESTROY the local database
 #
-# Sizing below assumes the full Always Free shape: 4 OCPU / 24 GB RAM. Allocated
-# here: PostgreSQL 6G, API 6G, Redis 1G, nginx 512M — ~13.5G, leaving headroom for the
-# OS, the backup job's pg_dump, and page cache. Re-tune all four together if you
-# run a smaller shape; over-committing memory on a host with no swap gets the
-# kernel OOM-killer involved, and it will pick PostgreSQL.
+# This file is NOT how production runs. Production is Koyeb (application) plus a
+# managed PostgreSQL and a managed Redis — see README.md. There is deliberately no
+# nginx, no certbot, no backup/restore tooling and no server tuning here: every one
+# of those is the managed provider's job now, and keeping a second, subtly different
+# copy of them in the repo is how the two drift apart until the local one is wrong.
 #
-# Security posture applied to every service:
-#   * no-new-privileges  — a setuid binary inside the image cannot escalate
-#   * cap_drop: ALL      — capabilities added back one at a time, only where needed
-#   * read_only rootfs   — everywhere it is achievable (see the PostgreSQL note)
-#   * no published ports except nginx 80/443
+# The credentials below are intentionally weak and intentionally committed. They
+# match the defaults in `backend/src/main/resources/application.yml`, so
+# `./gradlew bootRun` connects with no flags and no local .env. Nothing here is ever
+# reachable from outside your machine, and nothing here is used in production —
+# production secrets live in Koyeb's environment variables and nowhere else.
 # =============================================================================
 
-name: pgmanager
-
-# -----------------------------------------------------------------------------
-# YAML anchor: identical log rotation for every service.
-# Without this, container JSON logs grow unbounded and eventually fill the boot
-# volume — the single most common way a small cloud VM dies at 3am.
-# -----------------------------------------------------------------------------
-x-logging: &default-logging
-  driver: "json-file"
-  options:
-    max-size: "10m"
-    max-file: "5"
-    compress: "true"
+name: pgmanager-dev
 
 services:
 
   # ===========================================================================
-  # PostgreSQL 17 — system of record
+  # PostgreSQL 17 — matches the managed major version used in production.
+  #
+  # No custom postgresql.conf. Tuning a local dev database is pointless (there is
+  # no load to tune for), and on a managed provider you cannot supply one anyway,
+  # so a tuned file here would only teach you settings you cannot use.
   # ===========================================================================
   postgres:
     image: postgres:17-alpine
-    container_name: pgm-postgres
+    container_name: pgm-dev-postgres
     restart: unless-stopped
-    logging: *default-logging
-
-    # `-c config_file=` is the correct way to point PostgreSQL at a config file, and
-    # unlike MySQL's --defaults-file it does NOT drop built-in defaults — anything the
-    # file omits keeps its compiled-in value. The data directory still comes from
-    # PGDATA, so the entrypoint's initdb bootstrap is unaffected.
-    #
-    # The file must be mounted somewhere OTHER than $PGDATA: the entrypoint writes its
-    # own postgresql.conf into the data directory on first init, and a read-only mount
-    # there would abort initialisation.
-    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
 
     environment:
-      POSTGRES_DB:       ${POSTGRES_DB:?POSTGRES_DB is required}
-      POSTGRES_USER:     ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      # scram-sha-256 is the modern default and what the JDBC driver negotiates.
-      # Applies to the roles initdb creates, and to the host rules it generates.
-      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
-      # Keep the cluster in a subdirectory of the volume. If PGDATA is the volume mount
-      # point itself, a `lost+found` (or any stray file) on some filesystems makes
-      # initdb refuse to run on an "existing, non-empty" directory.
+      POSTGRES_DB:       ${POSTGRES_DB:-pg_manager}
+      POSTGRES_USER:     ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # Keep the cluster in a subdirectory of the volume: if PGDATA is the mount
+      # point itself, a stray file there makes initdb refuse to run on an
+      # "existing, non-empty" directory.
       PGDATA:            /var/lib/postgresql/data/pgdata
       TZ:                ${TZ:-Asia/Kolkata}
-      LANG:              C.UTF-8
+
+    ports:
+      # Published so the app can run from your IDE against localhost:5432.
+      # Bound to loopback: on a laptop joining a café network, 0.0.0.0 would put a
+      # database with the password `postgres` on the LAN.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
 
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      # Config is mounted read-only so a compromised container cannot rewrite its own
-      # tuning. Outside PGDATA — see the note on `command:` above.
-      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
-      # *.sql here runs ONCE, only when the data directory is empty. Flyway owns the
-      # schema; this file only asserts the privilege surface (see the comment inside).
-      - ./postgres/init:/docker-entrypoint-initdb.d:ro
-      # Server log on the host so it survives `docker compose down` and can be shipped
-      # or rotated there. Must be chowned to uid 70 (alpine's postgres user) — the
-      # deploy script does this; see scripts/deploy.sh.
-      - ./logs/postgres:/var/log/postgresql
-
-    networks:
-      - data
-
-    # NOT read_only. The entrypoint starts as root to fix ownership on the data
-    # directory before dropping to the postgres user, and the server needs
-    # /var/run/postgresql (its unix socket and pid file) writable. Forcing read_only
-    # means hand-mounting tmpfs paths and redoing it on every image bump, for a
-    # container that already has no published port, no route to the internet, and ALL
-    # capabilities dropped except the four the privilege drop itself requires.
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN          # entrypoint fixes ownership of the data directory
-      - SETGID         # ...then drops from root to the postgres user
-      - SETUID
-      - DAC_OVERRIDE
+      - pgdata:/var/lib/postgresql/data
 
     healthcheck:
-      # `pg_isready` alone returns success against the entrypoint's TEMPORARY bootstrap
-      # server (the one that runs the init scripts on a local socket), so on a first
-      # boot it can report healthy before the real server is accepting TCP. The `-h
-      # 127.0.0.1` forces a TCP check, and the `psql` round-trip proves the SQL layer
-      # actually answers — which is what the API's depends_on is really waiting for.
-      #
-      # PGPASSWORD is required and not optional: POSTGRES_INITDB_ARGS sets
-      # scram-sha-256 for host AND local connections, so an unauthenticated psql fails
-      # with "no password supplied". Without it this check can never pass, the
-      # container sits in `starting` until start_period expires and then goes
-      # unhealthy — and the API never starts, because its depends_on waits on this.
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -q && PGPASSWORD=\"$$POSTGRES_PASSWORD\" psql -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -tAc 'SELECT 1' >/dev/null 2>&1 || exit 1"]
-      interval: 15s
-      timeout: 10s
+      # PGPASSWORD is required: the psql leg fails with "no password supplied"
+      # without it, and then the container never reports healthy.
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -q && PGPASSWORD=\"$$POSTGRES_PASSWORD\" psql -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -tAc 'SELECT 1' >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
       retries: 10
-      start_period: 120s          # crash recovery after an unclean stop can be slow
-
-    # PostgreSQL must be allowed to complete a shutdown checkpoint. Docker sends
-    # SIGTERM, which is a "smart" shutdown: it waits for clients to disconnect. The API
-    # drains in 45s, so this must exceed that or the checkpoint is cut short and the
-    # next boot runs crash recovery.
-    stop_grace_period: 120s
-
-    ulimits:
-      nofile:
-        soft: 65535
-        hard: 65535
-
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 6G
-        reservations:
-          memory: 2G
+      start_period: 30s
 
   # ===========================================================================
-  # Redis 7 — cache only (app.cache.enabled), fail-open
+  # Redis 7 — cache only, and fail-open (see CacheConfig).
+  #
+  # No password, because application.yml's dev default is an empty REDIS_PASSWORD.
+  # Production uses a managed Redis over TLS with a token; see README.md.
   # ===========================================================================
   redis:
     image: redis:7.4-alpine
-    container_name: pgm-redis
+    container_name: pgm-dev-redis
     restart: unless-stopped
-    logging: *default-logging
 
-    # The password is passed on the command line rather than written into redis.conf
-    # so the secret lives only in .env and the process environment — never in a file
-    # that gets committed, copied or backed up. It is visible to `ps` *inside* this
-    # container, which has no shell access path from outside and no published port.
-    command: >
-      sh -c 'exec redis-server /usr/local/etc/redis/redis.conf
-      --requirepass "$$REDIS_PASSWORD"'
-
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
-      TZ: ${TZ:-Asia/Kolkata}
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
 
     volumes:
-      - redis_data:/data
-      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
-
-    networks:
-      - data
-
-    read_only: true
-    tmpfs:
-      - /tmp:size=32m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+      - redisdata:/data
 
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG || exit 1"]
-      interval: 15s
-      timeout: 5s
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG || exit 1"]
+      interval: 10s
+      timeout: 3s
       retries: 5
-      start_period: 20s
-
-    stop_grace_period: 30s        # let the final AOF fsync / RDB save complete
-
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 1G
-        reservations:
-          memory: 256M
 
   # ===========================================================================
-  # Spring Boot API
+  # The API in a container. Behind a profile, because the normal loop is to run it
+  # from the IDE (or `./gradlew bootRun`) against the two services above — this is
+  # for reproducing the built image locally, i.e. what Koyeb actually deploys.
+  #
+  #   docker compose --profile app up -d --build
   # ===========================================================================
   api:
-    # In production this is PULLED, not built — CI publishes the tag and the deploy
-    # script only ever runs `docker compose pull`. The build block is kept so the
-    # same file can build locally with `docker compose build api`.
-    image: ${API_IMAGE:-ghcr.io/your-org/pg-manager-backend}:${IMAGE_TAG:-latest}
+    profiles: ["app"]
     build:
       context: ..                       # repository root — the Dockerfile needs backend/
       dockerfile: deployment/Dockerfile
-      args:
-        BUILD_VERSION: ${IMAGE_TAG:-dev}
-        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
-        BUILD_DATE: ${BUILD_DATE:-unknown}
+    container_name: pgm-dev-api
 
-    container_name: pgm-api
-    restart: unless-stopped
-    logging: *default-logging
-
-    # Reaps zombie processes. Cheap insurance for anything the JVM forks.
-    init: true
-
-    # Explicit per-variable mapping, NOT `env_file: .env`. env_file would inject
-    # every unrelated secret and every other unrelated secret into this container's
-    # environment, where any code path that dumps env — a stack trace, a heap dump,
-    # an actuator endpoint left exposed — would leak them.
     environment:
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
-      SERVER_PORT:     ${SERVER_PORT:-8080}
-      MANAGEMENT_PORT: ${MANAGEMENT_PORT:-9091}
+      # NOT the prod profile: application-prod.yml requires JWT_SECRET and
+      # APP_PUBLIC_BASE_URL with no defaults, and turns Flyway's strict validation
+      # on. Running the default profile locally keeps this a one-command start.
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-default}
+      SPRING_DATASOURCE_URL:      jdbc:postgresql://postgres:5432/${POSTGRES_DB:-pg_manager}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      TZ: ${TZ:-Asia/Kolkata}
 
-      # --- database (service name resolves on the `data` network) ---
-      DB_HOST:     postgres
-      DB_PORT:     "5432"
-      DB_NAME:     ${POSTGRES_DB}
-      DB_USERNAME: ${POSTGRES_USER}
-      DB_PASSWORD: ${POSTGRES_PASSWORD}
-      DB_POOL_MAX: ${DB_POOL_MAX:-30}
-      DB_POOL_MIN: ${DB_POOL_MIN:-10}
-
-      # --- cache ---
-      CACHE_ENABLED:  ${CACHE_ENABLED:-true}
-      REDIS_HOST:     redis
-      REDIS_PORT:     "6379"
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-
-      # --- security ---
-      # No default. application-prod.yml declares ${JWT_SECRET} with no fallback, so
-      # the context fails to start rather than silently signing tokens with the
-      # development secret that is committed in application.yml.
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
-
-      # Origin baked into the tenant self check-in QR code. Must be the public HTTPS
-      # domain — a tenant scans this on a phone that is not on your LAN.
-      APP_PUBLIC_BASE_URL: https://${DOMAIN_NAME:?DOMAIN_NAME is required}
-
-      # --- outbound mail (optional; unset MAIL_HOST disables sending) ---
-      MAIL_HOST:       ${MAIL_HOST:-}
-      MAIL_PORT:       ${MAIL_PORT:-587}
-      MAIL_USERNAME:   ${MAIL_USERNAME:-}
-      MAIL_PASSWORD:   ${MAIL_PASSWORD:-}
-      EMAIL_ENABLED:   ${EMAIL_ENABLED:-false}
-      EMAIL_FROM:      ${EMAIL_FROM:-no-reply@pgmanager.app}
-      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-PG Manager}
-
-      # --- api request logging (com.pgmanager.apilog) ---
-      API_LOG_ENABLED:        ${API_LOG_ENABLED:-true}
-      API_LOG_RETENTION_DAYS: ${API_LOG_RETENTION_DAYS:-10}
-      API_LOG_MASK:           "true"      # never turn this off; raw passwords would be persisted
-
-      # --- swagger: off in production, blocked at nginx as well (defence in depth) ---
-      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
-
-      TZ:      ${TZ:-Asia/Kolkata}
-      LANG:    C.UTF-8
-      LC_ALL:  C.UTF-8
-      JAVA_OPTS: ${JAVA_OPTS:--XX:+UseContainerSupport -XX:MaxRAMPercentage=70.0 -XX:InitialRAMPercentage=40.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/app/logs -Djava.awt.headless=true -Dfile.encoding=UTF-8 -Djava.io.tmpdir=/app/tmp}
-
-    volumes:
-      - api_logs:/app/logs
-
-    networks:
-      - data      # -> postgres, redis
-      - edge      # -> nginx
-
-    # No `ports:`. The API is unreachable from the internet; nginx is the only way in.
-    # To debug from the host, bind to loopback only and never 0.0.0.0:
-    #   ports:
-    #     - "127.0.0.1:8080:8080"
-
-    read_only: true
-    tmpfs:
-      # The JVM needs a writable temp dir; -Djava.io.tmpdir points at /app/tmp.
-      # noexec matters: it stops a dropped payload being executed from tmp.
-      - /app/tmp:size=256m,mode=1777,noexec,nosuid,nodev
-      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    ports:
+      - "127.0.0.1:8080:8080"
+      # Actuator runs in Spring Boot's management child context on its own port.
+      # Published here only so you can curl it; see README.md for why it is separate.
+      - "127.0.0.1:9091:9091"
 
     depends_on:
       postgres:
-        condition: service_healthy      # Flyway would fail against a booting PostgreSQL
+        condition: service_healthy      # Flyway would fail against a booting database
       redis:
         condition: service_healthy
 
-    # Longer than the app's own 30s drain (spring.lifecycle.timeout-per-shutdown-phase)
-    # so a slow in-flight request finishes rather than being cut off by Docker.
-    stop_grace_period: 45s
-
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 6G
-        reservations:
-          memory: 1G
-
-  # ===========================================================================
-  # nginx — TLS termination, reverse proxy, static hosting, rate limiting
-  # ===========================================================================
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: pgm-nginx
-    restart: unless-stopped
-    logging: *default-logging
-
-    # Reload every 6h so a certificate renewed by the certbot sidecar is picked up
-    # without a restart. `exec` on the last command keeps nginx as PID 1.
-    command: >
-      sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done &
-      exec nginx -g "daemon off;"'
-
-    environment:
-      # Consumed by the official image's envsubst entrypoint, which renders
-      # /etc/nginx/templates/*.template into /etc/nginx/conf.d/. Only variables that
-      # exist in the environment are substituted, so nginx's own $host / $remote_addr
-      # are left untouched.
-      DOMAIN_NAME: ${DOMAIN_NAME}
-      TZ: ${TZ:-Asia/Kolkata}
-      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/conf.d
-
-    ports:
-      # The only two ports exposed by this stack. Bind 0.0.0.0 here — Oracle Cloud's
-      # security list plus Cloudflare are the outer perimeter.
-      - "80:80"
-      - "443:443"
-
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/templates:ro        # *.template -> rendered to conf.d
-      - ./nginx/snippets:/etc/nginx/snippets:ro
-      - ./nginx/www:/var/www/html:ro                  # static / Flutter web build
-      - certbot_certs:/etc/letsencrypt:ro
-      - certbot_www:/var/www/certbot:ro
-      - ./logs/nginx:/var/log/nginx
-
-    networks:
-      - edge
-
-    read_only: true
-    tmpfs:
-      - /var/cache/nginx:size=256m,mode=0755
-      - /var/run:size=16m,mode=0755
-      - /etc/nginx/conf.d:size=8m,mode=0755          # envsubst renders here at boot
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - NET_BIND_SERVICE      # required to listen on 80/443 as a non-root worker
-      - CHOWN                 # entrypoint fixes cache dir ownership
-      - SETGID
-      - SETUID
-      - DAC_OVERRIDE
-
-    healthcheck:
-      # busybox wget: the alpine image has no curl. /nginx-health is served on :80
-      # ahead of the HTTPS redirect precisely so this probe does not follow a 301.
-      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://127.0.0.1/nginx-health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-
-    depends_on:
-      api:
-        condition: service_healthy
-
-    stop_grace_period: 30s
-
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-
-  # ===========================================================================
-  # certbot — Let's Encrypt renewal sidecar
-  #
-  # Issuance is a one-off run by scripts/init-letsencrypt.sh. This container only
-  # RENEWS: it wakes twice a day (the interval Let's Encrypt recommends, jittered by
-  # certbot itself) and exits quietly when there is nothing within 30 days of expiry.
-  # nginx picks up a renewed cert on its own 6-hourly reload above.
-  # ===========================================================================
-  certbot:
-    image: certbot/certbot:latest
-    container_name: pgm-certbot
-    restart: unless-stopped
-    logging: *default-logging
-
-    entrypoint: >
-      sh -c 'trap exit TERM;
-      while :; do
-        certbot renew --webroot -w /var/www/certbot --quiet --no-random-sleep-on-renew;
-        sleep 12h & wait $${!};
-      done'
-
-    volumes:
-      - certbot_certs:/etc/letsencrypt
-      - certbot_www:/var/www/certbot
-
-    environment:
-      TZ: ${TZ:-Asia/Kolkata}
-
-    # No network alias needed; it talks outbound only.
-    networks:
-      - edge
-
-    security_opt:
-      - no-new-privileges:true
-
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: 256M
-
-# =============================================================================
-# Networks
-# =============================================================================
-networks:
-  # nginx <-> api. Has a route out for certbot's ACME calls.
-  edge:
-    name: pgm-edge
-    driver: bridge
-
-  # api <-> postgres/redis. `internal: true` removes the default gateway entirely, so
-  # even a full RCE inside the database container has no path to the internet —
-  # no reverse shell, no data exfiltration over HTTP.
-  data:
-    name: pgm-data
-    driver: bridge
-    internal: true
-
-# =============================================================================
-# Volumes
-#
-# Named volumes (not bind mounts) for state: they survive `docker compose down`,
-# are managed by the daemon, and on this host live under /var/lib/docker/volumes.
-# Back them up with scripts/backup.sh — a `docker volume rm` is unrecoverable.
-# =============================================================================
 volumes:
-  postgres_data:
-    name: pgm-postgres-data
-  redis_data:
-    name: pgm-redis-data
-  api_logs:
-    name: pgm-api-logs
-  certbot_certs:
-    name: pgm-certbot-certs
-  certbot_www:
-    name: pgm-certbot-www
+  pgdata:
+    name: pgm-dev-pgdata
+  redisdata:
+    name: pgm-dev-redisdata
