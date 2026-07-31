@@ -17,18 +17,19 @@ server:
   port: ${SERVER_PORT:8080}
 
   # Stop accepting new connections, let in-flight requests finish, then shut down.
-  # Paired with spring.lifecycle.timeout-per-shutdown-phase below and the 45s
-  # stop_grace_period in docker-compose.yml (which must be the larger of the two, or
-  # Docker SIGKILLs the JVM mid-drain).
+  # Paired with spring.lifecycle.timeout-per-shutdown-phase below, which must stay
+  # under the platform's termination grace period — Koyeb sends SIGTERM and then
+  # SIGKILLs; a drain longer than its grace period is cut off mid-request.
   shutdown: graceful
 
-  # Trust X-Forwarded-* from nginx. Without this Tomcat believes every request
-  # arrived over plain HTTP on port 8080, so any absolute URL the app builds comes
-  # out as http://api:8080/... and request.getRemoteAddr() returns the proxy.
+  # Trust X-Forwarded-* from Koyeb's edge. Without this Tomcat believes every
+  # request arrived over plain HTTP, so any absolute URL the app builds comes out as
+  # http://...:8080/ and request.getRemoteAddr() returns the proxy rather than the
+  # client — which also means api_request_log records the proxy IP for every hit.
   #
-  # Safe ONLY because nothing reaches this port except nginx — the container
-  # publishes no ports and sits on an internal Docker network. Exposing 8080
-  # directly would let a client forge these headers.
+  # Safe because the container is only reachable through Koyeb's load balancer. It
+  # would NOT be safe on a service exposed directly to the internet: a client could
+  # then forge these headers and spoof both the scheme and its own IP.
   forward-headers-strategy: native
 
   error:
@@ -59,9 +60,14 @@ server:
     max-swallow-size: 25MB
 
   compression:
-    # nginx already gzips (see nginx.conf). Doing it twice wastes CPU on the JVM
-    # side and gains nothing, so it stays off here.
-    enabled: false
+    # ON now. Under the previous setup nginx gzipped responses and doing it twice
+    # wasted CPU; Koyeb's edge does not compress application responses, so without
+    # this the JSON goes out raw — which is felt directly by a tenant on mobile
+    # data, since the list endpoints are the biggest payloads in the API.
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/plain,text/css,application/javascript
+    # Below ~1KB the compression costs more than it saves.
+    min-response-size: 1024
 
 spring:
   lifecycle:
@@ -73,26 +79,57 @@ spring:
   # Database
   # ---------------------------------------------------------------------------
   datasource:
-    # The database itself is created by the PostgreSQL container's POSTGRES_DB on first
-    # boot; the app only ever connects to it. PostgreSQL has no "create if missing"
-    # connection option, which is the safer default anyway: an app that can create
-    # databases is an app that can silently create the wrong one after a typo in
-    # DB_NAME — then run Flyway into it and look perfectly healthy.
+    # ONE variable, not host/port/name/user/password assembled here.
     #
-    # reWriteBatchedInserts is the PostgreSQL equivalent of MySQL's
-    # rewriteBatchedStatements: it collapses a JDBC batch into one multi-row INSERT,
-    # which is what makes the CSV bulk import and the api_request_log writes cheap.
-    # (The prepared-statement cache settings from the MySQL URL have no equivalent —
-    # the PostgreSQL driver caches server-side prepared statements by default.)
-    url: jdbc:postgresql://${DB_HOST:postgres}:${DB_PORT:5432}/${DB_NAME:pg_manager}?reWriteBatchedInserts=true&ApplicationName=pg-manager-backend
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
+    # Every managed PostgreSQL provider (Neon, Supabase, Koyeb, RDS) hands you a
+    # single connection string, and splitting it into parts means transcribing five
+    # fields by hand into Koyeb's environment — where the failure mode for getting
+    # one wrong is a startup error at 2am rather than a copy-paste. Paste the whole
+    # thing into SPRING_DATASOURCE_URL instead.
+    #
+    # NO DEFAULT. A missing value must fail the context at startup rather than
+    # silently fall back to the localhost URL committed in application.yml, which in
+    # production would mean an app that boots, finds no database, and reports itself
+    # unhealthy for a reason that is not obvious from the logs.
+    #
+    # The URL MUST carry `sslmode=require` (most providers already include it in the
+    # string they give you — check). The database is reached across the public
+    # internet here, unlike the Docker-network setup this replaced, and the
+    # PostgreSQL driver's default is `prefer`: it will quietly fall back to an
+    # UNENCRYPTED connection if the TLS handshake fails, carrying tenant data and
+    # payment rows in the clear. `require` refuses instead. `verify-full` is stronger
+    # still (it also checks the hostname against the certificate, defeating an active
+    # MITM) and is worth using if your provider documents a CA bundle.
+    #
+    # Two parameters worth appending if the provider has not:
+    #   reWriteBatchedInserts=true   collapses a JDBC batch into one multi-row INSERT
+    #                                — what makes the CSV bulk import and the
+    #                                api_request_log writes cheap
+    #   ApplicationName=pg-manager-backend
+    #                                labels the connection in pg_stat_activity, so
+    #                                the provider's dashboard tells you which app a
+    #                                slow query came from
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
     hikari:
       pool-name: pgm-pool
-      maximum-pool-size: ${DB_POOL_MAX:30}
-      minimum-idle: ${DB_POOL_MIN:10}
+      # 10, not the 30 this used when the database was a dedicated container on the
+      # same box. A managed instance enforces a connection ceiling (free tiers are
+      # often 20-60 TOTAL), PostgreSQL forks a backend process per connection, and
+      # Koyeb may run more than one instance of this service — so the real budget is
+      # `maximum-pool-size x instance count`, and exceeding it fails as
+      # "too many clients already" under exactly the load you added instances for.
+      #
+      # If your provider offers a POOLER endpoint (PgBouncer), prefer it in
+      # SPRING_DATASOURCE_URL and raise this. One caveat: a pooler in transaction
+      # mode cannot hold server-side prepared statements across a checkout, so append
+      # `prepareThreshold=0` to the URL or you will see "prepared statement S_1
+      # already exists" under concurrency.
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: ${DB_POOL_MIN:2}
 
       # Fail a request that cannot get a connection in 20s rather than letting
       # Tomcat threads pile up behind an exhausted pool.
@@ -100,9 +137,12 @@ spring:
       validation-timeout: 5000
       idle-timeout: 300000
 
-      # MUST be lower than idle_session_timeout (600s in postgres/postgresql.conf). If the
-      # server closes an idle connection the pool still considers valid, the next query on
-      # it fails with "connection has been closed". 540s leaves a 60s margin.
+      # MUST be lower than whatever idle timeout the managed provider enforces (and
+      # than any idle timeout on the network path — a cloud load balancer will also
+      # drop a quiet TCP connection). If the far end closes a connection the pool
+      # still believes is good, the next query on it fails with "connection has been
+      # closed". Check your provider's value; 540s (9 min) is under the common 10-min
+      # default with a 60s margin.
       max-lifetime: 540000
 
       # Log a warning when a connection is held for over 30s. Almost always an
@@ -158,30 +198,48 @@ spring:
     clean-disabled: true
 
     # NOTE on rolling back across a migration: Flyway's default
-    # ignore-migration-patterns is `*:future`, so deploying an OLDER jar over a
+    # ignore-migration-patterns is `*:future`, so redeploying an OLDER image over a
     # database that has newer migrations applied does not fail here — it fails a
     # moment later, in Hibernate's ddl-auto=validate, with a less obvious message.
-    # scripts/rollback.sh detects and warns about this case before you hit it.
+    #
+    # Koyeb's one-click rollback swaps the IMAGE ONLY and knows nothing about your
+    # schema, so rolling back across a release that added a migration needs a database
+    # restore from the provider's point-in-time recovery too. Rolling FORWARD with a
+    # fix is almost always the better option — see README.md.
 
   # ---------------------------------------------------------------------------
   # Redis
   # ---------------------------------------------------------------------------
   data:
     redis:
-      host: ${REDIS_HOST:redis}
+      host: ${REDIS_HOST}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
-      # Short timeouts on purpose. The cache is fail-open, so a slow Redis must
-      # degrade to a direct database read quickly rather than adding its latency to
-      # every request on top of the query it was meant to avoid.
+      ssl:
+        # ON by default here, unlike the dev profile. Redis is now reached over the
+        # public internet rather than a private Docker network, and every managed
+        # provider (Upstash, Redis Cloud) requires TLS — the password is sent in the
+        # first command of the connection, so a plaintext connection leaks the
+        # credential itself, not just the cached values.
+        #
+        # Set REDIS_SSL=false only for a Redis on a private network you control.
+        enabled: ${REDIS_SSL:true}
+      # Short timeouts on purpose, and they matter more now than they did on a local
+      # network: the cache is fail-open (CacheErrorHandler swallows failures and falls
+      # through to a direct database read), so a slow or unreachable Redis must give
+      # up fast rather than adding internet latency to every request on top of the
+      # query it was meant to avoid.
       timeout: 2000ms
       connect-timeout: 2000ms
       lettuce:
         pool:
           enabled: true
-          max-active: 16
-          max-idle: 8
-          min-idle: 2
+          # Smaller than the 16 used against a co-located Redis: managed free tiers
+          # cap concurrent connections (Upstash's is low), and this is multiplied by
+          # the number of Koyeb instances.
+          max-active: ${REDIS_POOL_MAX:8}
+          max-idle: 4
+          min-idle: 1
           max-wait: 1000ms
         shutdown-timeout: 200ms
 
@@ -209,30 +267,40 @@ spring:
       enabled: false
 
 # =============================================================================
-# Actuator — on a SEPARATE PORT. This is the single most important choice in
-# this file, and it is doing three jobs at once:
+# Actuator — on a SEPARATE PORT (9091). Keep it that way.
+#
+# On Koyeb this means declaring TWO ports on the service: 8080 with a public HTTP
+# route, and 9091 with NO route, carrying the health check
+# (/actuator/health/readiness). Three things depend on the split:
 #
 #   1. api_request_log stays clean. ApiLogFilter has no path exclusions
 #      (shouldNotFilter only consults logging.api.enabled), so a health probe on the
-#      main port would be persisted like any other request. At a 15s interval that is
-#      ~5,700 rows a day per probe source, on the fastest-growing table in the schema.
-#      Spring Boot puts management endpoints in a child context, and filter beans from
-#      the parent are not registered there — so probes never reach the filter.
+#      main port would be persisted like any other request — thousands of rows a
+#      day, on the fastest-growing table in the schema. Spring Boot puts management
+#      endpoints in a child context and does not register the parent's filter beans
+#      there, so probes never reach the filter.
 #
-#   2. It is unreachable from the internet. The port is not published by
-#      docker-compose.yml, and nginx proxies exactly one path to it
-#      (/actuator/health/readiness) rather than the prefix.
+#   2. It is not routed, so it is not on the internet. Everything below is
+#      UNAUTHENTICATED to anyone who can reach the port — which is precisely why it
+#      must not get a public route. Giving 9091 a route publishes /actuator/metrics
+#      to the world.
 #
-#   3. It needs no change to SecurityConfig. The parent context's filter chain does
-#      not apply to the management port either — which is the flip side of the same
-#      coin, and precisely WHY points 1 and 2 are load-bearing: everything below is
-#      unauthenticated to anyone who can reach the port.
+#   3. It needs no change to SecurityConfig — the parent filter chain does not
+#      apply to the management port.
+#
+# DO NOT "simplify" this by setting MANAGEMENT_PORT=8080. Actuator then moves into
+# the MAIN context, where SecurityConfig's `.anyRequest().authenticated()` applies:
+# the health check gets 401, never passes, and Koyeb never brings the instance into
+# rotation. The deploy just hangs and rolls back, with a 401 in the logs that looks
+# like a credentials problem rather than a port one. If the platform genuinely
+# cannot probe a second port, the fix is a `permitAll` for /actuator/health in
+# SecurityConfig plus a path exclusion in ApiLogFilter — not this variable.
 # =============================================================================
 management:
   server:
     port: ${MANAGEMENT_PORT:9091}
-    # Bind to all interfaces within the container network namespace so the nginx
-    # container can reach it; the port is not published to the host.
+    # Bind to all interfaces inside the container so the platform's health checker
+    # can reach it. Safe only because the port carries no public route — see above.
     address: 0.0.0.0
 
   endpoints:
@@ -260,8 +328,8 @@ management:
         liveness:
           include: livenessState,ping
         # Readiness = "can this instance serve requests". Includes the database,
-        # because it cannot. Used by the Docker HEALTHCHECK, by
-        # `depends_on: service_healthy`, and by deploy.sh's rollout gate.
+        # because it cannot. This is the endpoint Koyeb's health check must target,
+        # and the gate that decides whether a new deploy takes traffic.
         #
         # Redis is EXCLUDED on purpose: the cache is fail-open (CacheErrorHandler
         # swallows failures and falls through to a direct DB read), so a Redis
@@ -336,8 +404,13 @@ app:
 #
 # Off by default. The OpenAPI document enumerates every endpoint, every role guard
 # and every DTO field in the system — a complete map for anyone probing the API.
-# nginx also returns 403 for these paths, so enabling this alone does not expose
-# them; both locks have to be opened.
+#
+# THIS IS NOW THE ONLY LOCK. Under the previous setup nginx also returned 403 for
+# these paths, so exposing the docs took two mistakes; there is no nginx in front of
+# the app on Koyeb, and SecurityConfig deliberately permitAll's `/swagger-ui/**` and
+# `/v3/api-docs/**` (they are useless behind auth). So setting SWAGGER_ENABLED=true
+# in the Koyeb environment publishes the full API map to the internet immediately,
+# with nothing behind it. Turn it on to debug, turn it off again.
 # =============================================================================
 springdoc:
   api-docs:
@@ -349,13 +422,15 @@ springdoc:
 # =============================================================================
 # Logging
 #
-# Two destinations: stdout (captured by Docker's json-file driver, rotated at
-# 10m x 5 by docker-compose.yml) and a rolling file on the api_logs volume for
-# anything that needs to outlive the container.
+# stdout ONLY. The previous setup also wrote a rolling file to a Docker volume,
+# which is actively wrong on a managed platform: the container filesystem is
+# ephemeral, so a "persistent" log is lost on every deploy, restart and scale event
+# — while still consuming the container's disk and eventually filling it. Koyeb
+# captures stdout and that is the only copy that survives.
 #
-# Note this is application logging only. The per-request audit trail is the
-# separate `apilog` framework writing to api_request_log — its configuration is
-# inherited from application.yml and is not repeated here.
+# Note this is application logging only. The per-request audit trail is the separate
+# `apilog` framework writing to api_request_log — which IS durable, because it is in
+# the database. That is where to look for what a client actually sent.
 # =============================================================================
 logging:
   level:
@@ -378,21 +453,9 @@ logging:
     org.springframework.security: WARN
     org.springframework.web: WARN
 
-  file:
-    name: /app/logs/pg-manager.log
-
-  logback:
-    rollingpolicy:
-      file-name-pattern: /app/logs/pg-manager.%d{yyyy-MM-dd}.%i.log.gz
-      max-file-size: 50MB
-      # Hard ceiling across all files. The volume is not unlimited, and an
-      # unbounded log directory eventually stops the container from writing at all.
-      total-size-cap: 1GB
-      max-history: 14
-      clean-history-on-start: true
-
   pattern:
-    # Console: no timestamp. Docker's json-file driver already records one per line,
-    # and two timestamps per entry makes `docker compose logs` hard to read.
-    console: "%-5level [%thread] %logger{36} - %msg%n"
-    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{40} - %msg%n"
+    # Timestamp INCLUDED, unlike the previous Docker setup where the json-file driver
+    # stamped every line and two timestamps made the output hard to read. Koyeb's log
+    # viewer shows its own ingest time, which is not the same instant as the event —
+    # so without this you cannot correlate a log line with an api_request_log row.
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
