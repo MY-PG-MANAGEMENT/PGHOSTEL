@@ -23,11 +23,41 @@ public class NotificationService {
 
     // ─── Core send ────────────────────────────────────────────────────────────
 
+    /** In-app is the channel the owner-facing Notification Settings screen writes. */
+    private static final String CH_IN_APP = "IN_APP";
+
+    /**
+     * Fans a notification out to an org's owner/manager logins — but only to those
+     * who have switched that category **on** in Notification Settings.
+     *
+     * <p>This used to select every OWNER/PROPERTY_MANAGER/MANAGER unconditionally and
+     * never look at {@code notification_preference} at all. The settings screen wrote
+     * {@code IN_APP} rows that nothing ever read, so the toggles had no effect
+     * whatsoever: switching a category off changed a row in the database and the
+     * notifications kept arriving.
+     *
+     * <p>The join is an <b>INNER</b> join on {@code enabled = TRUE}, which makes the
+     * feature <b>opt-in</b>: no preference row means no notification. That is the
+     * deliberate default-off behaviour — {@code COALESCE(p.enabled, FALSE)} in
+     * {@code NotificationController.preferences()} is the same default on the read
+     * side, so the switch an owner sees and the delivery they get always agree.
+     * Contrast {@link #optedOut} on the tenant email path, which is opt-<i>out</i>:
+     * tenants have no preferences UI, so gating them on a row they cannot create
+     * would silently stop every tenant notification.
+     *
+     * <p>DISTINCT because one party can hold more than one {@code user_login} row;
+     * without it a notification would be inserted for the same recipient twice.
+     */
     public void notifyOwners(Long organizationId, String categoryId, String title, String message,
                              String entityType, Long entityId, boolean important) {
         List<Long> partyIds = jdbc.queryForList(
-                "SELECT party_id FROM user_login WHERE organization_id = ? AND role_type_id IN ('OWNER','PROPERTY_MANAGER','MANAGER')",
-                Long.class, organizationId);
+                "SELECT DISTINCT ul.party_id FROM user_login ul " +
+                        "JOIN notification_preference np ON np.party_id = ul.party_id " +
+                        "AND np.category_id = ? AND np.channel_type_id = ? AND np.enabled = TRUE " +
+                        "WHERE ul.organization_id = ? AND ul.role_type_id IN ('OWNER','PROPERTY_MANAGER','MANAGER')",
+                Long.class, categoryId, CH_IN_APP, organizationId);
+        // Nobody opted in: return before the INSERT, so we do not accumulate
+        // notification rows that have no recipients and can never be read.
         if (partyIds.isEmpty()) return;
 
         jdbc.update(

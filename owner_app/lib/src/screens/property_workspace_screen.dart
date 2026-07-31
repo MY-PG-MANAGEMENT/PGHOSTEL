@@ -13,6 +13,7 @@ import 'complaints_screen.dart';
 import 'temporary_stay_screen.dart';
 import 'reports_screen.dart';
 import 'room_screen.dart' show AssignBedSheet;
+import '../utils/tenant_login_feature.dart';
 import '../widgets/animations.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/error_retry_view.dart';
@@ -284,10 +285,17 @@ class _PropertyDashboardTab extends StatefulWidget {
 class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
   late Future<Map<String, dynamic>> _statsFuture;
 
+  /// Complaints are raised by tenants through the tenant portal, so the quick
+  /// action is pointless — and misleading — for an org whose Tenant Login is off:
+  /// the list could only ever be empty. Kept out of the stats future on purpose,
+  /// so a feature-probe failure cannot take the whole Overview tab down with it.
+  bool _tenantLoginEnabled = false;
+
   @override
   void initState() {
     super.initState();
     _loadStats();
+    _loadTenantLoginFeature();
   }
 
   void _loadStats() {
@@ -295,6 +303,12 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
         .read<AppState>()
         .apiClient
         .get('/properties/${widget.propertyId}/stats');
+  }
+
+  Future<void> _loadTenantLoginFeature() async {
+    final enabled =
+        await fetchTenantLoginEnabled(context.read<AppState>().apiClient);
+    if (mounted) setState(() => _tenantLoginEnabled = enabled);
   }
 
   void _showVacantBeds(BuildContext context) {
@@ -534,23 +548,26 @@ class _PropertyDashboardTabState extends State<_PropertyDashboardTab> {
                           ),
                         ),
                       ),
-                      _QuickActionCard(
-                        icon: Icons.support_agent_outlined,
-                        iconBg: const Color(0xFFEDE9FE),
-                        iconColor: const Color(0xFF6D28D9),
-                        title: 'Complaints',
-                        subtitle: 'Tenant issues',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ComplaintsScreen(
-                              propertyId: widget.propertyId,
-                              propertyName:
-                                  '${widget.property['facilityName'] ?? 'Property'}',
+                      // Only when the org has Tenant Login (super-admin opt-in) —
+                      // see _tenantLoginEnabled.
+                      if (_tenantLoginEnabled)
+                        _QuickActionCard(
+                          icon: Icons.support_agent_outlined,
+                          iconBg: const Color(0xFFEDE9FE),
+                          iconColor: const Color(0xFF6D28D9),
+                          title: 'Complaints',
+                          subtitle: 'Tenant issues',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ComplaintsScreen(
+                                propertyId: widget.propertyId,
+                                propertyName:
+                                    '${widget.property['facilityName'] ?? 'Property'}',
+                              ),
                             ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ],

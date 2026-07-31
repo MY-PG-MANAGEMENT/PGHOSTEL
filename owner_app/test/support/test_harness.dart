@@ -10,10 +10,11 @@ import 'package:pg_manager_owner_app/src/app_state.dart';
 import 'package:pg_manager_owner_app/src/services/api_client.dart';
 
 /// A test double for [ApiClient] that lets each test decide, per request path,
-/// whether a `get`/`post` call should resolve with a value, throw an error, or
-/// hang on a pending future (so the loading spinner can be observed).
+/// whether a `get`/`post`/`put`/`patch`/`delete` call should resolve with a value,
+/// throw an error, or hang on a pending future (so a loading spinner or an
+/// in-flight save can be observed).
 ///
-/// `get`/`post` are non-final on [ApiClient], so overriding them is safe. We
+/// These methods are all non-final on [ApiClient], so overriding them is safe. We
 /// still call `super(...)` with a real (canonicalised) `const
 /// FlutterSecureStorage()` — no network or storage I/O ever happens because the
 /// overrides never call into the parent's `_send`.
@@ -40,6 +41,15 @@ class FakeApiClient extends ApiClient {
 
   /// Records every `delete` path requested, in order.
   final List<String> deleteCalls = [];
+
+  /// Per-path PATCH responders. The key is the exact path passed to `patch`.
+  final Map<String, _Responder> _patchResponders = {};
+
+  /// Records every `patch` path requested, in order.
+  final List<String> patchCalls = [];
+
+  /// Records the body of every `patch`, in order (parallel to [patchCalls]).
+  final List<Map<String, dynamic>> patchBodies = [];
 
   /// Per-path PUT responders. The key is the exact path passed to `put`.
   final Map<String, _Responder> _putResponders = {};
@@ -92,6 +102,22 @@ class FakeApiClient extends ApiClient {
   void stubDeleteError(String path, Object error) =>
       _deleteResponders[path] = _Responder.error(error);
 
+  /// Make [patch] on [path] resolve with [data].
+  void stubPatch(String path, [Map<String, dynamic> data = const {}]) =>
+      _patchResponders[path] = _Responder.value(data);
+
+  /// Make [patch] on [path] throw [error].
+  void stubPatchError(String path, Object error) =>
+      _patchResponders[path] = _Responder.error(error);
+
+  /// Make [patch] on [path] return a future that never completes, so an
+  /// in-flight save (e.g. a toggle's pending spinner) can be observed.
+  Completer<Map<String, dynamic>> stubPatchPending(String path) {
+    final completer = Completer<Map<String, dynamic>>();
+    _patchResponders[path] = _Responder.pending(completer);
+    return completer;
+  }
+
   @override
   Future<Map<String, dynamic>> get(String path) {
     getCalls.add(path);
@@ -123,6 +149,18 @@ class FakeApiClient extends ApiClient {
     if (responder == null) {
       return Future.error(
           StateError('FakeApiClient: no PUT stub registered for "$path"'));
+    }
+    return responder.respond();
+  }
+
+  @override
+  Future<Map<String, dynamic>> patch(String path, Map<String, dynamic> body) {
+    patchCalls.add(path);
+    patchBodies.add(body);
+    final responder = _patchResponders[path];
+    if (responder == null) {
+      return Future.error(
+          StateError('FakeApiClient: no PATCH stub registered for "$path"'));
     }
     return responder.respond();
   }

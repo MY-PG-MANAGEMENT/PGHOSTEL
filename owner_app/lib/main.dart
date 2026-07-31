@@ -17,6 +17,7 @@ import 'src/screens/responsive_modules.dart';
 import 'src/theme/app_theme.dart';
 import 'src/theme/tenant_theme.dart';
 import 'src/widgets/app_toast.dart';
+import 'src/widgets/home_back_handler.dart';
 
 void main() {
   runApp(const PgManagerOwnerApp());
@@ -42,7 +43,7 @@ class PgManagerOwnerApp extends StatelessWidget {
               final isTenant = state.roleTypeId == 'TENANT';
               // Tenant portal lives under /tenant (careful: owner route is /tenants, plural).
               final onTenantRoute = loc == '/tenant' || loc.startsWith('/tenant/');
-              String home() => isSuper ? '/admin' : isTenant ? '/tenant' : '/dashboard';
+              String home() => homeRouteFor(state.roleTypeId);
 
               if (!state.initialized) return loc == '/' ? null : '/';
               if (loc == '/') return state.isLoggedIn ? home() : '/login';
@@ -75,23 +76,27 @@ class PgManagerOwnerApp extends StatelessWidget {
               GoRoute(path: '/', builder: (_, __) => const SplashScreen()),
               GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
               GoRoute(path: '/forgot-password', builder: (_, __) => const ForgotPasswordScreen()),
-              GoRoute(path: '/dashboard', builder: (_, __) => const PgDashboardScreen()),
-              GoRoute(path: '/dashboard/analytics', builder: (_, __) => const AnalyticsScreen()),
-              GoRoute(path: '/onboarding', builder: (_, __) => const OnboardingScreen()),
-              GoRoute(path: '/properties', builder: (_, __) => const PropertyScreen()),
-              GoRoute(path: '/tenants', builder: (_, __) => const TenantScreen()),
+              // _signedIn wraps every route a logged-in user can land on, so the
+              // system back button returns them to their dashboard instead of
+              // closing the app. The auth routes above are deliberately bare:
+              // back on the login screen should reach the platform.
+              GoRoute(path: '/dashboard', builder: (_, __) => _signedIn(const PgDashboardScreen())),
+              GoRoute(path: '/dashboard/analytics', builder: (_, __) => _signedIn(const AnalyticsScreen())),
+              GoRoute(path: '/onboarding', builder: (_, __) => _signedIn(const OnboardingScreen())),
+              GoRoute(path: '/properties', builder: (_, __) => _signedIn(const PropertyScreen())),
+              GoRoute(path: '/tenants', builder: (_, __) => _signedIn(const TenantScreen())),
               GoRoute(path: '/tenants/manage', redirect: (_, __) => '/tenants'),
-              GoRoute(path: '/billing', builder: (_, __) => const BillingScreen()),
-              GoRoute(path: '/expenses', builder: (_, __) => const ExpensesScreen()),
-              GoRoute(path: '/staff', builder: (_, __) => const StaffScreen()),
+              GoRoute(path: '/billing', builder: (_, __) => _signedIn(const BillingScreen())),
+              GoRoute(path: '/expenses', builder: (_, __) => _signedIn(const ExpensesScreen())),
+              GoRoute(path: '/staff', builder: (_, __) => _signedIn(const StaffScreen())),
               GoRoute(path: '/billing/manage', redirect: (_, __) => '/billing'),
               GoRoute(path: '/payments', redirect: (_, __) => '/billing'),
-              GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
-              GoRoute(path: '/notifications/settings', builder: (_, __) => const NotificationSettingsScreen()),
-              GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
-              GoRoute(path: '/settings/profile', builder: (_, __) => const ProfileScreen()),
-              GoRoute(path: '/settings/password', builder: (_, __) => const ChangePasswordScreen()),
-              GoRoute(path: '/admin', builder: (_, __) => const SuperAdminScreen()),
+              GoRoute(path: '/notifications', builder: (_, __) => _signedIn(const NotificationsScreen())),
+              GoRoute(path: '/notifications/settings', builder: (_, __) => _signedIn(const NotificationSettingsScreen())),
+              GoRoute(path: '/settings', builder: (_, __) => _signedIn(const SettingsScreen())),
+              GoRoute(path: '/settings/profile', builder: (_, __) => _signedIn(const ProfileScreen())),
+              GoRoute(path: '/settings/password', builder: (_, __) => _signedIn(const ChangePasswordScreen())),
+              GoRoute(path: '/admin', builder: (_, __) => _signedIn(const SuperAdminScreen())),
               // ─── Tenant portal (Purple/White theme, Quick-Action nav) ───
               GoRoute(path: '/tenant', builder: (_, __) => _tenant(const TenantDashboardScreen())),
               GoRoute(path: '/tenant/change-password', builder: (_, __) => _tenant(const TenantChangePasswordScreen())),
@@ -127,6 +132,10 @@ class PgManagerOwnerApp extends StatelessWidget {
   }
 }
 
+/// Gives a signed-in screen sane system-back behaviour. See [HomeBackHandler].
+Widget _signedIn(Widget child) => HomeBackHandler(child: child);
+
 /// Wraps a tenant screen in the Purple/White Material 3 theme so the tenant
 /// experience is visually distinct from the owner/admin app.
-Widget _tenant(Widget child) => Theme(data: buildTenantTheme(), child: child);
+Widget _tenant(Widget child) =>
+    _signedIn(Theme(data: buildTenantTheme(), child: child));

@@ -89,9 +89,18 @@ public class NotificationController {
         return ApiResponse.ok(null);
     }
 
+    /**
+     * The caller's per-category in-app notification switches.
+     *
+     * <p>Defaults to <b>off</b> ({@code COALESCE(p.enabled, FALSE)}): a category with
+     * no stored row is not delivered. This has to stay in step with the INNER join in
+     * {@code NotificationService.notifyOwners} — if one side defaulted on and the
+     * other off, the switch an owner sees would contradict the notifications they
+     * actually receive, which is the bug this pair replaced.
+     */
     @GetMapping("/preferences")
     ApiResponse<List<Map<String, Object>>> preferences() {
-        return ApiResponse.ok(jdbc.queryForList("SELECT c.category_id,c.name,c.description,COALESCE(p.enabled,TRUE) enabled " +
+        return ApiResponse.ok(jdbc.queryForList("SELECT c.category_id,c.name,c.description,COALESCE(p.enabled,FALSE) enabled " +
                         "FROM notification_category c LEFT JOIN notification_preference p ON p.category_id=c.category_id " +
                         "AND p.party_id=? AND p.channel_type_id='IN_APP' WHERE c.active=TRUE ORDER BY c.name",
                 currentUser.principal().partyId()));
