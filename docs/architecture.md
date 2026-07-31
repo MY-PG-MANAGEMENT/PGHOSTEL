@@ -6,7 +6,7 @@ PG Manager is a lightweight owner-first PG/Hostel Management SaaS.
 
 - Spring Boot backend APIs.
 - Flutter Owner App.
-- Shared MySQL database.
+- Shared PostgreSQL database.
 - Organization-scoped multi-tenancy.
 - Owner workflows for setup, inventory, tenant lifecycle, billing, notifications, settings, and analytics.
 - A responsive Flutter Super Admin workspace using the same API and design system.

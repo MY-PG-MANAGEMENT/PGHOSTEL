@@ -31,8 +31,8 @@ erDiagram
         varchar cache_key PK
         bigint organization_id FK
         json cache_value
-        datetime cached_at
-        datetime expires_at
+        timestamp cached_at
+        timestamp expires_at
     }
 
     ACTIVITY_LOG {
@@ -44,7 +44,7 @@ erDiagram
         bigint entity_id
         json action_details
         varchar ip_address
-        datetime created_at
+        timestamp created_at
     }
 
     FACILITY {
@@ -54,7 +54,7 @@ erDiagram
         varchar facility_name
         int capacity
         varchar status
-        datetime created_at
+        timestamp created_at
     }
 
     FACILITY_PARTY {

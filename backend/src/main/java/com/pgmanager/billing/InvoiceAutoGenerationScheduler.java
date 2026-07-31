@@ -59,8 +59,9 @@ public class InvoiceAutoGenerationScheduler {
         int generated = 0;
         for (Map<String, Object> row : rows) {
             try {
-                // TINYINT(1) reaches us as a Boolean (or a Number once wrapped in COALESCE) —
-                // casting to Number would throw, and this catch would silently skip the org.
+                // A BOOLEAN column reaches us as a Boolean (or a Number once wrapped in
+                // COALESCE/SUM) — casting to Number would throw, and this catch would then
+                // silently skip the org, so every org's invoices would just stop appearing.
                 if (!JdbcValues.toBoolean(row.get("auto_enabled"), true)) continue;
                 if (row.get("from_date") == null) continue;
 

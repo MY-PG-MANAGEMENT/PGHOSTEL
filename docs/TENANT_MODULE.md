@@ -84,7 +84,7 @@ A checked-out tenant cannot log in (`AppUserPrincipal.isEnabled()` is false for 
 
 New migration `V22__tenant_login_complaints_notices.sql`:
 
-- **`user_login`** += `disabled_reason VARCHAR(40)`, `must_change_password TINYINT(1)`, `last_login_at DATETIME(6)`.
+- **`user_login`** += `disabled_reason VARCHAR(40)`, `must_change_password BOOLEAN`, `last_login_at TIMESTAMP(6)`.
 - **`feature_master`** seed `TENANT_LOGIN`.
 - **`notification_category`** seed `COMPLAINT`, `NOTICE`.
 - **`complaint`** — `complaint_id, organization_id, party_id, property_facility_id, category, title, description, priority, status, created_at, updated_at`.

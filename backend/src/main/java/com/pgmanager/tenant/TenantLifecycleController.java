@@ -70,11 +70,12 @@ public class TenantLifecycleController {
         assertTenant(partyId);
         jdbc.update("UPDATE tenant_employment SET thru_date=? WHERE organization_id=? AND party_id=? AND thru_date IS NULL",
                 request.fromDate().minusDays(1), currentUser.organizationId(), partyId);
-        jdbc.update("INSERT INTO tenant_employment(organization_id,party_id,company_name,designation,employee_id,monthly_salary,work_email,office_address," +
-                        "from_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", currentUser.organizationId(), partyId, request.companyName(),
+        return ApiResponse.ok(jdbc.queryForMap(
+                "INSERT INTO tenant_employment(organization_id,party_id,company_name,designation,employee_id,monthly_salary,work_email,office_address," +
+                        "from_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) RETURNING *",
+                currentUser.organizationId(), partyId, request.companyName(),
                 request.designation(), request.employeeId(), request.monthlySalary(), request.workEmail(), request.officeAddress(), request.fromDate(),
-                LocalDateTime.now(), LocalDateTime.now());
-        return ApiResponse.ok(jdbc.queryForMap("SELECT * FROM tenant_employment WHERE tenant_employment_id=LAST_INSERT_ID()"));
+                LocalDateTime.now(), LocalDateTime.now()));
     }
 
     @GetMapping("/documents")
@@ -89,7 +90,8 @@ public class TenantLifecycleController {
     ApiResponse<Map<String, Object>> saveDocumentMetadata(@PathVariable Long partyId, @Valid @RequestBody DocumentRequest request) {
         assertTenant(partyId);
         jdbc.update("INSERT INTO identity_document(organization_id,party_id,document_type_id,document_number,verification_status,expires_on,created_at,updated_at) " +
-                        "VALUES(?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE document_number=VALUES(document_number),expires_on=VALUES(expires_on),updated_at=VALUES(updated_at)",
+                        "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT (organization_id,party_id,document_type_id) DO UPDATE SET " +
+                        "document_number=EXCLUDED.document_number,expires_on=EXCLUDED.expires_on,updated_at=EXCLUDED.updated_at",
                 currentUser.organizationId(), partyId, request.documentTypeId(), request.documentNumber(), "PENDING", request.expiresOn(),
                 LocalDateTime.now(), LocalDateTime.now());
         return documents(partyId);
@@ -103,11 +105,12 @@ public class TenantLifecycleController {
         Long bedCount = jdbc.queryForObject("SELECT COUNT(*) FROM facility WHERE facility_id=? AND organization_id=? AND facility_type_id='BED' AND status='ACTIVE'",
                 Long.class, request.bedFacilityId(), org);
         if (bedCount == null || bedCount == 0) throw new NotFoundException("Available bed not found");
-        jdbc.update("INSERT INTO admission(organization_id,party_id,bed_facility_id,move_in_date,monthly_rent,security_deposit,advance_amount," +
-                        "notice_period_days,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?, 'DRAFT',?,?)", org, partyId, request.bedFacilityId(),
+        Long admissionId = jdbc.queryForObject(
+                "INSERT INTO admission(organization_id,party_id,bed_facility_id,move_in_date,monthly_rent,security_deposit,advance_amount," +
+                        "notice_period_days,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?, 'DRAFT',?,?) RETURNING admission_id",
+                Long.class, org, partyId, request.bedFacilityId(),
                 request.moveInDate(), request.monthlyRent(), request.securityDeposit(), request.advanceAmount(), request.noticePeriodDays(),
                 LocalDateTime.now(), LocalDateTime.now());
-        Long admissionId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         String agreementNumber = "AGR-" + org + "-" + admissionId;
         jdbc.update("INSERT INTO agreement(organization_id,admission_id,agreement_number,from_date,terms,status,created_at,updated_at) " +
                         "VALUES(?,?,?,?,?,'DRAFT',?,?)", org, admissionId, agreementNumber, request.moveInDate(), request.terms(), LocalDateTime.now(), LocalDateTime.now());
@@ -132,19 +135,21 @@ public class TenantLifecycleController {
         jdbc.update("UPDATE agreement SET status='SIGNED',signed_at=?,updated_at=?,version=version+1 WHERE admission_id=?",
                 LocalDateTime.now(), LocalDateTime.now(), admissionId);
         Long signOrg = currentUser.organizationId();
-        jdbc.update("INSERT INTO billing_account(organization_id,party_id,admission_id,currency_code,status,advance_balance,created_at,updated_at) " +
-                        "VALUES(?,?,?,'INR','ACTIVE',?,?,?)", signOrg, partyId, admissionId,
+        Long billingAccountId = jdbc.queryForObject(
+                "INSERT INTO billing_account(organization_id,party_id,admission_id,currency_code,status,advance_balance,created_at,updated_at) " +
+                        "VALUES(?,?,?,'INR','ACTIVE',?,?,?) RETURNING billing_account_id",
+                Long.class, signOrg, partyId, admissionId,
                 admission.get("advance_amount"), LocalDateTime.now(), LocalDateTime.now());
-        Long billingAccountId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         // Auto-generate first month invoice. The security deposit is a one-time charge
         // collected with the first month's payment — it appears on this invoice only.
         BigDecimal monthlyRent = admission.get("monthly_rent") != null ? decimal(admission.get("monthly_rent")) : BigDecimal.ZERO;
         LocalDate invoiceMonth = LocalDate.of(moveIn.getYear(), moveIn.getMonthValue(), 1);
         String invoiceNumber = "INV-" + signOrg + "-" + admissionId;
-        jdbc.update("INSERT INTO invoice(organization_id,billing_account_id,invoice_number,invoice_month,issue_date,due_date," +
-                        "total_amount,paid_amount,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,0,'PENDING',?,?)",
-                signOrg, billingAccountId, invoiceNumber, invoiceMonth, moveIn, moveIn, monthlyRent.add(securityDeposit), LocalDateTime.now(), LocalDateTime.now());
-        Long invoiceId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        Long invoiceId = jdbc.queryForObject(
+                "INSERT INTO invoice(organization_id,billing_account_id,invoice_number,invoice_month,issue_date,due_date," +
+                        "total_amount,paid_amount,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,0,'PENDING',?,?) RETURNING invoice_id",
+                Long.class, signOrg, billingAccountId, invoiceNumber, invoiceMonth, moveIn, moveIn,
+                monthlyRent.add(securityDeposit), LocalDateTime.now(), LocalDateTime.now());
         jdbc.update("INSERT INTO invoice_item(invoice_id,item_type_id,description,amount,created_at,updated_at) VALUES(?,?,?,?,?,?)",
                 invoiceId, "MONTHLY_RENT", "Monthly Rent", monthlyRent, LocalDateTime.now(), LocalDateTime.now());
         if (securityDeposit.compareTo(BigDecimal.ZERO) > 0) {

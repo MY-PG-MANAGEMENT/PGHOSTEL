@@ -6,7 +6,7 @@ Install later:
 
 - JDK 21.
 - Gradle or use a generated Gradle wrapper later.
-- MySQL 8+.
+- PostgreSQL 16+.
 - Flutter SDK.
 
 No build, test, dependency install, or server run was performed during scaffold creation.
@@ -15,8 +15,8 @@ No build, test, dependency install, or server run was performed during scaffold 
 
 Update `backend/src/main/resources/application.yml` before running:
 
-- MySQL username.
-- MySQL password.
+- PostgreSQL username.
+- PostgreSQL password.
 - Database URL if needed.
 - JWT secret for non-local environments.
 
@@ -53,7 +53,7 @@ For Android emulator, change the Flutter API base URL from `http://localhost:808
 ## Development Sequence
 
 1. Install required software.
-2. Configure MySQL.
+2. Configure PostgreSQL.
 3. Run backend Flyway migrations by starting Spring Boot.
 4. Test auth APIs through Swagger.
 5. Connect Flutter app to backend URL.

@@ -80,7 +80,8 @@ public class InventoryController {
     ApiResponse<List<Map<String, Object>>> updateAmenities(@PathVariable Long facilityId, @RequestBody Map<String, Boolean> values) {
         assertFacility(facilityId);
         values.forEach((type, available) -> jdbc.update("INSERT INTO facility_amenity(facility_id,amenity_type_id,available) VALUES(?,?,?) " +
-                "ON DUPLICATE KEY UPDATE available=VALUES(available)", facilityId, type, available));
+                "ON CONFLICT (facility_id,amenity_type_id) DO UPDATE SET available=EXCLUDED.available",
+                facilityId, type, available));
         return amenities(facilityId);
     }
 

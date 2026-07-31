@@ -104,8 +104,11 @@ public class TenantArchiveService {
             args.add(propertyId);
         }
         if (query != null && !query.isBlank()) {
-            sql.append("AND (COALESCE(pr.full_name, ta.full_name) LIKE ? " +
-                       "  OR COALESCE(pr.mobile_number, ta.mobile_number) LIKE ?) ");
+            // ILIKE, not LIKE: MySQL's ai_ci collation made LIKE case-insensitive, so searching
+            // "raj" matched "Raj Kumar". PostgreSQL's LIKE is case-sensitive and would quietly
+            // return nothing for the same query.
+            sql.append("AND (COALESCE(pr.full_name, ta.full_name) ILIKE ? " +
+                       "  OR COALESCE(pr.mobile_number, ta.mobile_number) ILIKE ?) ");
             String like = "%" + query.trim() + "%";
             args.add(like);
             args.add(like);

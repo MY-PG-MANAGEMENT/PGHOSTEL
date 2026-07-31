@@ -8,7 +8,7 @@
 #   bash: ./deploy.sh: /usr/bin/env: bad interpreter: No such file or directory
 #
 # ...which is the shell choking on the trailing \r, not a missing interpreter.
-# nginx, MySQL and Redis are more forgiving of CRLF but not uniformly so, and a
+# nginx, PostgreSQL and Redis are more forgiving of CRLF but not uniformly so, and a
 # Dockerfile ENTRYPOINT with a stray \r fails the same way as the script above.
 #
 # `text eol=lf` forces LF in the working tree regardless of the local autocrlf
@@ -25,7 +25,7 @@ Dockerfile      text eol=lf
 Dockerfile.*    text eol=lf
 *.conf          text eol=lf
 *.cnf           text eol=lf
-# Mounted into the MySQL container's /docker-entrypoint-initdb.d
+# Mounted into the PostgreSQL container's /docker-entrypoint-initdb.d
 *.sql           text eol=lf
 *.template      text eol=lf
 *.yml           text eol=lf

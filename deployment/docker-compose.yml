@@ -6,15 +6,15 @@
 #   Run         : docker compose --env-file .env up -d
 #
 # Sizing below assumes the full Always Free shape: 4 OCPU / 24 GB RAM. Allocated
-# here: MySQL 6G, API 6G, Redis 1G, nginx 512M — ~13.5G, leaving headroom for the
-# OS, the backup job's mysqldump, and page cache. Re-tune all four together if you
+# here: PostgreSQL 6G, API 6G, Redis 1G, nginx 512M — ~13.5G, leaving headroom for the
+# OS, the backup job's pg_dump, and page cache. Re-tune all four together if you
 # run a smaller shape; over-committing memory on a host with no swap gets the
-# kernel OOM-killer involved, and it will pick MySQL.
+# kernel OOM-killer involved, and it will pick PostgreSQL.
 #
 # Security posture applied to every service:
 #   * no-new-privileges  — a setuid binary inside the image cannot escalate
 #   * cap_drop: ALL      — capabilities added back one at a time, only where needed
-#   * read_only rootfs   — everywhere it is achievable (see the MySQL note)
+#   * read_only rootfs   — everywhere it is achievable (see the PostgreSQL note)
 #   * no published ports except nginx 80/443
 # =============================================================================
 
@@ -35,76 +35,92 @@ x-logging: &default-logging
 services:
 
   # ===========================================================================
-  # MySQL 8.4 LTS — system of record
+  # PostgreSQL 17 — system of record
   # ===========================================================================
-  mysql:
-    image: mysql:8.4
-    container_name: pgm-mysql
+  postgres:
+    image: postgres:17-alpine
+    container_name: pgm-postgres
     restart: unless-stopped
     logging: *default-logging
 
-    # No `command:` override. The image's /etc/my.cnf ends with
-    # `!includedir /etc/mysql/conf.d/`, so the my.cnf mounted below is picked up
-    # automatically and layered ON TOP of the image's own settings.
+    # `-c config_file=` is the correct way to point PostgreSQL at a config file, and
+    # unlike MySQL's --defaults-file it does NOT drop built-in defaults — anything the
+    # file omits keeps its compiled-in value. The data directory still comes from
+    # PGDATA, so the entrypoint's initdb bootstrap is unaffected.
     #
-    # Do NOT "improve" this to `--defaults-file=/etc/mysql/conf.d/my.cnf`:
-    # --defaults-file REPLACES every default config file rather than adding to them,
-    # which drops the image's datadir, socket path, pid-file and `user=mysql`. The
-    # socket in particular reverts to the compiled default of /tmp/mysql.sock, which
-    # the entrypoint's temporary bootstrap server does not expect — and the failure
-    # mode is a container that appears to start and then dies during initialisation.
+    # The file must be mounted somewhere OTHER than $PGDATA: the entrypoint writes its
+    # own postgresql.conf into the data directory on first init, and a read-only mount
+    # there would abort initialisation.
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
-      MYSQL_DATABASE:      ${MYSQL_DATABASE:?MYSQL_DATABASE is required}
-      MYSQL_USER:          ${MYSQL_USER:?MYSQL_USER is required}
-      MYSQL_PASSWORD:      ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
-      TZ:                  ${TZ:-Asia/Kolkata}
-      LANG:                C.UTF-8
+      POSTGRES_DB:       ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER:     ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      # scram-sha-256 is the modern default and what the JDBC driver negotiates.
+      # Applies to the roles initdb creates, and to the host rules it generates.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+      # Keep the cluster in a subdirectory of the volume. If PGDATA is the volume mount
+      # point itself, a `lost+found` (or any stray file) on some filesystems makes
+      # initdb refuse to run on an "existing, non-empty" directory.
+      PGDATA:            /var/lib/postgresql/data/pgdata
+      TZ:                ${TZ:-Asia/Kolkata}
+      LANG:              C.UTF-8
 
     volumes:
-      - mysql_data:/var/lib/mysql
-      # Config is mounted read-only: MySQL refuses to read a world-writable config
-      # file, and a compromised container must not be able to rewrite its own tuning.
-      - ./mysql/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      - postgres_data:/var/lib/postgresql/data
+      # Config is mounted read-only so a compromised container cannot rewrite its own
+      # tuning. Outside PGDATA — see the note on `command:` above.
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
       # *.sql here runs ONCE, only when the data directory is empty. Flyway owns the
-      # schema; this file only fixes up grants (see the comment inside it).
-      - ./mysql/init:/docker-entrypoint-initdb.d:ro
-      # Slow-query and error logs on the host so they survive `docker compose down`
-      # and can be shipped/rotated by the host. Must be chowned to uid 999 — the
+      # schema; this file only asserts the privilege surface (see the comment inside).
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      # Server log on the host so it survives `docker compose down` and can be shipped
+      # or rotated there. Must be chowned to uid 70 (alpine's postgres user) — the
       # deploy script does this; see scripts/deploy.sh.
-      - ./logs/mysql:/var/log/mysql
+      - ./logs/postgres:/var/log/postgresql
 
     networks:
       - data
 
-    # NOT read_only. The official entrypoint starts as root to fix ownership on the
-    # data directory and drop to the mysql user, and the server needs /var/run/mysqld
-    # and /tmp writable. Forcing read_only here means hand-mounting four tmpfs paths
-    # and re-doing it on every image bump, for a container that already has no
-    # published port, no network route to the internet, and ALL capabilities dropped
-    # except the four the entrypoint's own privilege drop requires.
+    # NOT read_only. The entrypoint starts as root to fix ownership on the data
+    # directory before dropping to the postgres user, and the server needs
+    # /var/run/postgresql (its unix socket and pid file) writable. Forcing read_only
+    # means hand-mounting tmpfs paths and redoing it on every image bump, for a
+    # container that already has no published port, no route to the internet, and ALL
+    # capabilities dropped except the four the privilege drop itself requires.
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     cap_add:
-      - CHOWN          # entrypoint fixes ownership of /var/lib/mysql
-      - SETGID         # ...then drops from root to the mysql user
+      - CHOWN          # entrypoint fixes ownership of the data directory
+      - SETGID         # ...then drops from root to the postgres user
       - SETUID
       - DAC_OVERRIDE
 
     healthcheck:
-      # `mysqladmin ping` succeeds on a server that is up but still recovering, so the
-      # extra `SELECT 1` proves the SQL layer actually accepts queries — which is what
-      # the API's depends_on is really waiting for.
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent -u root -p\"$$MYSQL_ROOT_PASSWORD\" && mysql -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" -e 'SELECT 1' >/dev/null 2>&1 || exit 1"]
+      # `pg_isready` alone returns success against the entrypoint's TEMPORARY bootstrap
+      # server (the one that runs the init scripts on a local socket), so on a first
+      # boot it can report healthy before the real server is accepting TCP. The `-h
+      # 127.0.0.1` forces a TCP check, and the `psql` round-trip proves the SQL layer
+      # actually answers — which is what the API's depends_on is really waiting for.
+      #
+      # PGPASSWORD is required and not optional: POSTGRES_INITDB_ARGS sets
+      # scram-sha-256 for host AND local connections, so an unauthenticated psql fails
+      # with "no password supplied". Without it this check can never pass, the
+      # container sits in `starting` until start_period expires and then goes
+      # unhealthy — and the API never starts, because its depends_on waits on this.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -q && PGPASSWORD=\"$$POSTGRES_PASSWORD\" psql -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -tAc 'SELECT 1' >/dev/null 2>&1 || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10
-      start_period: 120s          # InnoDB crash recovery on a large buffer pool is slow
+      start_period: 120s          # crash recovery after an unclean stop can be slow
 
-    # InnoDB must be allowed to finish its shutdown flush. A SIGKILL mid-flush means
-    # a crash-recovery cycle on next boot, and in the worst case a torn page.
+    # PostgreSQL must be allowed to complete a shutdown checkpoint. Docker sends
+    # SIGTERM, which is a "smart" shutdown: it waits for clients to disconnect. The API
+    # drains in 45s, so this must exceed that or the checkpoint is cut short and the
+    # next boot runs crash recovery.
     stop_grace_period: 120s
 
     ulimits:
@@ -197,7 +213,7 @@ services:
     init: true
 
     # Explicit per-variable mapping, NOT `env_file: .env`. env_file would inject
-    # MYSQL_ROOT_PASSWORD and every other unrelated secret into this container's
+    # every unrelated secret and every other unrelated secret into this container's
     # environment, where any code path that dumps env — a stack trace, a heap dump,
     # an actuator endpoint left exposed — would leak them.
     environment:
@@ -206,11 +222,11 @@ services:
       MANAGEMENT_PORT: ${MANAGEMENT_PORT:-9091}
 
       # --- database (service name resolves on the `data` network) ---
-      DB_HOST:     mysql
-      DB_PORT:     "3306"
-      DB_NAME:     ${MYSQL_DATABASE}
-      DB_USERNAME: ${MYSQL_USER}
-      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_HOST:     postgres
+      DB_PORT:     "5432"
+      DB_NAME:     ${POSTGRES_DB}
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
       DB_POOL_MAX: ${DB_POOL_MAX:-30}
       DB_POOL_MIN: ${DB_POOL_MIN:-10}
 
@@ -256,7 +272,7 @@ services:
       - api_logs:/app/logs
 
     networks:
-      - data      # -> mysql, redis
+      - data      # -> postgres, redis
       - edge      # -> nginx
 
     # No `ports:`. The API is unreachable from the internet; nginx is the only way in.
@@ -276,8 +292,8 @@ services:
       - ALL
 
     depends_on:
-      mysql:
-        condition: service_healthy      # Flyway would fail against a booting MySQL
+      postgres:
+        condition: service_healthy      # Flyway would fail against a booting PostgreSQL
       redis:
         condition: service_healthy
 
@@ -422,7 +438,7 @@ networks:
     name: pgm-edge
     driver: bridge
 
-  # api <-> mysql/redis. `internal: true` removes the default gateway entirely, so
+  # api <-> postgres/redis. `internal: true` removes the default gateway entirely, so
   # even a full RCE inside the database container has no path to the internet —
   # no reverse shell, no data exfiltration over HTTP.
   data:
@@ -438,8 +454,8 @@ networks:
 # Back them up with scripts/backup.sh — a `docker volume rm` is unrecoverable.
 # =============================================================================
 volumes:
-  mysql_data:
-    name: pgm-mysql-data
+  postgres_data:
+    name: pgm-postgres-data
   redis_data:
     name: pgm-redis-data
   api_logs:

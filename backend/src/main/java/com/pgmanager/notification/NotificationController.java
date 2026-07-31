@@ -109,7 +109,8 @@ public class NotificationController {
     @PatchMapping("/preferences")
     ApiResponse<List<Map<String, Object>>> updatePreferences(@RequestBody Map<String, Boolean> updates) {
         updates.forEach((category, enabled) -> jdbc.update("INSERT INTO notification_preference(party_id,category_id,channel_type_id,enabled,updated_at) " +
-                        "VALUES(?,?,'IN_APP',?,?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled),updated_at=VALUES(updated_at)",
+                        "VALUES(?,?,'IN_APP',?,?) ON CONFLICT (party_id,category_id,channel_type_id) " +
+                        "DO UPDATE SET enabled=EXCLUDED.enabled,updated_at=EXCLUDED.updated_at",
                 currentUser.principal().partyId(), category, enabled, LocalDateTime.now()));
         return preferences();
     }
@@ -117,10 +118,12 @@ public class NotificationController {
     @PostMapping
     ApiResponse<Map<String, Object>> create(@Valid @RequestBody CreateNotification request) {
         AppUserPrincipal user = currentUser.principal();
-        jdbc.update("INSERT INTO notification(organization_id,category_id,title,message,entity_type,entity_id,priority,created_at) VALUES(?,?,?,?,?,?,?,?)",
-                user.organizationId(), request.categoryId(), request.title(), request.message(), request.entityType(), request.entityId(),
+        Long id = jdbc.queryForObject(
+                "INSERT INTO notification(organization_id,category_id,title,message,entity_type,entity_id,priority,created_at) " +
+                        "VALUES(?,?,?,?,?,?,?,?) RETURNING notification_id",
+                Long.class, user.organizationId(), request.categoryId(), request.title(), request.message(),
+                request.entityType(), request.entityId(),
                 request.priority() == null ? "NORMAL" : request.priority(), LocalDateTime.now());
-        Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         jdbc.update("INSERT INTO notification_recipient(notification_id,party_id,important) VALUES(?,?,?)", id, user.partyId(), request.important());
         return ApiResponse.ok(Map.of("notificationId", id, "deliveryChannel", "IN_APP", "externalDelivery", "DISABLED"));
     }

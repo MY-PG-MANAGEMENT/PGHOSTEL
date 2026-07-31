@@ -1,6 +1,6 @@
 # PG Manager — Production Deployment
 
-Spring Boot 3.3 / Java 21 · MySQL 8.4 · Redis 7.4 · nginx 1.27 · Docker Compose v2
+Spring Boot 3.3 / Java 21 · PostgreSQL 17 · Redis 7.4 · nginx 1.27 · Docker Compose v2
 Target host: Oracle Cloud Always Free, Ampere A1 (arm64), Ubuntu 24.04 LTS, Cloudflare DNS.
 
 ---
@@ -27,7 +27,7 @@ Target host: Oracle Cloud Always Free, Ampere A1 (arm64), Ubuntu 24.04 LTS, Clou
 ```
 deployment/
 ├── Dockerfile                    4-stage build; jlink-free, layered, non-root, arm64
-├── docker-compose.yml            api + mysql + redis + nginx + certbot
+├── docker-compose.yml            api + postgres + redis + nginx + certbot
 ├── .env.example                  template — copy to .env, never commit .env
 ├── nginx/
 │   ├── nginx.conf                worker/gzip/rate-limit/upstream tuning
@@ -39,18 +39,18 @@ deployment/
 │   │   ├── proxy-common.conf     X-Forwarded-*, timeouts, upstream keepalive
 │   │   └── cloudflare-realip.conf  restore the true client IP behind the proxy
 │   └── www/                      static root (drop the Flutter web build here)
-├── mysql/
-│   ├── my.cnf                    InnoDB, binlog, slow log, utf8mb4, 8.4-safe
-│   └── init/01-init.sql          runs once on an empty data dir; grants only
+├── postgres/
+│   ├── postgresql.conf           memory, WAL, autovacuum, timeouts, slow-query log
+│   └── init/01-init.sql          runs once on an empty data dir; extension + grants
 ├── redis/redis.conf              AOF+RDB, LRU, no password in the file
 ├── scripts/
 │   ├── deploy.sh                 pull → recreate → health-gate → auto-rollback
 │   ├── rollback.sh               previous image, with a migration-safety warning
-│   ├── backup.sh                 verified mysqldump + Redis snapshot + retention
+│   ├── backup.sh                 verified pg_dump + Redis snapshot + retention
 │   ├── restore.sh                destructive restore, with a pre-restore safety dump
 │   ├── healthcheck.sh            whole-stack report incl. TLS expiry and disk
 │   └── init-letsencrypt.sh       first certificate (run before the first `up`)
-├── logs/                         bind-mounted nginx + mysql logs (gitignored)
+├── logs/                         bind-mounted nginx + postgres logs (gitignored)
 └── backups/                      local dumps (gitignored)
 
 .github/workflows/deploy.yml      test → build arm64 → push GHCR → ssh deploy
@@ -69,7 +69,7 @@ There were no health endpoints at all. Every health gate here — the Docker
 nginx's `/health` — depends on `/actuator/health`.
 
 **`backend/src/main/resources/application-prod.yml` added.**
-`application.yml` hardcodes `jdbc:mysql://localhost:3306`, and its JWT secret is a
+`application.yml` hardcodes `jdbc:postgresql://localhost:5432`, and its JWT secret is a
 literal committed to the repository. Inheriting either in production would mean the
 app cannot reach the database, and that anyone with the repo can forge an admin
 token for any organization. The prod profile declares `${JWT_SECRET}` with **no
@@ -137,16 +137,16 @@ cp .env.example .env
 chmod 600 .env
 
 # Generate real secrets — do not invent them by hand
-echo "MYSQL_ROOT_PASSWORD=$(openssl rand -base64 36 | tr -d '\n/+=' | cut -c1-32)"
-echo "MYSQL_PASSWORD=$(openssl rand -base64 36 | tr -d '\n/+=' | cut -c1-32)"
+echo "POSTGRES_PASSWORD=$(openssl rand -base64 36 | tr -d '\n/+=' | cut -c1-32)"
 echo "REDIS_PASSWORD=$(openssl rand -base64 36 | tr -d '\n/+=' | cut -c1-32)"
 echo "JWT_SECRET=$(openssl rand -base64 64 | tr -d '\n')"
 
 nano .env      # paste those in, then set DOMAIN_NAME, EMAIL_FOR_SSL, API_IMAGE
 ```
 
-If you change `MYSQL_DATABASE` or `MYSQL_USER` from the defaults, edit the matching
-literals in `mysql/init/01-init.sql` — MySQL cannot interpolate environment
+`postgres/init/01-init.sql` runs against `POSTGRES_DB` as `POSTGRES_USER`, so unlike
+the MySQL script it replaced it needs no edit when you rename either. PostgreSQL
+cannot interpolate environment
 variables into a `.sql` file, and a mismatch aborts the whole first-boot
 initialisation.
 
@@ -162,12 +162,12 @@ port-80 server block answers with a 301 — an infinite redirect loop.
 ```bash
 chmod +x scripts/*.sh
 
-# MySQL runs as uid 999 inside the container and writes its slow-query log into a
-# bind mount. On a fresh host that directory is root-owned, and MySQL fails to start
+# PostgreSQL runs as uid 70 in the alpine image and writes its server log into a
+# bind mount. On a fresh host that directory is root-owned, and PostgreSQL fails to start
 # with a permission error that reads like data corruption. `deploy.sh` fixes this on
 # every later deploy, but the first boot happens before deploy.sh ever runs.
-mkdir -p logs/mysql logs/nginx logs/api backups/mysql backups/redis
-sudo chown -R 999:999 logs/mysql
+mkdir -p logs/postgres logs/nginx logs/api backups/postgres backups/redis
+sudo chown -R 70:70 logs/postgres
 
 # Must run BEFORE the first `up`: nginx will not start without a certificate file,
 # and Let's Encrypt cannot validate the domain until nginx is serving. The script
@@ -213,14 +213,15 @@ docker compose restart api             # restart one service
 docker compose up -d                   # reconcile to the compose file
 docker stats --no-stream               # live CPU/memory against the limits
 
-# MySQL shell
-docker exec -it pgm-mysql mysql -u root -p"$(grep ^MYSQL_ROOT_PASSWORD .env | cut -d= -f2)" pg_manager
+# PostgreSQL shell
+docker exec -it -e PGPASSWORD="$(grep ^POSTGRES_PASSWORD .env | cut -d= -f2)" \
+  pgm-postgres psql -U pgmanager -d pg_manager
 
 # Redis shell
 docker exec -it pgm-redis redis-cli -a "$(grep ^REDIS_PASSWORD .env | cut -d= -f2)" --no-auth-warning
 
 # Slow queries
-docker exec pgm-mysql tail -f /var/log/mysql/slow.log
+docker exec pgm-postgres tail -f /var/log/postgresql/postgresql-$(date +%F).log
 
 # Validate nginx after editing a config, before reloading
 docker exec pgm-nginx nginx -t && docker exec pgm-nginx nginx -s reload
@@ -255,11 +256,11 @@ between the old container stopping and the new one passing readiness, during whi
 nginx returns the JSON 503 from `@upstream_down`. Eliminating it requires two
 replicas — see [Scaling](#9-scaling), and read the scheduler warning there first.
 
-**Changing infrastructure config** (`my.cnf`, `redis.conf`, nginx, `.env`):
+**Changing infrastructure config** (`postgresql.conf`, `redis.conf`, nginx, `.env`):
 
 ```bash
-nano mysql/my.cnf
-docker compose up -d --force-recreate mysql     # config is mounted, not baked in
+nano postgres/postgresql.conf
+docker compose up -d --force-recreate postgres  # config is mounted, not baked in
 ```
 
 ---
@@ -281,8 +282,9 @@ Rolling the schema back too means restoring a database backup, which loses
 everything written since it was taken. Check what you are dealing with:
 
 ```bash
-docker exec pgm-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N -B -e \
-  "SELECT version, description, installed_on FROM pg_manager.flyway_schema_history
+docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" pgm-postgres \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  "SELECT version, description, installed_on FROM flyway_schema_history
    ORDER BY installed_rank DESC LIMIT 5;"
 ```
 
@@ -294,20 +296,25 @@ In most cases rolling *forward* with a fix is the better option.
 
 `scripts/backup.sh`, nightly at 02:30 via host cron.
 
-- `mysqldump --single-transaction` — a consistent snapshot with no write locking
-  (valid because every table is InnoDB)
-- `--set-gtid-purged=OFF` — required, because `my.cnf` enables GTIDs and the default
-  writes a `SET @@GLOBAL.GTID_PURGED` that **fails on restore** into a server with
-  an existing GTID history, i.e. every real recovery
-- verified three ways before anything is pruned: `gzip -t`, a minimum size, and the
-  `Dump completed` marker that proves the dump was not truncated
+- `pg_dump --format=custom` — a compressed, indexed archive. `pg_restore` can verify
+  its table of contents without restoring (that is the integrity check), restore one
+  table selectively, and restore in parallel. There is no `--single-transaction` to
+  remember: pg_dump always runs in one snapshot and never blocks writers.
+- `--no-owner --no-privileges` — hard-coding ownership makes an archive un-restorable
+  into a differently-named role, which is exactly the situation you are in when
+  rebuilding a host from scratch
+- verified three ways before anything is pruned: `pg_restore --list` (parses the
+  archive's table of contents, so it proves the file is complete and enumerable —
+  strictly stronger than the end-of-file marker the MySQL dump was checked for), a
+  minimum size, and a minimum table count so a successful backup of the *wrong*
+  database is caught too
 - SHA-256 written alongside each archive
 - Redis snapshotted via `BGSAVE`, polling `LASTSAVE` rather than sleeping
 - retention runs **last**, so a failed backup can never delete the good ones
 
 ```bash
 ./scripts/backup.sh              # run now
-ls -lh backups/mysql/
+ls -lh backups/postgres/
 ```
 
 **Local backups are not a backup strategy.** They protect against a bad migration or
@@ -325,11 +332,11 @@ hypothesis.
 
 ```bash
 ./scripts/restore.sh                                          # list what is available
-./scripts/restore.sh backups/mysql/pg_manager_20260726_023000.sql.gz
+./scripts/restore.sh backups/postgres/pg_manager_20260726_023000.dump
 ```
 
 Destructive, and it says so. The script verifies the archive **before** touching
-anything, stops the API (leaving MySQL up to receive the load), takes a
+anything, stops the API (leaving PostgreSQL up to receive the load), takes a
 **pre-restore safety dump** of the current state, drops and recreates the schema,
 loads the archive, checks the table count and Flyway version, and restarts.
 
@@ -368,9 +375,12 @@ schedulers behind a profile and run exactly one instance with it enabled.
 The Always Free shape is 4 OCPU / 24 GB, and this stack currently allocates ~13.5 GB.
 The order that pays off:
 
-1. `innodb_buffer_pool_size` in `mysql/my.cnf` — raise toward 60% of the MySQL
-   container's limit, and raise the container's `deploy.resources.limits.memory`
-   with it. Nothing else comes close for read latency.
+1. `shared_buffers` in `postgres/postgresql.conf` — raise toward 25% of the
+   PostgreSQL container's limit (NOT 60%: unlike InnoDB's buffer pool, PostgreSQL
+   deliberately leans on the OS page cache as a second tier, so oversizing this
+   double-buffers and makes things worse). Raise `effective_cache_size` to ~65% of
+   the limit alongside it, and the container's `deploy.resources.limits.memory` with
+   both. Nothing else comes close for read latency.
 2. `DB_POOL_MAX` in `.env` — only if `healthcheck.sh` shows pool exhaustion.
    A larger pool against a saturated database just moves the queue.
 3. `JAVA_OPTS` `MaxRAMPercentage` — leave at 70. The other 30% is metaspace, code
@@ -392,9 +402,15 @@ replicas, retrying a failed POST could duplicate a payment.
 
 ### Database scaling
 
-`my.cnf` already enables binary logging with GTIDs, so a read replica needs no
-config change on the primary. Route reports and dashboards there; keep every write
-and the money queries on the primary.
+`postgresql.conf` already sets `wal_level = replica` and retains WAL
+(`wal_keep_size`), so a streaming read replica needs no config change on the primary
+beyond a replication role and a slot. Route reports and dashboards there; keep every
+write and the money queries on the primary.
+
+Be aware of the trade this introduces, which had no MySQL analogue: a long-running
+report on the replica either delays replay or gets cancelled by recovery conflict,
+depending on `hot_standby_feedback` — and turning that on makes the *primary* hold
+back vacuum. Pick deliberately.
 
 ---
 
@@ -405,7 +421,7 @@ and the money queries on the primary.
 - [ ] `.env` is `chmod 600` and gitignored (verify: `git check-ignore deployment/.env`)
 - [ ] Every password and `JWT_SECRET` regenerated — no `.env.example` value survives
 - [ ] `SWAGGER_ENABLED=false`
-- [ ] `MYSQL_USER` is not `root`
+- [ ] `POSTGRES_USER` is not `postgres` (the default superuser name)
 - [ ] `DOMAIN_NAME` correct; `APP_PUBLIC_BASE_URL` is the HTTPS origin, not a LAN IP
 - [ ] Cloudflare SSL mode is **Full (strict)**
 - [ ] Only 80, 443 and SSH open in the VCN security list
@@ -416,7 +432,7 @@ and the money queries on the primary.
 - [x] Non-root container user (uid 10001), no login shell
 - [x] Read-only root filesystem on api, redis and nginx; tmpfs mounted `noexec` where writable
 - [x] `no-new-privileges` and `cap_drop: ALL` on every service, capabilities re-added individually
-- [x] MySQL and Redis on an `internal: true` network — no route to the internet even after an RCE
+- [x] PostgreSQL and Redis on an `internal: true` network — no route to the internet even after an RCE
 - [x] Only nginx publishes ports; the API, database and cache are unreachable from the host
 - [x] Actuator on an unpublished port, one path proxied
 - [x] TLS 1.2/1.3 only, ECDHE+AEAD ciphers, OCSP stapling, 0-RTT off (replay-unsafe for non-idempotent POSTs)
@@ -431,7 +447,7 @@ and the money queries on the primary.
 **Ongoing**
 
 - [ ] `sudo unattended-upgrades` enabled for host security patches
-- [ ] Base images rebuilt monthly (`nginx`, `mysql`, `redis`, `eclipse-temurin` all get CVE fixes)
+- [ ] Base images rebuilt monthly (`nginx`, `postgres`, `redis`, `eclipse-temurin` all get CVE fixes)
 - [ ] Cloudflare IP ranges in `snippets/cloudflare-realip.conf` refreshed periodically
   (the refresh command is in the file; a stale list fails closed, never open)
 - [ ] Backup restore tested quarterly
@@ -445,7 +461,7 @@ and the money queries on the primary.
 - An access token stays valid for its full 30 minutes after an organization is
   deactivated; `JwtAuthenticationFilter` checks neither user nor org status per
   request. Documented in `CLAUDE.md`; unchanged here.
-- Traffic between nginx and Spring Boot, and between Spring Boot and MySQL, is
+- Traffic between nginx and Spring Boot, and between Spring Boot and PostgreSQL, is
   plaintext inside the Docker network. Acceptable on a single host; if these ever
   span hosts, enable TLS on both hops.
 
@@ -458,24 +474,47 @@ and the money queries on the primary.
 ```bash
 ./scripts/healthcheck.sh                    # heap %, pool usage, cache hit rate
 docker stats --no-stream                    # against the compose limits
-docker exec pgm-mysql tail -100 /var/log/mysql/slow.log
+docker exec pgm-postgres tail -100 /var/log/postgresql/postgresql-$(date +%F).log
 docker exec pgm-redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning INFO stats
 awk '{print $NF}' logs/nginx/access.log | sort -rn | head   # slowest requests
 ```
 
-**MySQL.** `innodb_buffer_pool_size` (3 GB) dominates everything else. Watch:
+**PostgreSQL.** `shared_buffers` (1.5 GB) plus the OS page cache dominates read
+latency. `pg_stat_statements` is created by `postgres/init/01-init.sql`, and it is the
+single most useful thing here during an incident:
 
 ```sql
-SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_reads';       -- disk reads: want near-flat
-SHOW GLOBAL STATUS LIKE 'Created_tmp_disk_tables';        -- rising ⇒ raise tmp_table_size
-SHOW GLOBAL STATUS LIKE 'Threads_connected';              -- vs max_connections
+-- slowest statements by total time
+SELECT calls, round(total_exec_time) ms, round(mean_exec_time) avg_ms,
+       left(query, 90) FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10;
+
+-- cache hit ratio: want > 0.99
+SELECT sum(blks_hit)::float / nullif(sum(blks_hit + blks_read), 0) FROM pg_stat_database;
+
+-- table bloat / vacuum health: n_dead_tup climbing means autovacuum is behind
+SELECT relname, n_live_tup, n_dead_tup, last_autovacuum
+FROM pg_stat_user_tables ORDER BY n_dead_tup DESC LIMIT 10;
+
+-- connections vs max_connections
+SELECT count(*), (SELECT setting FROM pg_settings WHERE name='max_connections')
+FROM pg_stat_activity;
 ```
 
-Do not go looking for the query cache. It was **removed in MySQL 8.0** — it was a
-global mutex that invalidated every cached result for a table on any write to it,
-which on a write-heavy multi-tenant schema made things slower. Its replacements here
-are the buffer pool, the application's Redis layer, and indexes (see V23, added after
-the planner was found filtering the tenant-list hot path in memory).
+The thing with no MySQL equivalent, and the one most likely to bite: **autovacuum**.
+Every UPDATE and DELETE leaves a dead tuple behind, and the nightly `api_request_log`
+retention sweep deletes in large batches. If `n_dead_tup` on a table climbs and never
+falls, autovacuum is losing — that is a bloating table and a degrading index, not a
+cosmetic number. `postgresql.conf` already runs it more aggressively than the
+defaults; the next lever is `autovacuum_vacuum_cost_limit`.
+
+The second one: an **idle-in-transaction** session holds its locks *and* blocks vacuum
+from reclaiming any tuple newer than it, so one forgotten `BEGIN` can bloat the whole
+database. `idle_in_transaction_session_timeout` is set to 60 s for exactly this.
+
+There is no query cache to look for and no equivalent to configure. The read caches
+here are `shared_buffers`, the OS page cache, the application's Redis layer, and
+indexes (see the `facility_party` composites in the baseline, added after the planner
+was found filtering the tenant-list hot path in memory).
 
 **Redis.** A hit rate under 50% (reported by `healthcheck.sh`) means eviction
 pressure — raise `maxmemory` and the container limit together, keeping `maxmemory`
@@ -505,19 +544,30 @@ evidence is the heap dump on the `api_logs` volume.
 **API exits immediately, logs show `Could not resolve placeholder 'JWT_SECRET'`** —
 working as designed. Set it in `.env`.
 
-**API cannot reach MySQL** — check `depends_on` actually waited:
-`docker inspect -f '{{.State.Health.Status}}' pgm-mysql`. On a cold start InnoDB
-recovery can exceed the 120 s `start_period`.
+**API cannot reach PostgreSQL** — check `depends_on` actually waited:
+`docker inspect -f '{{.State.Health.Status}}' pgm-postgres`. On a cold start, crash
+recovery after an unclean stop can exceed the 120 s `start_period`. If the container
+sits in `starting` forever on a *clean* first boot, read the healthcheck output
+(`docker inspect --format='{{json .State.Health}}' pgm-postgres`) — the `psql` leg
+needs `PGPASSWORD`, because `POSTGRES_INITDB_ARGS` sets scram-sha-256 for local
+connections too.
 
-**`Communications link failure` under load** — Hikari `max-lifetime` (540 s) has
-drifted above MySQL's `wait_timeout` (600 s). Keep the first below the second.
+**`connection has been closed` under load** — Hikari `max-lifetime` (540 s) has
+drifted above PostgreSQL's `idle_session_timeout` (600 s). Keep the first below the
+second.
 
 **Flyway `Validate failed: checksum mismatch`** — an already-applied migration file
 was edited. Do **not** set `validate-on-migrate: false`. Find the changed file,
 confirm the live schema is correct, then `flyway repair`.
 
-**MySQL will not start, permission errors on `/var/log/mysql`** — the bind mount is
-root-owned. `sudo chown -R 999:999 logs/mysql` (`deploy.sh` does this automatically).
+**PostgreSQL will not start, permission errors on `/var/log/postgresql`** — the bind
+mount is root-owned. `sudo chown -R 70:70 logs/postgres` (`deploy.sh` does this
+automatically). Note the uid is **70** (alpine's `postgres`), not the 999 the MySQL
+image used.
+
+**`initdb: directory not empty`** — `PGDATA` points at a subdirectory of the volume
+(`/var/lib/postgresql/data/pgdata`) precisely to avoid this. If you removed that, a
+`lost+found` or any stray file at the mount point makes initdb refuse to run.
 
 **Redirect loop through Cloudflare** — SSL mode is "Flexible". Set it to
 "Full (strict)".

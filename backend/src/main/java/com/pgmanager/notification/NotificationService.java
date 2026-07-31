@@ -60,16 +60,16 @@ public class NotificationService {
         // notification rows that have no recipients and can never be read.
         if (partyIds.isEmpty()) return;
 
-        jdbc.update(
-                "INSERT INTO notification(organization_id,category_id,title,message,entity_type,entity_id,priority,created_at) VALUES(?,?,?,?,?,?,?,?)",
-                organizationId, categoryId, title, message, entityType, entityId,
+        Long notifId = jdbc.queryForObject(
+                "INSERT INTO notification(organization_id,category_id,title,message,entity_type,entity_id,priority,created_at) " +
+                        "VALUES(?,?,?,?,?,?,?,?) RETURNING notification_id",
+                Long.class, organizationId, categoryId, title, message, entityType, entityId,
                 important ? "HIGH" : "NORMAL", LocalDateTime.now());
-        Long notifId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         if (notifId == null) return;
 
         for (Long partyId : partyIds) {
             try {
-                jdbc.update("INSERT IGNORE INTO notification_recipient(notification_id,party_id,important) VALUES(?,?,?)",
+                jdbc.update("INSERT INTO notification_recipient(notification_id,party_id,important) VALUES(?,?,?) ON CONFLICT DO NOTHING",
                         notifId, partyId, important);
             } catch (Exception e) {
                 log.warn("Could not create notification_recipient for party {}: {}", partyId, e.getMessage());
@@ -79,7 +79,7 @@ public class NotificationService {
 
     public boolean alreadySentToday(Long organizationId, String categoryId, String entityType, Long entityId) {
         Integer count = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM notification WHERE organization_id=? AND category_id=? AND entity_type=? AND entity_id=? AND DATE(created_at)=CURDATE()",
+                "SELECT COUNT(*) FROM notification WHERE organization_id=? AND category_id=? AND entity_type=? AND entity_id=? AND created_at::date=CURRENT_DATE",
                 Integer.class, organizationId, categoryId, entityType, entityId);
         return count != null && count > 0;
     }
@@ -162,12 +162,12 @@ public class NotificationService {
         if (tenantPartyId == null || organizationId == null) return;
         try {
             String safeSubject = subject != null && subject.length() > 160 ? subject.substring(0, 160) : subject;
-            jdbc.update(
-                    "INSERT INTO notification(organization_id,category_id,title,message,entity_type,entity_id,priority,created_at) VALUES(?,?,?,?,?,?,?,?)",
-                    organizationId, categoryId, safeSubject, body, entityType, entityId, "NORMAL", LocalDateTime.now());
-            Long notifId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+            Long notifId = jdbc.queryForObject(
+                    "INSERT INTO notification(organization_id,category_id,title,message,entity_type,entity_id,priority,created_at) " +
+                            "VALUES(?,?,?,?,?,?,?,?) RETURNING notification_id",
+                    Long.class, organizationId, categoryId, safeSubject, body, entityType, entityId, "NORMAL", LocalDateTime.now());
             if (notifId == null) return;
-            jdbc.update("INSERT IGNORE INTO notification_recipient(notification_id,party_id,important) VALUES(?,?,?)",
+            jdbc.update("INSERT INTO notification_recipient(notification_id,party_id,important) VALUES(?,?,?) ON CONFLICT DO NOTHING",
                     notifId, tenantPartyId, false);
 
             String email = queryString("SELECT email FROM person WHERE party_id = ?", tenantPartyId);

@@ -89,8 +89,8 @@ public class NoticeService {
                 "(nr.notice_read_id IS NOT NULL) AS read_flag " +
                 "FROM notice n " +
                 "LEFT JOIN notice_read nr ON nr.notice_id=n.notice_id AND nr.party_id=? " +
-                "WHERE n.organization_id=? AND n.active=1 " +
-                "AND (n.expires_at IS NULL OR n.expires_at > NOW(6)) " +
+                "WHERE n.organization_id=? AND n.active=TRUE " +
+                "AND (n.expires_at IS NULL OR n.expires_at > LOCALTIMESTAMP(6)) " +
                 "AND (n.property_facility_id IS NULL OR n.property_facility_id=?) " +
                 "ORDER BY n.published_at DESC",
                 partyId, organizationId, propertyId);
@@ -100,8 +100,8 @@ public class NoticeService {
         Integer c = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM notice n " +
                 "LEFT JOIN notice_read nr ON nr.notice_id=n.notice_id AND nr.party_id=? " +
-                "WHERE n.organization_id=? AND n.active=1 AND nr.notice_read_id IS NULL " +
-                "AND (n.expires_at IS NULL OR n.expires_at > NOW(6)) " +
+                "WHERE n.organization_id=? AND n.active=TRUE AND nr.notice_read_id IS NULL " +
+                "AND (n.expires_at IS NULL OR n.expires_at > LOCALTIMESTAMP(6)) " +
                 "AND (n.property_facility_id IS NULL OR n.property_facility_id=?)",
                 Integer.class, partyId, organizationId, propertyId);
         return c == null ? 0 : c;
@@ -113,7 +113,7 @@ public class NoticeService {
         Notice n = notices.findByNoticeIdAndOrganizationId(noticeId, organizationId)
                 .orElseThrow(() -> new NotFoundException("Notice not found"));
         LocalDateTime now = LocalDateTime.now();
-        jdbc.update("INSERT IGNORE INTO notice_read(notice_id,party_id,read_at,created_at,updated_at) VALUES(?,?,?,?,?)",
+        jdbc.update("INSERT INTO notice_read(notice_id,party_id,read_at,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING",
                 noticeId, partyId, now, now, now);
         Map<String, Object> map = toMap(n);
         map.put("read", true);

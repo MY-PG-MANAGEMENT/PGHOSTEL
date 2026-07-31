@@ -122,11 +122,12 @@ public class StaffController {
     ApiResponse<Map<String, Object>> create(@Valid @RequestBody StaffRequest request) {
         Long org = currentUser.organizationId();
         if (request.propertyId() != null) requirePropertyInOrg(org, request.propertyId());
-        jdbc.update("INSERT INTO staff(organization_id,property_facility_id,full_name,profession,mobile_number," +
-                        "monthly_salary,join_date,status,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'ACTIVE',?,NOW(),NOW())",
-                org, request.propertyId(), request.fullName().trim(), request.profession().trim(),
+        Long staffId = jdbc.queryForObject(
+                "INSERT INTO staff(organization_id,property_facility_id,full_name,profession,mobile_number," +
+                        "monthly_salary,join_date,status,notes,created_at,updated_at) " +
+                        "VALUES(?,?,?,?,?,?,?,'ACTIVE',?,LOCALTIMESTAMP,LOCALTIMESTAMP) RETURNING staff_id",
+                Long.class, org, request.propertyId(), request.fullName().trim(), request.profession().trim(),
                 request.mobileNumber(), request.monthlySalary(), request.joinDate(), request.notes());
-        Long staffId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         auditService.log(org, currentUser.userLoginId(), "STAFF_CREATED", "STAFF", staffId,
                 request.fullName() + " (" + request.profession() + ") " + request.monthlySalary());
         return ApiResponse.ok("Staff added", Map.of("staffId", staffId));
@@ -143,7 +144,7 @@ public class StaffController {
             throw new BadRequestException("Status must be ACTIVE or INACTIVE");
         }
         jdbc.update("UPDATE staff SET property_facility_id=?, full_name=?, profession=?, mobile_number=?, " +
-                        "monthly_salary=?, join_date=?, status=?, notes=?, updated_at=NOW() WHERE staff_id=? AND organization_id=?",
+                        "monthly_salary=?, join_date=?, status=?, notes=?, updated_at=LOCALTIMESTAMP WHERE staff_id=? AND organization_id=?",
                 request.propertyId(), request.fullName().trim(), request.profession().trim(), request.mobileNumber(),
                 request.monthlySalary(), request.joinDate(), status, request.notes(), staffId, org);
         auditService.log(org, currentUser.userLoginId(), "STAFF_UPDATED", "STAFF", staffId,
@@ -156,7 +157,7 @@ public class StaffController {
     ApiResponse<Void> deactivate(@PathVariable Long staffId) {
         Long org = currentUser.organizationId();
         requireStaff(org, staffId);
-        jdbc.update("UPDATE staff SET status='INACTIVE', updated_at=NOW() WHERE staff_id=? AND organization_id=?",
+        jdbc.update("UPDATE staff SET status='INACTIVE', updated_at=LOCALTIMESTAMP WHERE staff_id=? AND organization_id=?",
                 staffId, org);
         auditService.log(org, currentUser.userLoginId(), "STAFF_DEACTIVATED", "STAFF", staffId, null);
         return ApiResponse.ok("Staff deactivated", null);
@@ -188,7 +189,7 @@ public class StaffController {
             BigDecimal salary = decimal(staff.get("monthly_salary"));
             try {
                 jdbc.update("INSERT INTO staff_salary_payment(organization_id,staff_id,pay_month,amount,payment_method," +
-                                "paid_date,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,NOW(),NOW())",
+                                "paid_date,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,LOCALTIMESTAMP,LOCALTIMESTAMP)",
                         org, staffId, ym.toString(), salary, method, today, currentUser.userLoginId());
             } catch (DuplicateKeyException alreadyPaid) {
                 skipped++;
@@ -199,7 +200,7 @@ public class StaffController {
             Long expenseId = expenseWriter.insertApproved(org, propertyId, "SALARY",
                     "Salary - " + staff.get("full_name") + " (" + ym + ")", salary, method, today,
                     currentUser.userLoginId());
-            jdbc.update("UPDATE staff_salary_payment SET expense_id=?, updated_at=NOW() WHERE staff_id=? AND pay_month=?",
+            jdbc.update("UPDATE staff_salary_payment SET expense_id=?, updated_at=LOCALTIMESTAMP WHERE staff_id=? AND pay_month=?",
                     expenseId, staffId, ym.toString());
             auditService.log(org, currentUser.userLoginId(), "STAFF_SALARY_PAID", "STAFF", staffId,
                     staff.get("full_name") + " " + ym + " " + salary + " (" + method + ")");

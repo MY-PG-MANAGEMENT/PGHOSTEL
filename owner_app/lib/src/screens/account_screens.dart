@@ -724,10 +724,18 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
     _load();
   }
 
-  /// `enabled` arrives as a JSON `1`/`0`, not `true`/`false`: the backend reads it
-  /// as `COALESCE(p.enabled, TRUE)` and MySQL Connector/J returns a Number for a
-  /// `TINYINT(1)` seen through `COALESCE` (see the JdbcValues note in CLAUDE.md).
-  /// Anything other than a recognised truthy form counts as off.
+  /// `enabled` arrives as a JSON `true`/`false`: the column is a PostgreSQL BOOLEAN
+  /// and the backend reads it as `COALESCE(p.enabled, FALSE)`, which stays boolean.
+  ///
+  /// `1` is still accepted, and that is not dead code. Under MySQL this endpoint
+  /// really did return `1`/`0` (Connector/J handed back a Number for a `TINYINT(1)`
+  /// seen through `COALESCE`), and the same numeric shape reappears for any flag
+  /// derived via `SUM`/`COUNT`. Dropping it would silently turn every category off
+  /// against an older backend.
+  ///
+  /// Matching by identity, not truthiness: anything else — a `'yes'`, a `null` —
+  /// counts as off, because failing open here means delivering notifications the
+  /// owner switched off.
   static bool _isEnabled(Object? raw) => raw == true || raw == 1;
 
   static String _categoryId(Map<String, dynamic> item) => '${item['category_id']}';

@@ -29,8 +29,8 @@ erDiagram
         varchar external_transaction_id
         varchar status
         varchar notes
-        datetime created_at
-        datetime updated_at
+        timestamp created_at
+        timestamp updated_at
     }
 
     PAYMENT_ALLOCATION {
@@ -39,7 +39,7 @@ erDiagram
         bigint payment_id FK
         bigint invoice_id FK
         decimal amount
-        datetime allocated_at
+        timestamp allocated_at
     }
 
     PAYMENT_REFUND {
@@ -51,9 +51,9 @@ erDiagram
         varchar reference_number
         varchar reason
         varchar status
-        datetime refunded_at
-        datetime created_at
-        datetime updated_at
+        timestamp refunded_at
+        timestamp created_at
+        timestamp updated_at
     }
 
     INVOICE {
@@ -68,8 +68,8 @@ erDiagram
         decimal total_amount
         decimal paid_amount
         varchar status
-        datetime created_at
-        datetime updated_at
+        timestamp created_at
+        timestamp updated_at
     }
 
     BILLING_ACCOUNT {
@@ -80,8 +80,8 @@ erDiagram
         varchar currency_code
         varchar status
         decimal advance_balance
-        datetime created_at
-        datetime updated_at
+        timestamp created_at
+        timestamp updated_at
     }
 
     ADMISSION {
@@ -95,6 +95,6 @@ erDiagram
         decimal advance_amount
         int notice_period_days
         varchar status
-        datetime created_at
-        datetime updated_at
+        timestamp created_at
+        timestamp updated_at
     }

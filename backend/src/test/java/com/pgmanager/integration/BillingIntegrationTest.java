@@ -11,7 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
-import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -23,7 +23,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * End-to-end billing payment-collection tests against a real MySQL (Testcontainers
+ * End-to-end billing payment-collection tests against a real PostgreSQL (Testcontainers
  * + Flyway). Seeds a billing account + invoice via JdbcTemplate for the registered
  * owner's party, then drives the real {@code POST /api/billing/payments} flow and
  * asserts the persisted allocation, status transition and idempotent replay.
@@ -37,13 +37,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class BillingIntegrationTest {
 
     @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0").withDatabaseName("pg_manager");
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:17-alpine").withDatabaseName("pg_manager");
 
     @DynamicPropertySource
     static void datasourceProps(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
-        registry.add("spring.datasource.username", MYSQL::getUsername);
-        registry.add("spring.datasource.password", MYSQL::getPassword);
+        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+        registry.add("spring.datasource.username", POSTGRES::getUsername);
+        registry.add("spring.datasource.password", POSTGRES::getPassword);
     }
 
     @Autowired MockMvc mvc;
@@ -72,14 +72,16 @@ class BillingIntegrationTest {
     private long seedInvoice(Owner owner, String total) {
         LocalDateTime now = LocalDateTime.now();
         LocalDate month = LocalDate.now().withDayOfMonth(1);
-        jdbc.update("INSERT INTO billing_account(organization_id,party_id,created_at,updated_at) VALUES(?,?,?,?)",
-                owner.orgId(), owner.partyId(), now, now);
-        long baId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        long baId = jdbc.queryForObject(
+                "INSERT INTO billing_account(organization_id,party_id,created_at,updated_at) VALUES(?,?,?,?) " +
+                        "RETURNING billing_account_id",
+                Long.class, owner.orgId(), owner.partyId(), now, now);
         String invNum = "INV-IT-" + System.nanoTime();
-        jdbc.update("INSERT INTO invoice(organization_id,billing_account_id,invoice_number,invoice_month,issue_date,due_date," +
-                        "total_amount,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                owner.orgId(), baId, invNum, month, month, month, new java.math.BigDecimal(total), now, now);
-        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        return jdbc.queryForObject(
+                "INSERT INTO invoice(organization_id,billing_account_id,invoice_number,invoice_month,issue_date,due_date," +
+                        "total_amount,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) RETURNING invoice_id",
+                Long.class, owner.orgId(), baId, invNum, month, month, month,
+                new java.math.BigDecimal(total), now, now);
     }
 
     @Test

@@ -5,9 +5,12 @@ spring:
   application:
     name: pg-manager-backend
   datasource:
-    url: jdbc:mysql://localhost:3306/pg_manager?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Kolkata
-    username: root
-    password: root
+    # PostgreSQL has no createDatabaseIfNotExist equivalent -- create the database
+    # once with `createdb pg_manager` (or the equivalent in your client) before the
+    # first run. Flyway then owns everything inside it.
+    url: jdbc:postgresql://localhost:5432/pg_manager
+    username: postgres
+    password: postgres
   jpa:
     hibernate:
       ddl-auto: validate
@@ -76,7 +79,8 @@ logging:
     # Persist off the request thread. false makes the insert inline (handy in tests).
     async: ${API_LOG_ASYNC:true}
     retention-days: ${API_LOG_RETENTION_DAYS:10}
-    # Per-payload cap in characters, applied after masking. Keep <= ~16000 for TEXT columns.
+    # Per-payload cap in characters, applied after masking. PostgreSQL TEXT is
+    # unbounded, so this is purely about log volume and row size, not a column limit.
     max-payload-chars: ${API_LOG_MAX_PAYLOAD_CHARS:8000}
     # Off-peak, and clear of the 01:00 invoice sweep and 00:05 bed-transfer job.
     cleanup-cron: ${API_LOG_CLEANUP_CRON:0 15 3 * * *}

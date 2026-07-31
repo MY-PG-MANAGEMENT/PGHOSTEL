@@ -96,10 +96,12 @@ public class InvoiceGenerationService {
      * deposit is deliberately never part of a recurring invoice). The due date falls on the
      * tenant's billing anniversary day, clamped to the month length.
      *
-     * <p>{@code @Transactional} so the INSERT and its {@code LAST_INSERT_ID()} read share one
-     * connection — required when the scheduler calls this outside any surrounding transaction.
-     * (Within {@link #generateDueOn} the self-invocation simply joins that method's transaction,
-     * keeping the manual batch atomic as before.)
+     * <p>{@code @Transactional} so the invoice INSERT and its line-item INSERTs either all land
+     * or none do — a half-written invoice would bill the wrong total. (It no longer has to be
+     * transactional merely to keep a connection: the id now comes back from {@code RETURNING} on
+     * the insert itself rather than a separate {@code LAST_INSERT_ID()} read.) Within
+     * {@link #generateDueOn} the self-invocation simply joins that method's transaction, keeping
+     * the manual batch atomic as before.
      */
     @Transactional
     public Long createRecurringInvoice(Long org, Long baId, Long partyId, BigDecimal monthlyRent,
@@ -121,10 +123,11 @@ public class InvoiceGenerationService {
         LocalDate dueDate = invoiceMonth.withDayOfMonth(day);
         String invNum = "INV-" + org + "-" + baId + "-" + invoiceMonth.toString().substring(0, 7).replace("-", "");
         LocalDateTime now = LocalDateTime.now();
-        jdbc.update("INSERT INTO invoice(organization_id,billing_account_id,invoice_number,invoice_month,issue_date,due_date," +
-                        "total_amount,paid_amount,status,created_at,updated_at,version) VALUES(?,?,?,?,?,?,?,0,'PENDING',?,?,0)",
-                org, baId, invNum, invoiceMonth, invoiceMonth, dueDate, rent, now, now);
-        Long invoiceId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        Long invoiceId = jdbc.queryForObject(
+                "INSERT INTO invoice(organization_id,billing_account_id,invoice_number,invoice_month,issue_date,due_date," +
+                        "total_amount,paid_amount,status,created_at,updated_at,version) VALUES(?,?,?,?,?,?,?,0,'PENDING',?,?,0) " +
+                        "RETURNING invoice_id",
+                Long.class, org, baId, invNum, invoiceMonth, invoiceMonth, dueDate, rent, now, now);
         jdbc.update("INSERT INTO invoice_item(invoice_id,item_type_id,description,amount,created_at,updated_at) VALUES(?,?,?,?,?,?)",
                 invoiceId, "MONTHLY_RENT", "Monthly Rent", baseRent, now, now);
         if (ac.compareTo(BigDecimal.ZERO) > 0) {

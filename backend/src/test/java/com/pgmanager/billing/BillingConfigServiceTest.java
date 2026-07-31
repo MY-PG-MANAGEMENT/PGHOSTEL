@@ -13,10 +13,15 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Regression cover for reading the config row. MySQL hands {@code auto_generate_enabled}
- * (TINYINT(1)) back as a {@link Boolean}, so casting it to Number blew up with a 500 the
- * moment an org actually saved a setting — until then every org fell through the
- * "no row → DEFAULT" branch and the cast was never reached.
+ * Regression cover for reading and writing the config row.
+ *
+ * <p>Reading: {@code auto_generate_enabled} comes back as a {@link Boolean}, so casting it to
+ * Number blew up with a 500 the moment an org actually saved a setting — until then every
+ * org fell through the "no row → DEFAULT" branch and the cast was never reached.
+ *
+ * <p>Writing: the flag must be bound as a {@code boolean}, not {@code 1}/{@code 0}. PostgreSQL
+ * will not coerce an integer into a BOOLEAN column, so the old numeric bind is now a hard
+ * failure on save rather than a silent no-op.
  */
 class BillingConfigServiceTest {
 
@@ -86,8 +91,10 @@ class BillingConfigServiceTest {
 
         assertThat(saved.invoiceLeadDays()).isEqualTo(BillingConfigService.MAX_LEAD_DAYS);
         assertThat(saved.checkoutGraceDays()).isEqualTo(BillingConfigService.MAX_GRACE_DAYS);
+        // auto_generate_enabled binds as a real boolean, not 1/0: PostgreSQL will not coerce an
+        // integer into a BOOLEAN column the way MySQL's TINYINT(1) did.
         verify(jdbc).update(contains("INSERT INTO organization_billing_config"),
                 eq(1L), eq(BillingConfigService.MAX_LEAD_DAYS), eq(BillingConfigService.MAX_GRACE_DAYS),
-                eq(0), any(), any());
+                eq(false), any(), any());
     }
 }

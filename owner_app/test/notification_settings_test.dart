@@ -17,15 +17,21 @@ import 'support/test_harness.dart';
 /// switch to spring back silently. It also never checked `snapshot.hasError`, so a
 /// failed initial load sat on an endless spinner.
 ///
-/// `enabled` is asserted as a JSON `1`/`0` on purpose: the backend reads it as
-/// `COALESCE(p.enabled, TRUE)` and Connector/J returns a Number for a TINYINT(1)
-/// seen through COALESCE, so that — not `true`/`false` — is the real payload.
+/// `enabled` is stubbed as a JSON `true`/`false`: the column is a PostgreSQL BOOLEAN
+/// and `COALESCE(p.enabled, FALSE)` returns a real boolean, so that is the payload the
+/// app actually receives.
+///
+/// The reader still accepts `1`/`0` as well, and that is deliberate rather than dead
+/// code: under MySQL, Connector/J returned a Number for a TINYINT(1) seen through
+/// COALESCE, so an app build in the field predating this migration — or any future
+/// endpoint that reports a flag via SUM/COUNT — sends the numeric form. Both are
+/// covered below.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   const prefsPath = '/notifications/preferences';
 
-  Map<String, dynamic> prefs({Object rentEnabled = 1, Object checkoutEnabled = 0}) => {
+  Map<String, dynamic> prefs({Object rentEnabled = true, Object checkoutEnabled = false}) => {
         'items': [
           {
             'category_id': 'RENT_REMINDER',

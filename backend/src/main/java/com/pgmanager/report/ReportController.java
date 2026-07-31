@@ -225,7 +225,7 @@ public class ReportController {
                 "                 ORDER BY occ.thru_date IS NULL DESC, occ.from_date DESC LIMIT 1),'') roomBed, " +
                 "       SUM(i.total_amount - i.paid_amount) dueAmount, " +
                 "       MIN(i.due_date) dueSince, " +
-                "       GREATEST(DATEDIFF(?, MIN(i.due_date)), 0) daysOverdue, " +
+                "       GREATEST(CAST(? AS date) - MIN(i.due_date), 0) daysOverdue, " +
                 "       (SELECT MAX(p.payment_date) FROM payment p " +
                 "        WHERE p.organization_id=i.organization_id AND p.party_id=ba.party_id AND p.status='RECEIVED') lastPaymentDate, " +
                 "       MIN(CASE WHEN i.due_date >= CURRENT_DATE THEN i.due_date END) nextDueDate, " +

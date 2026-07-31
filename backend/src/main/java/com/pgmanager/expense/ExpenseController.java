@@ -204,14 +204,14 @@ public class ExpenseController {
         LocalDate date = request.expenseDate() == null ? LocalDate.now() : request.expenseDate();
         boolean approved = !request.requiresApproval();
         LocalDateTime now = LocalDateTime.now();
-        jdbc.update("INSERT INTO expense(organization_id,property_facility_id,category,title,description,amount," +
+        Long expenseId = jdbc.queryForObject(
+                "INSERT INTO expense(organization_id,property_facility_id,category,title,description,amount," +
                         "expense_date,payment_method,vendor_name,status,approved_by,approved_at,created_by,created_at,updated_at) " +
-                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                org, request.propertyId(), category, request.title().trim(), request.description(), request.amount(),
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING expense_id",
+                Long.class, org, request.propertyId(), category, request.title().trim(), request.description(), request.amount(),
                 date, method, request.vendorName(), approved ? "APPROVED" : "PENDING",
                 approved ? currentUser.userLoginId() : null, approved ? now : null,
                 currentUser.userLoginId(), now, now);
-        Long expenseId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         if (approved && "CASH".equals(method)) {
             expenseWriter.recordCashOut(org, request.propertyId(), expenseId, request.amount(),
                     request.title(), date, currentUser.userLoginId());
@@ -246,7 +246,7 @@ public class ExpenseController {
         String status = (String) existing.get("status");
 
         jdbc.update("UPDATE expense SET property_facility_id=?, category=?, title=?, description=?, amount=?, " +
-                        "expense_date=?, payment_method=?, vendor_name=?, updated_at=NOW() " +
+                        "expense_date=?, payment_method=?, vendor_name=?, updated_at=LOCALTIMESTAMP " +
                         "WHERE expense_id=? AND organization_id=?",
                 request.propertyId(), category, title, request.description(), request.amount(),
                 date, method, request.vendorName(), expenseId, org);
@@ -293,7 +293,7 @@ public class ExpenseController {
         if (rows.isEmpty()) throw new NotFoundException("Expense not found");
         Map<String, Object> expense = rows.getFirst();
         if (!"PENDING".equals(expense.get("status"))) throw new BadRequestException("Expense is already " + expense.get("status"));
-        jdbc.update("UPDATE expense SET status=?, approved_by=?, approved_at=NOW(), updated_at=NOW() WHERE expense_id=?",
+        jdbc.update("UPDATE expense SET status=?, approved_by=?, approved_at=LOCALTIMESTAMP, updated_at=LOCALTIMESTAMP WHERE expense_id=?",
                 status, currentUser.userLoginId(), expenseId);
         if (status.equals("APPROVED") && "CASH".equals(expense.get("payment_method"))) {
             Long propertyId = expense.get("property_facility_id") == null
@@ -317,7 +317,9 @@ public class ExpenseController {
         YearMonth ym = parseMonth(request.month());
         long scope = request.propertyId() != null ? request.propertyId() : 0L;
         jdbc.update("INSERT INTO expense_budget(organization_id,property_facility_id,category,budget_month,amount,created_at,updated_at) " +
-                        "VALUES(?,?,?,?,?,NOW(),NOW()) ON DUPLICATE KEY UPDATE amount=VALUES(amount), updated_at=NOW()",
+                        "VALUES(?,?,?,?,?,LOCALTIMESTAMP,LOCALTIMESTAMP) " +
+                        "ON CONFLICT (organization_id,property_facility_id,category,budget_month) " +
+                        "DO UPDATE SET amount=EXCLUDED.amount, updated_at=LOCALTIMESTAMP",
                 org, scope, category, ym.toString(), request.amount());
         auditService.log(org, currentUser.userLoginId(), "EXPENSE_BUDGET_SET", "EXPENSE_BUDGET", scope,
                 category + " " + ym + " " + request.amount());
@@ -333,7 +335,7 @@ public class ExpenseController {
         if (request.propertyId() != null) requirePropertyInOrg(org, request.propertyId());
         LocalDate date = request.entryDate() == null ? LocalDate.now() : request.entryDate();
         jdbc.update("INSERT INTO petty_cash_entry(organization_id,property_facility_id,entry_type,amount,note,entry_date," +
-                        "created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,NOW(),NOW())",
+                        "created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,LOCALTIMESTAMP,LOCALTIMESTAMP)",
                 org, request.propertyId() != null ? request.propertyId() : 0L, type, request.amount(),
                 request.note(), date, currentUser.userLoginId());
         auditService.log(org, currentUser.userLoginId(), "PETTY_CASH_" + type, "PETTY_CASH",
@@ -349,7 +351,7 @@ public class ExpenseController {
         LocalDate fromDate = from.atDay(1), toDate = current.atEndOfMonth();
         String prop = propertyId != null ? " AND property_facility_id=?" : "";
         Map<String, BigDecimal> expenses = monthTotals(jdbc.queryForList(
-                "SELECT DATE_FORMAT(expense_date,'%Y-%m') m, SUM(amount) total FROM expense " +
+                "SELECT TO_CHAR(expense_date,'YYYY-MM') m, SUM(amount) total FROM expense " +
                 "WHERE organization_id=? AND status IN " + SPENT_STATUSES + " AND expense_date BETWEEN ? AND ?" + prop +
                 " GROUP BY m", args(org, fromDate, toDate, propertyId != null ? new Object[]{propertyId} : new Object[0])));
         String incomeProp = propertyId != null
@@ -359,7 +361,7 @@ public class ExpenseController {
                 ? new Object[]{org, fromDate, toDate, org, propertyId}
                 : new Object[]{org, fromDate, toDate};
         Map<String, BigDecimal> income = monthTotals(jdbc.queryForList(
-                "SELECT DATE_FORMAT(payment_date,'%Y-%m') m, SUM(amount) total FROM payment " +
+                "SELECT TO_CHAR(payment_date,'YYYY-MM') m, SUM(amount) total FROM payment " +
                 "WHERE organization_id=? AND status='RECEIVED' AND payment_date BETWEEN ? AND ?" + incomeProp +
                 " GROUP BY m", incomeArgs));
         List<Map<String, Object>> points = new ArrayList<>();
@@ -508,7 +510,7 @@ public class ExpenseController {
             return;
         }
         int updated = jdbc.update(
-                "UPDATE petty_cash_entry SET property_facility_id=?, amount=?, note=?, entry_date=?, updated_at=NOW() " +
+                "UPDATE petty_cash_entry SET property_facility_id=?, amount=?, note=?, entry_date=?, updated_at=LOCALTIMESTAMP " +
                 "WHERE organization_id=? AND expense_id=?",
                 propertyId != null ? propertyId : 0L, amount, title, date, org, expenseId);
         if (updated == 0) {

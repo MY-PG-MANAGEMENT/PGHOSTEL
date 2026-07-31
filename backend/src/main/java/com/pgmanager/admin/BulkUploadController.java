@@ -310,7 +310,7 @@ public class BulkUploadController {
     /** Look up a facility of the given type by its unique {@code facility_code} within an org. */
     private Long findFacilityByCode(Long orgId, String typeId, String code) {
         return jdbc.query(
-                "SELECT facility_id FROM facility WHERE organization_id=? AND facility_type_id=? AND facility_code=? LIMIT 1",
+                "SELECT facility_id FROM facility WHERE organization_id=? AND facility_type_id=? AND LOWER(facility_code)=LOWER(?) LIMIT 1",
                 rs -> rs.next() ? rs.getLong(1) : null,
                 orgId, typeId, code);
     }
@@ -320,7 +320,7 @@ public class BulkUploadController {
         return jdbc.query(
                 "SELECT f.facility_id FROM facility f " +
                 "JOIN facility_group_member fgm ON fgm.child_facility_id=f.facility_id AND fgm.thru_date IS NULL " +
-                "WHERE fgm.parent_facility_id=? AND f.facility_type_id=? AND f.facility_code=? LIMIT 1",
+                "WHERE fgm.parent_facility_id=? AND f.facility_type_id=? AND LOWER(f.facility_code)=LOWER(?) LIMIT 1",
                 rs -> rs.next() ? rs.getLong(1) : null,
                 parentId, typeId, code);
     }

@@ -128,7 +128,8 @@ class BillingControllerTest {
     void collectFullPaymentMarksInvoicePaid() throws Exception {
         collectStubs(invoice("5000", "0"));
         when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
-        when(jdbc.queryForObject(eq("SELECT LAST_INSERT_ID()"), eq(Long.class))).thenReturn(500L);
+        // The payment id comes back from RETURNING on the INSERT itself.
+        when(jdbc.queryForObject(contains("INSERT INTO payment"), eq(Long.class), any(Object[].class))).thenReturn(500L);
 
         mvc.perform(post("/api/billing/payments").contentType(MediaType.APPLICATION_JSON).content(body("5000")))
                 .andExpect(status().isOk())
@@ -140,7 +141,7 @@ class BillingControllerTest {
     void collectPartialPaymentMarksInvoicePartial() throws Exception {
         collectStubs(invoice("5000", "0"));
         when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
-        when(jdbc.queryForObject(eq("SELECT LAST_INSERT_ID()"), eq(Long.class))).thenReturn(501L);
+        when(jdbc.queryForObject(contains("INSERT INTO payment"), eq(Long.class), any(Object[].class))).thenReturn(501L);
 
         mvc.perform(post("/api/billing/payments").contentType(MediaType.APPLICATION_JSON).content(body("2000")))
                 .andExpect(status().isOk())
@@ -171,7 +172,7 @@ class BillingControllerTest {
                 .andExpect(jsonPath("$.data.payment_id").value(500));
 
         // No second payment row, and no invoice re-statement.
-        verify(jdbc, never()).update(contains("INSERT INTO payment"), any(Object[].class));
+        verify(jdbc, never()).queryForObject(contains("INSERT INTO payment"), eq(Long.class), any(Object[].class));
     }
 
     // ── Delete (soft-cancel) is pending-only, and restore is its undo ──────────
