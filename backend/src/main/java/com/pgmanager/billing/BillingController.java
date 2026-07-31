@@ -180,6 +180,20 @@ public class BillingController {
     @Transactional
     ApiResponse<Map<String, Object>> collectPayment(@Valid @RequestBody PaymentRequest request) {
         Long org = currentUser.organizationId();
+        // Replay check FIRST, before the balance guard below.
+        //
+        // A retry of a payment that settled the invoice in full leaves balance = 0, so
+        // the "exceeds invoice balance" guard rejected the replay with a 400 and the
+        // DuplicateKeyException branch further down was never reached. That is exactly
+        // backwards: the idempotency key exists so a client that retries after a network
+        // timeout gets the original receipt back, not an error telling it the invoice is
+        // already paid. The catch below stays as the race backstop for two concurrent
+        // replays, where both get past this lookup before either has inserted.
+        List<Map<String, Object>> replay = jdbc.queryForList(
+                "SELECT payment_id,amount,status FROM payment WHERE organization_id=? AND idempotency_key=?",
+                org, request.idempotencyKey());
+        if (!replay.isEmpty()) return ApiResponse.ok("Payment already recorded", replay.getFirst());
+
         List<Map<String, Object>> invoices = jdbc.queryForList("SELECT i.invoice_id,i.billing_account_id,i.total_amount,i.paid_amount,ba.party_id " +
                 "FROM invoice i JOIN billing_account ba ON ba.billing_account_id=i.billing_account_id WHERE i.invoice_id=? AND i.organization_id=? FOR UPDATE",
                 request.invoiceId(), org);

@@ -1,8 +1,10 @@
 package com.pgmanager.security;
 
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -36,6 +38,24 @@ public class SecurityConfig {
                                 RoleType.ACCOUNTANT, RoleType.SUPPORT, RoleType.VIEWER)
                         .anyRequest().authenticated()
                 )
+                // Unauthenticated -> 401, not the Spring default 403.
+                //
+                // With no authentication mechanism registered (no formLogin, no httpBasic
+                // — this is a stateless JWT API), Spring Security falls back to
+                // Http403ForbiddenEntryPoint, so a request with a missing or expired token
+                // came back 403. That is the wrong status, and it also silently disabled
+                // the Flutter client's token refresh: ApiClient retries through
+                // /auth/refresh on 401 only, so an expired access token surfaced as a hard
+                // error instead of refreshing. 403 stays reserved for an authenticated
+                // caller who lacks the role (see GlobalExceptionHandler.accessDenied),
+                // which is the distinction the app relies on for a deactivated org.
+                .exceptionHandling(ex -> ex.authenticationEntryPoint((req, res, authEx) -> {
+                    res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    res.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                    // Same ApiResponse envelope every other error uses, so the client's
+                    // JSON decode path does not have to special-case this one.
+                    res.getWriter().write("{\"success\":false,\"message\":\"Unauthorized\",\"data\":null}");
+                }))
                 .authenticationProvider(authenticationProvider())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
