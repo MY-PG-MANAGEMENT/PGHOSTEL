@@ -48,7 +48,7 @@ import java.util.Set;
  * a tenant's {@code {mobile}@{orgId}} for the same person). That suffix is an <b>implementation
  * detail nobody should have to type</b>: {@code AuthService.resolveStaffMobile} maps a bare 10-digit
  * entry back to it, so the credential an owner hands over is just the mobile. Temp password
- * {@link #TEMP_PASSWORD} with {@code must_change_password = 1}, exactly like
+ * {@link #TEMP_PASSWORD} with {@code must_change_password = TRUE}, exactly like
  * {@code TenantLoginService}.
  */
 @Service
@@ -138,7 +138,7 @@ public class PropertyManagerService {
         login.setOrganizationId(organizationId);
         login = userLoginRepository.save(login);
         // Forces a password change on first sign-in; the column and the flow already exist (V22).
-        jdbc.update("UPDATE user_login SET must_change_password = 1 WHERE user_login_id = ?",
+        jdbc.update("UPDATE user_login SET must_change_password = TRUE WHERE user_login_id = ?",
                 login.getUserLoginId());
 
         replaceAssignments(organizationId, party.getPartyId(), properties);
@@ -198,7 +198,7 @@ public class PropertyManagerService {
     public String resetPassword(Long organizationId, Long userLoginId) {
         loadManager(organizationId, userLoginId);
         LocalDateTime now = LocalDateTime.now();
-        jdbc.update("UPDATE user_login SET password_hash = ?, must_change_password = 1, updated_at = ? " +
+        jdbc.update("UPDATE user_login SET password_hash = ?, must_change_password = TRUE, updated_at = ? " +
                         "WHERE user_login_id = ?",
                 passwordEncoder.encode(TEMP_PASSWORD), now, userLoginId);
         jdbc.update("UPDATE refresh_token SET revoked = TRUE, updated_at = ? " +

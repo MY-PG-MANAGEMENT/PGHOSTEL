@@ -109,7 +109,8 @@ public class AccountController {
         updates.forEach((key, value) -> {
             if (!allowed.contains(key)) throw new BadRequestException("Unsupported preference: " + key);
             jdbc.update("INSERT INTO user_preference(user_login_id,preference_key,preference_value,updated_at) VALUES(?,?,?,?) " +
-                            "ON DUPLICATE KEY UPDATE preference_value=VALUES(preference_value),updated_at=VALUES(updated_at)",
+                            "ON CONFLICT (user_login_id,preference_key) DO UPDATE SET " +
+                            "preference_value=EXCLUDED.preference_value,updated_at=EXCLUDED.updated_at",
                     currentUser.userLoginId(), key, value, LocalDateTime.now());
         });
         return preferences();
@@ -124,8 +125,9 @@ public class AccountController {
     @PostMapping("/devices")
     ApiResponse<Map<String, Object>> registerDevice(@Valid @RequestBody DeviceRequest request) {
         jdbc.update("INSERT INTO user_device(user_login_id,device_identifier_hash,platform,biometric_enabled,push_token,last_seen_at) " +
-                        "VALUES(?,?,?,?,?,?) ON DUPLICATE KEY UPDATE platform=VALUES(platform),biometric_enabled=VALUES(biometric_enabled)," +
-                        "push_token=VALUES(push_token),last_seen_at=VALUES(last_seen_at),revoked_at=NULL",
+                        "VALUES(?,?,?,?,?,?) ON CONFLICT (user_login_id,device_identifier_hash) DO UPDATE SET " +
+                        "platform=EXCLUDED.platform,biometric_enabled=EXCLUDED.biometric_enabled," +
+                        "push_token=EXCLUDED.push_token,last_seen_at=EXCLUDED.last_seen_at,revoked_at=NULL",
                 currentUser.userLoginId(), request.deviceIdentifierHash(), request.platform(), request.biometricEnabled(),
                 request.pushToken(), LocalDateTime.now());
         return ApiResponse.ok(Map.of("registered", true, "biometricEnabled", request.biometricEnabled()));

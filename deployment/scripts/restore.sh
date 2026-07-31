@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
-# restore.sh — restore MySQL (and optionally Redis) from a backup
+
 #
 #   ./scripts/restore.sh                                  # list available backups
-#   ./scripts/restore.sh backups/mysql/pg_manager_20260726_023000.sql.gz
+#   ./scripts/restore.sh backups/postgres/pg_manager_20260726_023000.dump
 #   ./scripts/restore.sh <file> --redis backups/redis/redis_20260726_023000.rdb.gz
 #
 # THIS IS DESTRUCTIVE. It replaces the current database with the contents of the
@@ -21,7 +21,7 @@ cd "$DEPLOY_DIR"
 set -a; source .env; set +a
 
 BACKUP_DIR="${BACKUP_DIR:-$DEPLOY_DIR/backups}"
-MYSQL_CONTAINER="pgm-mysql"
+PG_CONTAINER="pgm-postgres"
 REDIS_CONTAINER="pgm-redis"
 COMPOSE="docker compose --env-file .env"
 
@@ -33,9 +33,9 @@ fail() { echo "ERROR: $*" >&2; exit 1; }
 # -----------------------------------------------------------------------------
 if [[ $# -lt 1 ]]; then
     echo
-    echo "Available MySQL backups:"
-    echo "------------------------"
-    find "$BACKUP_DIR/mysql" -name '*.sql.gz' -printf '%T@ %p\n' 2>/dev/null \
+    echo "Available PostgreSQL backups:"
+    echo "-----------------------------"
+    find "$BACKUP_DIR/postgres" -name '*.dump' -printf '%T@ %p\n' 2>/dev/null \
         | sort -rn | cut -d' ' -f2- \
         | while read -r f; do printf '  %-62s %8s\n' "$f" "$(du -h "$f" | cut -f1)"; done
     echo
@@ -44,11 +44,11 @@ if [[ $# -lt 1 ]]; then
     find "$BACKUP_DIR/redis" -name '*.rdb.gz' -printf '%T@ %p\n' 2>/dev/null \
         | sort -rn | cut -d' ' -f2- | sed 's/^/  /'
     echo
-    echo "Usage: $0 <mysql-backup.sql.gz> [--redis <redis-backup.rdb.gz>]"
+    echo "Usage: $0 <postgres-backup.dump> [--redis <redis-backup.rdb.gz>]"
     exit 0
 fi
 
-MYSQL_BACKUP="$1"; shift
+PG_BACKUP="$1"; shift
 REDIS_BACKUP=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -57,92 +57,114 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ -f "$MYSQL_BACKUP" ]] || fail "Backup file not found: $MYSQL_BACKUP"
+[[ -f "$PG_BACKUP" ]] || fail "Backup file not found: $PG_BACKUP"
 
 # -----------------------------------------------------------------------------
 # Verify the archive BEFORE touching anything. Discovering the backup is corrupt
 # after dropping the live database is the worst possible order of operations.
 # -----------------------------------------------------------------------------
+# `pg_restore --list` parses the archive's table of contents without restoring
+# anything, so it proves the file is a readable, complete custom-format archive.
 log "Verifying archive integrity"
-gzip -t "$MYSQL_BACKUP" || fail "Archive is corrupt: $MYSQL_BACKUP"
+docker exec -i "$PG_CONTAINER" pg_restore --list /dev/stdin < "$PG_BACKUP" >/dev/null 2>&1 \
+    || fail "Archive is corrupt, truncated, or not a pg_dump custom-format file: $PG_BACKUP"
 
-if [[ -f "${MYSQL_BACKUP}.sha256" ]]; then
-    sha256sum -c "${MYSQL_BACKUP}.sha256" >/dev/null \
+if [[ -f "${PG_BACKUP}.sha256" ]]; then
+    sha256sum -c "${PG_BACKUP}.sha256" >/dev/null \
         || fail "Checksum mismatch — the archive has been altered or damaged"
     log "Checksum verified"
 else
     log "WARNING: no .sha256 alongside this archive; integrity unverified"
 fi
 
-zgrep -q "Dump completed" "$MYSQL_BACKUP" || fail "Archive has no completion marker — it is truncated"
-
 # -----------------------------------------------------------------------------
 # Confirmation
 # -----------------------------------------------------------------------------
-BACKUP_DATE=$(zgrep -m1 -o "Dump completed on [0-9: -]*" "$MYSQL_BACKUP" | sed 's/Dump completed on //' || echo "unknown")
+# The custom-format archive records its own creation time in the TOC header, which is
+# more trustworthy than the file's mtime (a copied file carries a new one).
+BACKUP_DATE=$(docker exec -i "$PG_CONTAINER" pg_restore --list /dev/stdin < "$PG_BACKUP" 2>/dev/null \
+    | sed -n 's/^; *Archive created at //p' | head -1)
+BACKUP_DATE="${BACKUP_DATE:-unknown}"
 
 cat <<BANNER
 
   ============================================================
    DESTRUCTIVE RESTORE
   ============================================================
-   Target database : ${MYSQL_DATABASE}
-   Archive         : ${MYSQL_BACKUP}
+   Target database : ${POSTGRES_DB}
+   Archive         : ${PG_BACKUP}
    Taken at        : ${BACKUP_DATE}
    Redis snapshot  : ${REDIS_BACKUP:-<none>}
 
-   The current contents of '${MYSQL_DATABASE}' will be REPLACED.
+   The current contents of '${POSTGRES_DB}' will be REPLACED.
    All data written after the timestamp above will be lost.
   ============================================================
 
 BANNER
 
 read -r -p "Type the database name to confirm: " CONFIRM
-[[ "$CONFIRM" == "$MYSQL_DATABASE" ]] || fail "Confirmation did not match. Nothing changed."
+[[ "$CONFIRM" == "$POSTGRES_DB" ]] || fail "Confirmation did not match. Nothing changed."
 
 # -----------------------------------------------------------------------------
 # Stop the API first.
 #
 # Restoring underneath a live application means in-flight transactions hit a schema
 # mid-replacement, Hibernate's validate can fire against half a schema, and the
-# connection pool fills with broken connections. Stop it; MySQL stays up because we
-# need it to accept the restore.
+# connection pool fills with broken connections. Stop it; PostgreSQL stays up because
+# we need it to accept the restore.
+#
+# Stopping the API is doubly required here: PostgreSQL refuses to DROP a database that
+# has ANY open connection, so a single live pool connection makes the restore below
+# fail outright rather than merely misbehave.
 # -----------------------------------------------------------------------------
-log "Stopping API (MySQL stays up to receive the restore)"
+log "Stopping API (PostgreSQL stays up to receive the restore)"
 $COMPOSE stop api
 
 # -----------------------------------------------------------------------------
 # Safety dump of the CURRENT state. This is the undo button for a restore performed
 # against the wrong archive — which is a mistake people make under incident pressure.
 # -----------------------------------------------------------------------------
-SAFETY="$BACKUP_DIR/mysql/pre-restore_$(date +%Y%m%d_%H%M%S).sql.gz"
+SAFETY="$BACKUP_DIR/postgres/pre-restore_$(date +%Y%m%d_%H%M%S).dump"
 log "Capturing current state -> $(basename "$SAFETY")"
-docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" "$MYSQL_CONTAINER" \
-    mysqldump --user=root --single-transaction --routines --triggers --events \
-              --set-gtid-purged=OFF --no-tablespaces --hex-blob --quick \
-              --default-character-set=utf8mb4 --databases "$MYSQL_DATABASE" \
-    | gzip -6 > "$SAFETY" || log "WARNING: safety dump failed (database may already be unusable)"
+docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" "$PG_CONTAINER" \
+    pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" \
+            --format=custom --compress=6 --no-owner --no-privileges \
+    > "$SAFETY" || log "WARNING: safety dump failed (database may already be unusable)"
 
 # -----------------------------------------------------------------------------
 # Restore
 #
-# The archive was produced with --databases, so it contains its own CREATE DATABASE
-# and USE statements. Those DROP nothing, which is why the explicit DROP/CREATE below
-# is required: without it, tables present now but absent from the dump would survive
-# and leave the schema ahead of Flyway's recorded history.
+# The database is dropped and recreated rather than restored over: tables that exist
+# now but are absent from the dump would otherwise survive and leave the schema ahead
+# of Flyway's recorded history.
+#
+# DROP DATABASE must run from a DIFFERENT database, hence `--dbname=postgres`, and it
+# fails while any session is still connected — WITH (FORCE) terminates those sessions
+# (PostgreSQL 13+). Without FORCE, one leftover psql window aborts the whole restore.
 # -----------------------------------------------------------------------------
-log "Dropping and recreating ${MYSQL_DATABASE}"
-docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" -i "$MYSQL_CONTAINER" \
-    mysql --user=root -e "
-        DROP DATABASE IF EXISTS \`${MYSQL_DATABASE}\`;
-        CREATE DATABASE \`${MYSQL_DATABASE}\`
-            CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-    "
+log "Dropping and recreating ${POSTGRES_DB}"
+docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" -i "$PG_CONTAINER" \
+    psql --username="$POSTGRES_USER" --dbname=postgres -v ON_ERROR_STOP=1 -q <<SQL
+DROP DATABASE IF EXISTS "${POSTGRES_DB}" WITH (FORCE);
+CREATE DATABASE "${POSTGRES_DB}" OWNER "${POSTGRES_USER}";
+SQL
+
+# pg_stat_statements lives in the database, not the cluster, so a freshly created
+# database does not have it — and only the init script (which never runs again) would
+# have added it. Recreate it here or the extension silently disappears after the first
+# restore, taking the main production diagnostic with it.
+docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" -i "$PG_CONTAINER" \
+    psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -v ON_ERROR_STOP=1 -q \
+    -c 'CREATE EXTENSION IF NOT EXISTS pg_stat_statements;'
 
 log "Loading archive (this can take several minutes)"
-if ! gunzip -c "$MYSQL_BACKUP" \
-    | docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" -i "$MYSQL_CONTAINER" \
-        mysql --user=root --default-character-set=utf8mb4; then
+# --exit-on-error is essential: pg_restore's DEFAULT is to log errors and carry on,
+# which would report success while leaving a partially restored database behind.
+# --jobs restores table data and indexes in parallel; safe with a custom-format archive.
+if ! docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" -i "$PG_CONTAINER" \
+        pg_restore --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" \
+                   --no-owner --no-privileges --exit-on-error --jobs=4 \
+        < "$PG_BACKUP"; then
     echo
     fail "Restore FAILED. Recover the previous state with:
     $0 $SAFETY"
@@ -153,17 +175,17 @@ log "Archive loaded"
 # -----------------------------------------------------------------------------
 # Sanity checks on the restored schema
 # -----------------------------------------------------------------------------
-TABLE_COUNT=$(docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" "$MYSQL_CONTAINER" \
-    mysql --user=root -N -B -e \
-    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}';")
+TABLE_COUNT=$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" "$PG_CONTAINER" \
+    psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -tAc \
+    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';")
 log "Restored ${TABLE_COUNT} tables"
 (( TABLE_COUNT > 10 )) || fail "Only ${TABLE_COUNT} tables restored — this does not look right"
 
 # Flyway will refuse to start the app if its history is inconsistent, so surface the
 # version here rather than letting it fail during boot.
-FLYWAY_VERSION=$(docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" "$MYSQL_CONTAINER" \
-    mysql --user=root -N -B -e \
-    "SELECT MAX(version) FROM \`${MYSQL_DATABASE}\`.flyway_schema_history WHERE success=1;" 2>/dev/null || echo "?")
+FLYWAY_VERSION=$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" "$PG_CONTAINER" \
+    psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -tAc \
+    "SELECT MAX(version) FROM flyway_schema_history WHERE success;" 2>/dev/null || echo "?")
 log "Flyway schema version: ${FLYWAY_VERSION}"
 
 # -----------------------------------------------------------------------------
@@ -209,8 +231,8 @@ cat <<DONE
 
   Restore complete.
 
-    Database   : ${MYSQL_DATABASE}  (${TABLE_COUNT} tables, Flyway ${FLYWAY_VERSION})
-    Restored   : ${MYSQL_BACKUP}
+    Database   : ${POSTGRES_DB}  (${TABLE_COUNT} tables, Flyway ${FLYWAY_VERSION})
+    Restored   : ${PG_BACKUP}
     Safety copy: ${SAFETY}
 
   Verify before declaring success:

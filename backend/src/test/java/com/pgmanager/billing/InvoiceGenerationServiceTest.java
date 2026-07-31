@@ -30,7 +30,10 @@ class InvoiceGenerationServiceTest {
     void setUp() {
         jdbc = mock(JdbcTemplate.class);
         service = new InvoiceGenerationService(jdbc, mock(NotificationService.class));
-        lenient().when(jdbc.queryForObject(eq("SELECT LAST_INSERT_ID()"), eq(Long.class))).thenReturn(777L);
+        // The invoice id comes back from RETURNING on the INSERT itself, so the insert IS the
+        // id-producing call — there is no separate LAST_INSERT_ID() read to stub any more.
+        lenient().when(jdbc.queryForObject(startsWith("INSERT INTO invoice("), eq(Long.class), any(Object[].class)))
+                .thenReturn(777L);
     }
 
     /** An occupancy row as the account query returns it; January so any day-of-month is valid. */
@@ -65,7 +68,7 @@ class InvoiceGenerationServiceTest {
         assertThat(result.notDue()).isEqualTo(1);
         assertThat(result.skipped()).isZero();
         // Exactly one invoice header written — the tenant billed on the 4th is untouched.
-        verify(jdbc, times(1)).update(startsWith("INSERT INTO invoice("), any(Object[].class));
+        verify(jdbc, times(1)).queryForObject(startsWith("INSERT INTO invoice("), eq(Long.class), any(Object[].class));
     }
 
     @Test

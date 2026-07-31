@@ -142,7 +142,7 @@ public class FacilityController {
                 joins +
                 "JOIN facility_party fp ON fp.facility_id=bed.facility_id AND fp.role_type_id='OCCUPANT' AND fp.thru_date IS NULL " +
                 "WHERE fgm.parent_facility_id=? AND bed.facility_type_id='BED' AND bed.organization_id=? " +
-                "AND fp.expected_checkout_date IS NOT NULL AND fp.expected_checkout_date>=CURDATE() " +
+                "AND fp.expected_checkout_date IS NOT NULL AND fp.expected_checkout_date>=CURRENT_DATE " +
                 "ORDER BY bed_status,expected_checkout_date ASC,floor_number,room_number,bed_id",
                 propertyId, org, propertyId, org);
         return ApiResponse.ok(beds);
@@ -165,7 +165,7 @@ public class FacilityController {
                 "FROM facility_party fp JOIN person per ON per.party_id=fp.party_id " + bedToProperty +
                 "WHERE fgm.parent_facility_id=? AND fp.organization_id=? " +
                 "AND fp.role_type_id='OCCUPANT' AND fp.thru_date IS NULL " +
-                "AND fp.expected_checkout_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(),INTERVAL 30 DAY) " +
+                "AND fp.expected_checkout_date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '30 days')::date " +
                 "ORDER BY fp.expected_checkout_date",
                 propertyId, org);
 
@@ -174,7 +174,7 @@ public class FacilityController {
                 "FROM facility_party fp JOIN person per ON per.party_id=fp.party_id " + bedToProperty +
                 "WHERE fgm.parent_facility_id=? AND fp.organization_id=? " +
                 "AND fp.role_type_id='OCCUPANT' AND fp.thru_date IS NULL " +
-                "AND fp.from_date >= DATE_SUB(CURDATE(),INTERVAL 30 DAY) " +
+                "AND fp.from_date >= (CURRENT_DATE - INTERVAL '30 days')::date " +
                 "ORDER BY fp.from_date DESC",
                 propertyId, org);
 
@@ -188,15 +188,15 @@ public class FacilityController {
                 "  AND fp.thru_date IS NULL AND fp.organization_id=? " + bedToProperty +
                 "WHERE fgm.parent_facility_id=? AND i.organization_id=? " +
                 "AND i.status IN ('PENDING','OVERDUE','PARTIAL') " +
-                "AND YEAR(i.invoice_month)=YEAR(CURDATE()) AND MONTH(i.invoice_month)=MONTH(CURDATE()) " +
+                "AND DATE_TRUNC('month',i.invoice_month)=DATE_TRUNC('month',CURRENT_DATE) " +
                 "ORDER BY i.status,per.full_name",
                 org, org, propertyId, org);
 
         List<Map<String, Object>> trend = jdbc.queryForList(
-                "SELECT DATE_FORMAT(payment_date,'%Y-%m') month,SUM(amount) collected " +
+                "SELECT TO_CHAR(payment_date,'YYYY-MM') month,SUM(amount) collected " +
                 "FROM payment WHERE organization_id=? " +
-                "AND payment_date >= DATE_SUB(CURDATE(),INTERVAL 6 MONTH) " +
-                "GROUP BY DATE_FORMAT(payment_date,'%Y-%m') ORDER BY month",
+                "AND payment_date >= (CURRENT_DATE - INTERVAL '6 months')::date " +
+                "GROUP BY TO_CHAR(payment_date,'YYYY-MM') ORDER BY month",
                 org);
 
         Map<String, Object> report = new LinkedHashMap<>();

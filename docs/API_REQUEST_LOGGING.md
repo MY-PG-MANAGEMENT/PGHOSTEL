@@ -253,7 +253,7 @@ the single-column version would not be used:
 on every request, including for principals that may later be deleted; an FK would add a lock and a
 lookup to the hottest insert path and could block a legitimate delete elsewhere.
 
-**`BIGINT AUTO_INCREMENT`, not UUID.** Highest-insert-rate table in the schema; InnoDB clusters on
+**A `BIGINT` identity column, not a UUID.** Highest-insert-rate table in the schema; the primary-key index clusters on
 the primary key, so a monotonic key appends to the rightmost page while a random UUID scatters
 inserts across the index, causing page splits, a larger index and a worse buffer-pool hit rate.
 
@@ -348,7 +348,7 @@ quietly starts creating sessions would change that. Asserted by `neverCreatesAnH
 | `ApiLogFilterTest` | 18 | one row per request, device headers, request-id echo, masking, response capture *and* delivery, every status mapping, rethrow-after-log, multipart skip, oversize skip vs truncate, XFF parsing, all four config switches, no-session |
 | `ApiLogEndToEndTest` | 7 | filter + interceptor + advice through a real dispatch: handler names, identity, tenant-only tenantId, anonymous nulls, exception details with the client contract intact, exactly-once |
 | `ApiLogCleanupSchedulerTest` | 5 | retention window, loop-until-short-batch, batch ceiling, disabled, refuses `retention-days: 0` |
-| `ApiRequestLogSchemaTest` | 1 | runs `V30` on real MySQL in a throwaway schema, compares columns to the entity **by reflection**, asserts all 8 indexes, executes the `DELETE … LIMIT` syntax. Auto-skips without local MySQL. |
+| `ApiRequestLogSchemaTest` | 1 | runs the baseline migration on a real PostgreSQL via Testcontainers, compares columns to the entity **by reflection**, asserts all 8 indexes, and executes the batched-delete `ctid IN (SELECT … LIMIT …)` form for real. Auto-skips without Docker. |
 
 Run: `./gradlew test --tests "com.pgmanager.apilog.*"`
 

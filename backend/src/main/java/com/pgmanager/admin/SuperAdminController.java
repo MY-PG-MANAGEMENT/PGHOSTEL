@@ -59,7 +59,7 @@ public class SuperAdminController {
                 "activeOrganizations", scalar("SELECT COUNT(*) FROM facility WHERE facility_type_id='ORGANIZATION' AND status='ACTIVE'"),
                 "totalProperties", scalar("SELECT COUNT(*) FROM facility WHERE facility_type_id='PROPERTY'"),
                 "totalTenants", scalar("SELECT COUNT(DISTINCT party_id) FROM facility_party WHERE role_type_id='TENANT' AND thru_date IS NULL"),
-                "monthlyRevenue", amount("SELECT COALESCE(SUM(p.amount),0) FROM payment p WHERE p.payment_date>=DATE_FORMAT(CURRENT_DATE,'%Y-%m-01')"),
+                "monthlyRevenue", amount("SELECT COALESCE(SUM(p.amount),0) FROM payment p WHERE p.payment_date>=DATE_TRUNC('month',CURRENT_DATE)::date"),
                 "recentActivity", jdbc.queryForList("SELECT action,entity_type,entity_id,created_at FROM audit_log ORDER BY created_at DESC LIMIT 10")
         ));
     }
@@ -179,7 +179,7 @@ public class SuperAdminController {
                 "                     WHERE ta.organization_id = o.facility_id AND ta.party_id = fp.party_id) " +
                 ") active_tenants, " +
                 "(SELECT COUNT(*) FROM facility p WHERE p.organization_id = o.facility_id " +
-                "   AND p.facility_type_id = 'PROPERTY' AND DATE(p.created_at) <= ?) property_count " +
+                "   AND p.facility_type_id = 'PROPERTY' AND p.created_at::date <= CAST(? AS date)) property_count " +
                 "FROM facility o WHERE o.facility_type_id = 'ORGANIZATION' " +
                 "ORDER BY o.facility_name",
                 monthEnd, monthStart, monthEnd);
@@ -401,7 +401,9 @@ public class SuperAdminController {
     @PatchMapping("/system-settings")
     ApiResponse<Void> updateSettings(@RequestBody Map<String, String> values) {
         values.forEach((key, value) -> jdbc.update("INSERT INTO system_setting(setting_key,setting_value,encrypted,updated_by_user_login_id,updated_at) " +
-                        "VALUES(?,?,FALSE,?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value),updated_by_user_login_id=VALUES(updated_by_user_login_id),updated_at=VALUES(updated_at)",
+                        "VALUES(?,?,FALSE,?,?) ON CONFLICT (setting_key) DO UPDATE SET " +
+                        "setting_value=EXCLUDED.setting_value," +
+                        "updated_by_user_login_id=EXCLUDED.updated_by_user_login_id,updated_at=EXCLUDED.updated_at",
                 key, value, currentUser.userLoginId(), LocalDateTime.now()));
         return ApiResponse.ok(null);
     }

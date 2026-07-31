@@ -17,8 +17,9 @@
 # So: rolling back across a release that added a migration requires restoring the
 # database too — scripts/restore.sh, using the pre-deploy backup — and that means
 # losing everything written since. Check first:
-#     docker exec pgm-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N -B \
-#       -e "SELECT version, description, installed_on FROM pg_manager.flyway_schema_history ORDER BY installed_rank DESC LIMIT 5;"
+#     docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" pgm-postgres \
+#       psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+#       "SELECT version, description, installed_on FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 5;"
 # =============================================================================
 
 set -euo pipefail
@@ -79,10 +80,10 @@ fi
 # -----------------------------------------------------------------------------
 TARGET_BUILT="$(docker inspect -f '{{.Created}}' "$TARGET_IMAGE" 2>/dev/null | cut -dT -f1 || echo '')"
 if [[ -n "$TARGET_BUILT" ]]; then
-    MIGRATIONS_SINCE=$(docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" pgm-mysql \
-        mysql --user=root -N -B -e \
-        "SELECT COUNT(*) FROM \`${MYSQL_DATABASE}\`.flyway_schema_history
-          WHERE success=1 AND installed_on > '${TARGET_BUILT} 00:00:00';" 2>/dev/null || echo 0)
+    MIGRATIONS_SINCE=$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" pgm-postgres \
+        psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -tAc \
+        "SELECT COUNT(*) FROM flyway_schema_history
+          WHERE success AND installed_on > TIMESTAMP '${TARGET_BUILT} 00:00:00';" 2>/dev/null || echo 0)
 
     if [[ "${MIGRATIONS_SINCE:-0}" -gt 0 ]]; then
         cat <<WARN

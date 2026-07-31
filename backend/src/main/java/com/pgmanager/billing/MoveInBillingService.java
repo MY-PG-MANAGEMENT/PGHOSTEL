@@ -34,9 +34,10 @@ public class MoveInBillingService {
                 "SELECT billing_account_id FROM billing_account WHERE organization_id=? AND party_id=? AND status='ACTIVE' LIMIT 1",
                 org, partyId);
         if (!rows.isEmpty()) return ((Number) rows.getFirst().get("billing_account_id")).longValue();
-        jdbc.update("INSERT INTO billing_account(organization_id,party_id,currency_code,status,advance_balance,created_at,updated_at,version) " +
-                "VALUES(?,?,'INR','ACTIVE',0,?,?,0)", org, partyId, LocalDateTime.now(), LocalDateTime.now());
-        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        return jdbc.queryForObject(
+                "INSERT INTO billing_account(organization_id,party_id,currency_code,status,advance_balance,created_at,updated_at,version) " +
+                        "VALUES(?,?,'INR','ACTIVE',0,?,?,0) RETURNING billing_account_id",
+                Long.class, org, partyId, LocalDateTime.now(), LocalDateTime.now());
     }
 
     /**
@@ -71,10 +72,11 @@ public class MoveInBillingService {
         if (exists != null && exists > 0) return baId;
 
         LocalDateTime now = LocalDateTime.now();
-        jdbc.update("INSERT INTO invoice(organization_id,billing_account_id,invoice_number,invoice_month,issue_date,due_date," +
-                        "total_amount,paid_amount,status,created_at,updated_at,version) VALUES(?,?,?,?,?,?,?,0,'PENDING',?,?,0)",
-                org, baId, invNum, invoiceMonth, date, date, amount, now, now);
-        Long invoiceId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        Long invoiceId = jdbc.queryForObject(
+                "INSERT INTO invoice(organization_id,billing_account_id,invoice_number,invoice_month,issue_date,due_date," +
+                        "total_amount,paid_amount,status,created_at,updated_at,version) VALUES(?,?,?,?,?,?,?,0,'PENDING',?,?,0) " +
+                        "RETURNING invoice_id",
+                Long.class, org, baId, invNum, invoiceMonth, date, date, amount, now, now);
         jdbc.update("INSERT INTO invoice_item(invoice_id,item_type_id,description,amount,created_at,updated_at) VALUES(?,?,?,?,?,?)",
                 invoiceId, "TEMP_STAY", "Temporary Stay Charge", amount, now, now);
         return baId;
@@ -252,10 +254,12 @@ public class MoveInBillingService {
                 : invoiceMonth.withDayOfMonth(Math.min(moveIn.getDayOfMonth(), invoiceMonth.lengthOfMonth()));
 
         String invNum = "INV-" + org + "-" + baId + "-" + invoiceMonth.toString().substring(0, 7).replace("-", "");
-        jdbc.update("INSERT INTO invoice(organization_id,billing_account_id,invoice_number,invoice_month,issue_date,due_date," +
-                        "total_amount,paid_amount,status,created_at,updated_at,version) VALUES(?,?,?,?,?,?,?,0,'PENDING',?,?,0)",
-                org, baId, invNum, invoiceMonth, issueDate, dueDate, rent.add(deposit), LocalDateTime.now(), LocalDateTime.now());
-        Long invoiceId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        Long invoiceId = jdbc.queryForObject(
+                "INSERT INTO invoice(organization_id,billing_account_id,invoice_number,invoice_month,issue_date,due_date," +
+                        "total_amount,paid_amount,status,created_at,updated_at,version) VALUES(?,?,?,?,?,?,?,0,'PENDING',?,?,0) " +
+                        "RETURNING invoice_id",
+                Long.class, org, baId, invNum, invoiceMonth, issueDate, dueDate, rent.add(deposit),
+                LocalDateTime.now(), LocalDateTime.now());
         if (baseRent.compareTo(BigDecimal.ZERO) > 0) {
             jdbc.update("INSERT INTO invoice_item(invoice_id,item_type_id,description,amount,created_at,updated_at) VALUES(?,?,?,?,?,?)",
                     invoiceId, "MONTHLY_RENT", "Monthly Rent", baseRent, LocalDateTime.now(), LocalDateTime.now());
@@ -293,15 +297,17 @@ public class MoveInBillingService {
         LocalDate payDate = rows.getFirst().get("due_date") != null
                 ? ((java.sql.Date) rows.getFirst().get("due_date")).toLocalDate() : LocalDate.now();
         String ikey = "bulk-backfill-" + org + "-" + invoiceId;
+        Long paymentId;
         try {
-            jdbc.update("INSERT INTO payment(organization_id,party_id,amount,payment_mode,payment_date,notes," +
-                            "idempotency_key,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'RECEIVED',?,?)",
-                    org, partyId, balance, method, payDate, "Imported historical payment", ikey,
+            paymentId = jdbc.queryForObject(
+                    "INSERT INTO payment(organization_id,party_id,amount,payment_mode,payment_date,notes," +
+                            "idempotency_key,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'RECEIVED',?,?) " +
+                            "RETURNING payment_id",
+                    Long.class, org, partyId, balance, method, payDate, "Imported historical payment", ikey,
                     LocalDateTime.now(), LocalDateTime.now());
         } catch (DuplicateKeyException dup) {
             return false;
         }
-        Long paymentId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         jdbc.update("INSERT INTO payment_allocation(organization_id,payment_id,invoice_id,amount,allocated_at) VALUES(?,?,?,?,?)",
                 org, paymentId, invoiceId, balance, LocalDateTime.now());
         jdbc.update("UPDATE invoice SET paid_amount=total_amount,status='PAID',updated_at=?,version=version+1 WHERE invoice_id=?",

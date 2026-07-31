@@ -34,7 +34,9 @@ class TenantLoginServiceTest {
         policy = mock(TenantLoginPolicy.class);
         auditService = mock(AuditService.class);
         lenient().when(passwordEncoder.encode(anyString())).thenReturn("ENCODED");
-        lenient().when(jdbc.queryForObject(eq("SELECT LAST_INSERT_ID()"), eq(Long.class))).thenReturn(5L);
+        // The new login's id comes back from RETURNING on the INSERT itself.
+        lenient().when(jdbc.queryForObject(contains("INSERT INTO user_login"), eq(Long.class), any(Object[].class)))
+                .thenReturn(5L);
         service = new TenantLoginService(jdbc, passwordEncoder, policy, auditService);
     }
 
@@ -54,7 +56,7 @@ class TenantLoginServiceTest {
         service.provisionForTenant(ORG, PARTY, MOBILE);
 
         verify(passwordEncoder).encode(TenantLoginService.TEMP_PASSWORD);
-        verify(jdbc).update(contains("INSERT INTO user_login"), any(Object[].class));
+        verify(jdbc).queryForObject(contains("INSERT INTO user_login"), eq(Long.class), any(Object[].class));
     }
 
     @Test

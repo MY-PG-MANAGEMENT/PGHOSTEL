@@ -23,12 +23,12 @@ public class ExpenseWriter {
     public Long insertApproved(Long organizationId, Long propertyId, String category, String title,
                                BigDecimal amount, String paymentMethod, LocalDate date, Long userLoginId) {
         LocalDateTime now = LocalDateTime.now();
-        jdbc.update("INSERT INTO expense(organization_id,property_facility_id,category,title,amount,expense_date," +
+        Long expenseId = jdbc.queryForObject(
+                "INSERT INTO expense(organization_id,property_facility_id,category,title,amount,expense_date," +
                         "payment_method,status,approved_by,approved_at,created_by,created_at,updated_at) " +
-                        "VALUES(?,?,?,?,?,?,?,'APPROVED',?,?,?,?,?)",
-                organizationId, propertyId, category, title, amount, date, paymentMethod,
+                        "VALUES(?,?,?,?,?,?,?,'APPROVED',?,?,?,?,?) RETURNING expense_id",
+                Long.class, organizationId, propertyId, category, title, amount, date, paymentMethod,
                 userLoginId, now, userLoginId, now, now);
-        Long expenseId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         if ("CASH".equals(paymentMethod)) {
             recordCashOut(organizationId, propertyId, expenseId, amount, title, date, userLoginId);
         }
@@ -42,7 +42,7 @@ public class ExpenseWriter {
                 Long.class, organizationId, expenseId);
         if (exists != null && exists > 0) return;
         jdbc.update("INSERT INTO petty_cash_entry(organization_id,property_facility_id,entry_type,amount,note,entry_date," +
-                        "expense_id,created_by,created_at,updated_at) VALUES(?,?,'OUT',?,?,?,?,?,NOW(),NOW())",
+                        "expense_id,created_by,created_at,updated_at) VALUES(?,?,'OUT',?,?,?,?,?,LOCALTIMESTAMP,LOCALTIMESTAMP)",
                 organizationId, propertyId != null ? propertyId : 0L, amount, note, date, expenseId, userLoginId);
     }
 }

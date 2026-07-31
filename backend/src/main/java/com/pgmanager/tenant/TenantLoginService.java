@@ -90,7 +90,7 @@ public class TenantLoginService {
         if (!candidates.isEmpty()) {
             Long id = asLong(candidates.get(0).get("user_login_id"));
             jdbc.update("UPDATE user_login SET status='ACTIVE', disabled_reason=NULL, party_id=?, " +
-                    "password_hash=?, must_change_password=1, updated_at=? WHERE user_login_id=?",
+                    "password_hash=?, must_change_password=TRUE, updated_at=? WHERE user_login_id=?",
                     partyId, passwordEncoder.encode(TEMP_PASSWORD), now, id);
             auditService.log(organizationId, null, "TENANT_LOGIN_REACTIVATED", "USER_LOGIN", id,
                     "Tenant login reactivated on rejoin");
@@ -99,10 +99,12 @@ public class TenantLoginService {
 
         // 3) No login for this org+mobile → create a new ACTIVE login with the temp password.
         String username = mobile + "@" + organizationId;
-        jdbc.update("INSERT INTO user_login(party_id,username,password_hash,role_type_id,organization_id," +
-                "status,must_change_password,created_at,updated_at) VALUES(?,?,?,?,?, 'ACTIVE', 1, ?, ?)",
-                partyId, username, passwordEncoder.encode(TEMP_PASSWORD), RoleType.TENANT, organizationId, now, now);
-        Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        // must_change_password is TRUE, not 1: PostgreSQL will not coerce an integer literal
+        // into a BOOLEAN column the way MySQL's TINYINT(1) did.
+        Long id = jdbc.queryForObject("INSERT INTO user_login(party_id,username,password_hash,role_type_id,organization_id," +
+                "status,must_change_password,created_at,updated_at) VALUES(?,?,?,?,?, 'ACTIVE', TRUE, ?, ?) " +
+                "RETURNING user_login_id",
+                Long.class, partyId, username, passwordEncoder.encode(TEMP_PASSWORD), RoleType.TENANT, organizationId, now, now);
         auditService.log(organizationId, null, "TENANT_LOGIN_CREATED", "USER_LOGIN", id, "Tenant login created");
     }
 

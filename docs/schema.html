@@ -156,7 +156,7 @@
 
 <header class="top">
   <div class="masthead">
-    <p class="eyebrow">Modular Monolith · MySQL · Flyway V1→V24</p>
+    <p class="eyebrow">Modular Monolith · PostgreSQL · Flyway V1 baseline</p>
     <h1>PG Manager — Database Schema</h1>
     <p class="lede">A module-by-module map of the live schema: every table, its keys, its relationships, and how data flows across the paying-guest management system. Reflects the current migration state after V24 pruned the unused data model.</p>
     <div class="meta-row">
@@ -208,7 +208,7 @@ erDiagram
     varchar sharing_type
     int     capacity
     decimal monthly_rent
-    tinyint is_ac
+    boolean is_ac
   }
   PARTY {
     bigint  party_id PK
@@ -219,7 +219,7 @@ erDiagram
     bigint  party_id PK "FK → party"
     varchar full_name
     varchar mobile_number
-    tinyint has_vehicle
+    boolean has_vehicle
   }
   FACILITY_GROUP_MEMBER {
     bigint parent_facility_id FK
@@ -265,9 +265,9 @@ erDiagram
     bigint  organization_id FK
     varchar username UK
     varchar role_type_id
-    tinyint must_change_password
+    boolean must_change_password
     varchar disabled_reason
-    datetime last_login_at
+    timestamp last_login_at
   }
   ROLE_TYPE {
     varchar role_type_id PK
@@ -278,7 +278,7 @@ erDiagram
   ROLE_PERMISSION {
     varchar role_type_id PK
     varchar permission_id PK
-    datetime from_date PK
+    timestamp from_date PK
   }
   REFRESH_TOKEN { bigint refresh_token_id PK
     varchar token_hash UK }
@@ -328,7 +328,7 @@ erDiagram
     int     capacity
     decimal monthly_rent
     decimal security_deposit
-    tinyint is_ac
+    boolean is_ac
     varchar email
     bigint  version "optimistic lock"
   }
@@ -343,7 +343,7 @@ erDiagram
   FACILITY_AMENITY {
     bigint  facility_id PK
     varchar amenity_type_id PK
-    tinyint available
+    boolean available
   }
   AMENITY_TYPE { varchar amenity_type_id PK
     varchar name }
@@ -628,14 +628,14 @@ erDiagram
     bigint  organization_id FK
     bigint  property_facility_id "NULL = org-wide"
     varchar notice_type
-    tinyint active
-    datetime expires_at
+    boolean active
+    timestamp expires_at
   }
   NOTICE_READ {
     bigint  notice_read_id PK
     bigint  notice_id FK
     bigint  party_id FK
-    datetime read_at
+    timestamp read_at
   }
       </pre>
     </div>
@@ -678,9 +678,9 @@ erDiagram
     bigint  notification_recipient_id PK
     bigint  notification_id FK
     bigint  party_id FK
-    datetime read_at
-    datetime archived_at
-    tinyint important
+    timestamp read_at
+    timestamp archived_at
+    boolean important
   }
   NOTIFICATION_OUTBOX {
     bigint  outbox_id PK
@@ -693,7 +693,7 @@ erDiagram
     bigint  party_id PK
     varchar category_id PK
     varchar channel_type_id PK
-    tinyint enabled
+    boolean enabled
   }
   NOTIFICATION_CATEGORY { varchar category_id PK
     varchar name }
@@ -727,13 +727,13 @@ erDiagram
   FEATURE_MASTER {
     bigint  feature_id PK
     varchar feature_code UK "EMAIL/WHATSAPP/TENANT_LOGIN"
-    tinyint active
+    boolean active
   }
   ORGANIZATION_FEATURE {
     bigint  organization_feature_id PK
     bigint  organization_id FK
     bigint  feature_id FK
-    tinyint enabled
+    boolean enabled
   }
   SUBSCRIPTION {
     bigint  subscription_id PK
@@ -746,7 +746,7 @@ erDiagram
   SYSTEM_SETTING {
     varchar setting_key PK
     varchar setting_value
-    tinyint encrypted
+    boolean encrypted
   }
       </pre>
     </div>
@@ -821,7 +821,7 @@ flowchart TB
 
 <footer>
   <div class="foot">
-    <span>PG Manager · Spring Boot 3.3.5 / Java 21 · MySQL · Flyway migrations V1 → V24</span>
+    <span>PG Manager · Spring Boot 3.3.5 / Java 21 · PostgreSQL · Flyway V1 baseline</span>
     <span class="mono">generated from backend/src/main/resources/db/migration</span>
   </div>
 </footer>

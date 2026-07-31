@@ -25,7 +25,7 @@ erDiagram
         string status "ACTIVE / INACTIVE"
         string disabled_reason "CHECKED_OUT (V22)"
         boolean must_change_password "V22"
-        datetime last_login_at "V22"
+        timestamp last_login_at "V22"
     }
 
     organization_feature {
@@ -63,8 +63,8 @@ erDiagram
         string notice_type
         string title
         string body
-        datetime published_at
-        datetime expires_at
+        timestamp published_at
+        timestamp expires_at
         boolean active
     }
 
@@ -72,5 +72,5 @@ erDiagram
         bigint notice_read_id PK
         bigint notice_id FK
         bigint party_id FK
-        datetime read_at
+        timestamp read_at
     }

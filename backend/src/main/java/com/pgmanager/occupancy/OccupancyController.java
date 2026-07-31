@@ -217,7 +217,7 @@ public class OccupancyController {
             }
         }
         int updated = jdbc.update(
-                "UPDATE facility_party SET expected_checkout_date=?,updated_at=NOW() " +
+                "UPDATE facility_party SET expected_checkout_date=?,updated_at=LOCALTIMESTAMP " +
                 "WHERE organization_id=? AND party_id=? AND role_type_id='OCCUPANT' AND thru_date IS NULL",
                 checkoutDate, org, request.partyId());
         if (updated == 0) throw new NotFoundException("Active bed assignment not found for this tenant");
@@ -234,7 +234,7 @@ public class OccupancyController {
     ApiResponse<Void> changeRent(@Valid @RequestBody ChangeRentRequest request) {
         Long org = currentUser.organizationId();
         int updated = jdbc.update(
-                "UPDATE facility_party SET monthly_rent=?,updated_at=NOW() " +
+                "UPDATE facility_party SET monthly_rent=?,updated_at=LOCALTIMESTAMP " +
                 "WHERE organization_id=? AND party_id=? AND role_type_id='OCCUPANT' AND thru_date IS NULL",
                 request.monthlyRent(), org, request.partyId());
         if (updated == 0) throw new NotFoundException("Active bed assignment not found for this tenant");

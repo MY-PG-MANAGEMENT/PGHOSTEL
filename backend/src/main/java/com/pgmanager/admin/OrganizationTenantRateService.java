@@ -82,8 +82,8 @@ public class OrganizationTenantRateService {
         jdbc.update("INSERT INTO organization_tenant_rate" +
                         "(organization_id,price_per_tenant,updated_by_user_login_id,created_at,updated_at) " +
                         "VALUES(?,?,?,?,?) " +
-                        "ON DUPLICATE KEY UPDATE price_per_tenant=VALUES(price_per_tenant)," +
-                        "updated_by_user_login_id=VALUES(updated_by_user_login_id),updated_at=VALUES(updated_at)",
+                        "ON CONFLICT (organization_id) DO UPDATE SET price_per_tenant=EXCLUDED.price_per_tenant," +
+                        "updated_by_user_login_id=EXCLUDED.updated_by_user_login_id,updated_at=EXCLUDED.updated_at",
                 organizationId, price.setScale(2, RoundingMode.HALF_UP), userLoginId, now, now);
     }
 
@@ -92,8 +92,8 @@ public class OrganizationTenantRateService {
         validate(price);
         jdbc.update("INSERT INTO system_setting(setting_key,setting_value,encrypted,updated_by_user_login_id,updated_at) " +
                         "VALUES(?,?,FALSE,?,?) " +
-                        "ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)," +
-                        "updated_by_user_login_id=VALUES(updated_by_user_login_id),updated_at=VALUES(updated_at)",
+                        "ON CONFLICT (setting_key) DO UPDATE SET setting_value=EXCLUDED.setting_value," +
+                        "updated_by_user_login_id=EXCLUDED.updated_by_user_login_id,updated_at=EXCLUDED.updated_at",
                 DEFAULT_RATE_KEY, price.setScale(2, RoundingMode.HALF_UP).toPlainString(),
                 userLoginId, LocalDateTime.now());
     }

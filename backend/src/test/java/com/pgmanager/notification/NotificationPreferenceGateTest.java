@@ -11,6 +11,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -42,7 +44,10 @@ class NotificationPreferenceGateTest {
     /** Stub the recipient lookup (the only queryForList(String, Class, Object...) call). */
     private void stubRecipients(List<Long> partyIds) {
         when(jdbc.queryForList(anyString(), eq(Long.class), any(Object[].class))).thenReturn(partyIds);
-        when(jdbc.queryForObject(eq("SELECT LAST_INSERT_ID()"), eq(Long.class))).thenReturn(77L);
+        // The notification id now comes back from RETURNING on the INSERT itself, so the insert
+        // is a queryForObject rather than an update followed by a LAST_INSERT_ID() read.
+        lenient().when(jdbc.queryForObject(startsWith("INSERT INTO notification("), eq(Long.class), any(Object[].class)))
+                .thenReturn(77L);
     }
 
     private String recipientSql() {
@@ -58,8 +63,8 @@ class NotificationPreferenceGateTest {
         service.notifyOwners(1L, "RENT_REMINDER", "Rent due", "Body", "RENT", 5L, false);
 
         // One notification row, then one recipient row per opted-in party.
-        verify(jdbc).update(anyString(), eq(1L), eq("RENT_REMINDER"), eq("Rent due"), eq("Body"),
-                eq("RENT"), eq(5L), eq("NORMAL"), any());
+        verify(jdbc).queryForObject(anyString(), eq(Long.class), eq(1L), eq("RENT_REMINDER"), eq("Rent due"),
+                eq("Body"), eq("RENT"), eq(5L), eq("NORMAL"), any());
         verify(jdbc).update(anyString(), eq(77L), eq(11L), eq(false));
         verify(jdbc).update(anyString(), eq(77L), eq(12L), eq(false));
     }

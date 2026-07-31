@@ -9,7 +9,7 @@ How we test PG Manager, screen by screen and endpoint by endpoint. Legend:
 # Backend (no Docker needed for unit/slice/validation tests)
 cd backend && ./gradlew test
 
-# Backend full integration (needs Docker for Testcontainers MySQL)
+# Backend full integration (needs Docker for Testcontainers PostgreSQL)
 cd backend && ./gradlew test            # integration tests auto-run when Docker is present,
                                          # and auto-skip (not fail) when it is absent
 
@@ -24,7 +24,7 @@ cd owner_app && flutter test
 | Unit — validation | Jakarta `Validator` | DTO constraints | no |
 | Unit — logic | Mockito | Service business rules | no |
 | Slice — contract | standalone `MockMvc` | Controller `@Valid` + delegation | no |
-| Integration | Testcontainers + Flyway + `MockMvc` | Full stack vs real MySQL | **yes (CI)** |
+| Integration | Testcontainers + Flyway + `MockMvc` | Full stack vs real PostgreSQL | **yes (CI)** |
 | Widget | `flutter_test` | Screen render / validation / states | no |
 
 ## The scenario template (apply to every screen & endpoint)

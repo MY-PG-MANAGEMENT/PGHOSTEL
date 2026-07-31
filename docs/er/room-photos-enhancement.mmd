@@ -9,8 +9,8 @@ erDiagram
         bigint content_reference_id FK
         int display_order
         varchar description
-        datetime created_at
-        datetime updated_at
+        timestamp created_at
+        timestamp updated_at
     }
 
     FACILITY {
@@ -24,8 +24,8 @@ erDiagram
         decimal monthly_rent
         decimal size_sq_ft
         varchar description
-        datetime created_at
-        datetime updated_at
+        timestamp created_at
+        timestamp updated_at
     }
 
     CONTENT_REFERENCE {
@@ -38,6 +38,6 @@ erDiagram
         varchar storage_key
         varchar mime_type
         varchar status
-        datetime created_at
-        datetime updated_at
+        timestamp created_at
+        timestamp updated_at
     }

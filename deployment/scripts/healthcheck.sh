@@ -49,7 +49,7 @@ say "=============================================="
 # Containers
 # -----------------------------------------------------------------------------
 head_ "Containers"
-for c in pgm-mysql pgm-redis pgm-api pgm-nginx; do
+for c in pgm-postgres pgm-redis pgm-api pgm-nginx; do
     if ! docker inspect "$c" >/dev/null 2>&1; then
         bad "$c does not exist"
         continue
@@ -77,37 +77,37 @@ for c in pgm-mysql pgm-redis pgm-api pgm-nginx; do
 done
 
 # -----------------------------------------------------------------------------
-# MySQL
+# PostgreSQL
 # -----------------------------------------------------------------------------
-head_ "MySQL"
-if docker exec -e MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}" pgm-mysql \
-        mysql --user=root -N -B -e "SELECT 1" >/dev/null 2>&1; then
+head_ "PostgreSQL"
+if docker exec -e PGPASSWORD="${POSTGRES_PASSWORD:-}" pgm-postgres \
+        psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -tAc "SELECT 1" >/dev/null 2>&1; then
     ok "accepting queries"
 
-    CONNS=$(docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" pgm-mysql mysql --user=root -N -B \
-            -e "SELECT COUNT(*) FROM information_schema.processlist;" 2>/dev/null || echo '?')
-    MAXC=$(docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" pgm-mysql mysql --user=root -N -B \
-            -e "SELECT @@max_connections;" 2>/dev/null || echo '?')
+    CONNS=$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" pgm-postgres psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -tAc \
+            "SELECT COUNT(*) FROM pg_stat_activity;" 2>/dev/null || echo '?')
+    MAXC=$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" pgm-postgres psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -tAc \
+            "SELECT setting FROM pg_settings WHERE name='max_connections';" 2>/dev/null || echo '?')
     if [[ "$CONNS" != '?' && "$MAXC" != '?' ]] && (( CONNS * 100 / MAXC > 80 )); then
         warn "connections ${CONNS}/${MAXC} — over 80% of max_connections"
     else
         ok "connections ${CONNS}/${MAXC}"
     fi
 
-    FLYWAY=$(docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" pgm-mysql mysql --user=root -N -B \
-            -e "SELECT MAX(version) FROM \`${MYSQL_DATABASE}\`.flyway_schema_history WHERE success=1;" 2>/dev/null || echo '?')
+    FLYWAY=$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" pgm-postgres psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -tAc \
+            "SELECT MAX(version) FROM flyway_schema_history WHERE success;" 2>/dev/null || echo '?')
     ok "schema version ${FLYWAY}"
 
     # A failed migration leaves a success=0 row and blocks every subsequent boot
     # until it is repaired — worth surfacing before the next deploy hits it.
-    FAILED_MIG=$(docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" pgm-mysql mysql --user=root -N -B \
-            -e "SELECT COUNT(*) FROM \`${MYSQL_DATABASE}\`.flyway_schema_history WHERE success=0;" 2>/dev/null || echo 0)
+    FAILED_MIG=$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" pgm-postgres psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -tAc \
+            "SELECT COUNT(*) FROM flyway_schema_history WHERE NOT success;" 2>/dev/null || echo 0)
     (( FAILED_MIG > 0 )) && bad "${FAILED_MIG} FAILED migration(s) in flyway_schema_history — run flyway repair"
 
     # api_request_log is the fastest-growing table in the schema: one row per request,
     # no sampling. If the cleanup scheduler stops, this is where it shows first.
-    LOG_ROWS=$(docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" pgm-mysql mysql --user=root -N -B \
-            -e "SELECT COUNT(*) FROM \`${MYSQL_DATABASE}\`.api_request_log;" 2>/dev/null || echo 0)
+    LOG_ROWS=$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" pgm-postgres psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -tAc \
+            "SELECT COUNT(*) FROM api_request_log;" 2>/dev/null || echo 0)
     if (( LOG_ROWS > 5000000 )); then
         warn "api_request_log has ${LOG_ROWS} rows — is ApiLogCleanupScheduler (03:15) running?"
     else
@@ -160,7 +160,7 @@ if docker exec pgm-api curl -fsS --max-time 5 \
         "http://127.0.0.1:${MANAGEMENT_PORT:-9091}/actuator/health/readiness" >/dev/null 2>&1; then
     ok "readiness (database reachable)"
 else
-    bad "readiness probe failed — the API cannot reach MySQL"
+    bad "readiness probe failed — the API cannot reach PostgreSQL"
 fi
 
 # JVM heap. Sustained pressure here precedes an OOM kill; the JVM is configured to
@@ -235,13 +235,13 @@ ok "load ${LOAD} across ${CORES} cores"
 
 # Most recent backup. A backup job that has silently stopped is invisible until the
 # day you need it.
-LATEST_BACKUP=$(find "${BACKUP_DIR:-$DEPLOY_DIR/backups}/mysql" -name '*.sql.gz' -printf '%T@\n' 2>/dev/null | sort -rn | head -1)
+LATEST_BACKUP=$(find "${BACKUP_DIR:-$DEPLOY_DIR/backups}/postgres" -name '*.dump' -printf '%T@\n' 2>/dev/null | sort -rn | head -1)
 if [[ -n "$LATEST_BACKUP" ]]; then
     AGE_H=$(( ( $(date +%s) - ${LATEST_BACKUP%.*} ) / 3600 ))
     (( AGE_H > 48 )) && bad  "last backup was ${AGE_H}h ago — the backup cron is not running" \
                      || ok   "last backup ${AGE_H}h ago"
 else
-    bad "no MySQL backup found"
+    bad "no PostgreSQL backup found"
 fi
 
 # -----------------------------------------------------------------------------

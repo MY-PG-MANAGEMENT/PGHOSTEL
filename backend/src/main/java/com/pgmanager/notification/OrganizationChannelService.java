@@ -54,8 +54,9 @@ public class OrganizationChannelService {
             condition = "#organizationId != null && #code != null")
     public boolean enabled(Long organizationId, String code) {
         if (organizationId == null) return false;
-        // NOTE: `of` is a RESERVED keyword in MySQL 8.0 — using it as a table alias is a syntax
-        // error, so alias organization_feature as `orgf`.
+        // NOTE: organization_feature is aliased `orgf`, not `of`. That was forced under MySQL 8
+        // (`of` is reserved there, so it was a syntax error); PostgreSQL accepts it, but the
+        // alias stays — renaming it across every query buys nothing and `of` reads worse.
         Boolean value = jdbc.query(
                 "SELECT orgf.enabled FROM organization_feature orgf " +
                 "JOIN feature_master fm ON fm.feature_id = orgf.feature_id " +
@@ -82,7 +83,8 @@ public class OrganizationChannelService {
         jdbc.update(
                 "INSERT INTO organization_feature(organization_id,feature_id,enabled,created_at,updated_at) " +
                 "VALUES(?,?,?,?,?) " +
-                "ON DUPLICATE KEY UPDATE enabled=VALUES(enabled),updated_at=VALUES(updated_at)",
+                "ON CONFLICT (organization_id,feature_id) " +
+                "DO UPDATE SET enabled=EXCLUDED.enabled,updated_at=EXCLUDED.updated_at",
                 organizationId, featureId, enabled, now, now);
         return channels(organizationId);
     }

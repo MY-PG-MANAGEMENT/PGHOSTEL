@@ -63,10 +63,10 @@ public class BillingController {
         Object[] pp3 = propertyId != null ? new Object[]{org, org, propertyId} : new Object[0];
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("totalCollection", amount(
-                "SELECT COALESCE(SUM(amount),0) FROM payment WHERE organization_id=? AND status='RECEIVED' AND payment_date BETWEEN DATE_FORMAT(CURRENT_DATE,'%Y-%m-01') AND LAST_DAY(CURRENT_DATE)" + payProp,
+                "SELECT COALESCE(SUM(amount),0) FROM payment WHERE organization_id=? AND status='RECEIVED' AND payment_date BETWEEN DATE_TRUNC('month',CURRENT_DATE)::date AND (DATE_TRUNC('month',CURRENT_DATE) + INTERVAL '1 month - 1 day')::date" + payProp,
                 cat(org, pp2)));
         result.put("totalCollectionCount", count(
-                "SELECT COUNT(*) FROM payment WHERE organization_id=? AND status='RECEIVED' AND payment_date BETWEEN DATE_FORMAT(CURRENT_DATE,'%Y-%m-01') AND LAST_DAY(CURRENT_DATE)" + payProp,
+                "SELECT COUNT(*) FROM payment WHERE organization_id=? AND status='RECEIVED' AND payment_date BETWEEN DATE_TRUNC('month',CURRENT_DATE)::date AND (DATE_TRUNC('month',CURRENT_DATE) + INTERVAL '1 month - 1 day')::date" + payProp,
                 cat(org, pp2)));
         result.put("receivedToday", amount(
                 "SELECT COALESCE(SUM(amount),0) FROM payment WHERE organization_id=? AND payment_date=CURRENT_DATE AND status='RECEIVED'" + payProp,
@@ -202,10 +202,13 @@ public class BillingController {
         BigDecimal balance = decimal(invoice.get("total_amount")).subtract(decimal(invoice.get("paid_amount")));
         if (request.amount().compareTo(balance) > 0) throw new BadRequestException("Payment exceeds invoice balance");
         String mode = request.paymentMode() == null ? "CASH" : request.paymentMode().toUpperCase();
+        Long paymentId;
         try {
-            jdbc.update("INSERT INTO payment(organization_id,party_id,amount,payment_mode,payment_date,reference_number,notes," +
-                            "idempotency_key,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,'RECEIVED',?,?)",
-                    org, invoice.get("party_id"), request.amount(), mode,
+            paymentId = jdbc.queryForObject(
+                    "INSERT INTO payment(organization_id,party_id,amount,payment_mode,payment_date,reference_number,notes," +
+                            "idempotency_key,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,'RECEIVED',?,?) " +
+                            "RETURNING payment_id",
+                    Long.class, org, invoice.get("party_id"), request.amount(), mode,
                     request.paymentDate() == null ? LocalDate.now() : request.paymentDate(),
                     request.referenceNumber(), request.notes(), request.idempotencyKey(), LocalDateTime.now(), LocalDateTime.now());
         } catch (DuplicateKeyException duplicate) {
@@ -213,7 +216,6 @@ public class BillingController {
                     "SELECT payment_id,amount,status FROM payment WHERE organization_id=? AND idempotency_key=?",
                     org, request.idempotencyKey()));
         }
-        Long paymentId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         jdbc.update("INSERT INTO payment_allocation(organization_id,payment_id,invoice_id,amount,allocated_at) VALUES(?,?,?,?,?)",
                 org, paymentId, request.invoiceId(), request.amount(), LocalDateTime.now());
         BigDecimal paid = decimal(invoice.get("paid_amount")).add(request.amount());
@@ -339,16 +341,18 @@ public class BillingController {
         if (balance.compareTo(BigDecimal.ZERO) > 0) {
             String ikey = "checkout-markpaid-" + invoiceId + "-" + org;
             try {
-                jdbc.update("INSERT INTO payment(organization_id,party_id,amount,payment_mode,payment_date," +
-                                "idempotency_key,status,created_at,updated_at) VALUES(?,?,?,'CASH',CURRENT_DATE,?,'RECEIVED',NOW(),NOW())",
-                        org, partyId, balance, ikey);
-                Long payId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+                Long payId = jdbc.queryForObject(
+                        "INSERT INTO payment(organization_id,party_id,amount,payment_mode,payment_date," +
+                                "idempotency_key,status,created_at,updated_at) " +
+                                "VALUES(?,?,?,'CASH',CURRENT_DATE,?,'RECEIVED',LOCALTIMESTAMP,LOCALTIMESTAMP) " +
+                                "RETURNING payment_id",
+                        Long.class, org, partyId, balance, ikey);
                 jdbc.update("INSERT INTO payment_allocation(organization_id,payment_id,invoice_id,amount,allocated_at) " +
-                        "VALUES(?,?,?,?,NOW())", org, payId, invoiceId, balance);
+                        "VALUES(?,?,?,?,LOCALTIMESTAMP)", org, payId, invoiceId, balance);
             } catch (DuplicateKeyException ignored) {
             }
         }
-        jdbc.update("UPDATE invoice SET paid_amount=total_amount,status='PAID',updated_at=NOW(),version=version+1 " +
+        jdbc.update("UPDATE invoice SET paid_amount=total_amount,status='PAID',updated_at=LOCALTIMESTAMP,version=version+1 " +
                 "WHERE invoice_id=? AND organization_id=?", invoiceId, org);
         return ApiResponse.ok("Invoice marked as paid", Map.of("invoiceId", invoiceId, "status", "PAID"));
     }
@@ -368,16 +372,18 @@ public class BillingController {
         if (balance.compareTo(BigDecimal.ZERO) > 0) {
             String ikey = "checkout-writeoff-" + invoiceId + "-" + org;
             try {
-                jdbc.update("INSERT INTO payment(organization_id,party_id,amount,payment_mode,payment_date," +
-                                "idempotency_key,status,created_at,updated_at) VALUES(?,?,?,'WRITE_OFF',CURRENT_DATE,?,'WRITTEN_OFF',NOW(),NOW())",
-                        org, partyId, balance, ikey);
-                Long payId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+                Long payId = jdbc.queryForObject(
+                        "INSERT INTO payment(organization_id,party_id,amount,payment_mode,payment_date," +
+                                "idempotency_key,status,created_at,updated_at) " +
+                                "VALUES(?,?,?,'WRITE_OFF',CURRENT_DATE,?,'WRITTEN_OFF',LOCALTIMESTAMP,LOCALTIMESTAMP) " +
+                                "RETURNING payment_id",
+                        Long.class, org, partyId, balance, ikey);
                 jdbc.update("INSERT INTO payment_allocation(organization_id,payment_id,invoice_id,amount,allocated_at) " +
-                        "VALUES(?,?,?,?,NOW())", org, payId, invoiceId, balance);
+                        "VALUES(?,?,?,?,LOCALTIMESTAMP)", org, payId, invoiceId, balance);
             } catch (DuplicateKeyException ignored) {
             }
         }
-        jdbc.update("UPDATE invoice SET status='WRITTEN_OFF',updated_at=NOW(),version=version+1 " +
+        jdbc.update("UPDATE invoice SET status='WRITTEN_OFF',updated_at=LOCALTIMESTAMP,version=version+1 " +
                 "WHERE invoice_id=? AND organization_id=?", invoiceId, org);
         return ApiResponse.ok("Invoice written off", null);
     }
@@ -412,7 +418,7 @@ public class BillingController {
         if (decimal(inv.get("paid_amount")).compareTo(BigDecimal.ZERO) > 0) {
             throw new BadRequestException("Cannot delete an invoice with collected payments — write it off instead");
         }
-        jdbc.update("UPDATE invoice SET status='CANCELLED',updated_at=NOW(),version=version+1 " +
+        jdbc.update("UPDATE invoice SET status='CANCELLED',updated_at=LOCALTIMESTAMP,version=version+1 " +
                 "WHERE invoice_id=? AND organization_id=?", invoiceId, org);
         auditService.log(org, currentUser.userLoginId(), "INVOICE_CANCELLED", "INVOICE", invoiceId,
                 "Pending invoice deleted (soft-cancelled)");
@@ -439,7 +445,7 @@ public class BillingController {
         if (!"CANCELLED".equals(status)) {
             throw new BadRequestException("Only a deleted invoice can be restored. This one is " + status.toLowerCase() + ".");
         }
-        jdbc.update("UPDATE invoice SET status='PENDING',updated_at=NOW(),version=version+1 " +
+        jdbc.update("UPDATE invoice SET status='PENDING',updated_at=LOCALTIMESTAMP,version=version+1 " +
                 "WHERE invoice_id=? AND organization_id=?", invoiceId, org);
         auditService.log(org, currentUser.userLoginId(), "INVOICE_RESTORED", "INVOICE", invoiceId,
                 "Cancelled invoice restored to pending");
@@ -476,7 +482,7 @@ public class BillingController {
             if (!validItemIds.contains(item.invoiceItemId())) {
                 throw new BadRequestException("Charge line does not belong to this invoice");
             }
-            jdbc.update("UPDATE invoice_item SET amount=?,updated_at=NOW() WHERE invoice_item_id=? AND invoice_id=?",
+            jdbc.update("UPDATE invoice_item SET amount=?,updated_at=LOCALTIMESTAMP WHERE invoice_item_id=? AND invoice_id=?",
                     item.amount(), item.invoiceItemId(), invoiceId);
         }
         BigDecimal total = jdbc.queryForObject(
@@ -484,7 +490,7 @@ public class BillingController {
         if (total == null || total.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BadRequestException("Total amount must be greater than zero");
         }
-        jdbc.update("UPDATE invoice SET total_amount=?,updated_at=NOW(),version=version+1 " +
+        jdbc.update("UPDATE invoice SET total_amount=?,updated_at=LOCALTIMESTAMP,version=version+1 " +
                 "WHERE invoice_id=? AND organization_id=?", total, invoiceId, org);
         // Mirror an edited security-deposit line onto the master deposit held on
         // the active occupancy row (what checkout shows the owner to refund).
@@ -494,7 +500,7 @@ public class BillingController {
         if (!depositLine.isEmpty() && inv.get("party_id") != null) {
             BigDecimal deposit = decimal(depositLine.getFirst().get("amount"));
             Long partyId = ((Number) inv.get("party_id")).longValue();
-            jdbc.update("UPDATE facility_party SET security_deposit=?,updated_at=NOW() " +
+            jdbc.update("UPDATE facility_party SET security_deposit=?,updated_at=LOCALTIMESTAMP " +
                     "WHERE organization_id=? AND party_id=? AND role_type_id='OCCUPANT' AND thru_date IS NULL",
                     deposit, org, partyId);
         }

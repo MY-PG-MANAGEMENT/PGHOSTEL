@@ -271,7 +271,7 @@ Endpoints:
 ```
 ✓ JDK 21+
 ✓ Gradle 8.x
-✓ MySQL 8.0+
+✓ PostgreSQL 16+
 ✓ Git
 ```
 
@@ -430,7 +430,7 @@ class PaymentServiceTest {
 class PaymentControllerIT {
     
     @Container
-    static MySQLContainer<?> mysql = new MySQLContainer<>();
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
     
     @Test
     void testPaymentFlow() {
@@ -539,10 +539,10 @@ public OccupancyStats getOccupancyStats(Long orgId) {
 - [Spring Security](https://spring.io/projects/spring-security)
 - [Spring REST Docs](https://spring.io/projects/spring-restdocs)
 
-### MySQL Documentation
-- [JSON Functions](https://dev.mysql.com/doc/refman/8.0/en/json-functions.html)
-- [Window Functions](https://dev.mysql.com/doc/refman/8.0/en/window-functions.html)
-- [Dates and Times](https://dev.mysql.com/doc/refman/8.0/en/date-and-time-functions.html)
+### PostgreSQL Documentation
+- [JSON Functions](https://www.postgresql.org/docs/current/functions-json.html)
+- [Window Functions](https://www.postgresql.org/docs/current/functions-window.html)
+- [Dates and Times](https://www.postgresql.org/docs/current/functions-datetime.html)
 
 ### Architecture
 - [Microservices Patterns](https://microservices.io/patterns/index.html)

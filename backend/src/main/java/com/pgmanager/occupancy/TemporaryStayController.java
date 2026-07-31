@@ -62,7 +62,7 @@ public class TemporaryStayController {
                      AND ba.party_id = fp.party_id AND ba.status = 'ACTIVE'
             LEFT JOIN invoice inv ON inv.billing_account_id = ba.billing_account_id
                      AND inv.invoice_number = CONCAT('TEMP-', fp.organization_id, '-', ba.billing_account_id, '-',
-                                                     DATE_FORMAT(fp.from_date, '%Y%m%d'))
+                                                     TO_CHAR(fp.from_date, 'YYYYMMDD'))
             WHERE fp.organization_id = ? AND fp.role_type_id = 'TEMP_OCCUPANT' AND prop.facility_id = ?
             ORDER BY fp.from_date DESC
             """;

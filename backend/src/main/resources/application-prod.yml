@@ -47,7 +47,8 @@ server:
       # a mismatch: most request time is spent outside the database (JSON
       # serialisation, BCrypt, the response write to a slow mobile client), so
       # threads outnumbering connections keeps the pool saturated. Raising the pool
-      # to match the threads would just move the queue into MySQL.
+      # to match the threads would just move the queue into PostgreSQL — and it costs
+      # more there, since PostgreSQL forks a backend process per connection.
       max: 200
       min-spare: 20
     max-connections: 8192
@@ -72,14 +73,21 @@ spring:
   # Database
   # ---------------------------------------------------------------------------
   datasource:
-    # createDatabaseIfNotExist is deliberately ABSENT (it is present in the dev URL).
-    # In production the schema is created by the MySQL container's init, and an app
-    # that can create databases is an app that can silently create the wrong one
-    # after a typo in DB_NAME — then run Flyway into it and look healthy.
-    url: jdbc:mysql://${DB_HOST:mysql}:${DB_PORT:3306}/${DB_NAME:pg_manager}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=${TZ:Asia/Kolkata}&characterEncoding=UTF-8&useUnicode=true&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048&useServerPrepStmts=true
+    # The database itself is created by the PostgreSQL container's POSTGRES_DB on first
+    # boot; the app only ever connects to it. PostgreSQL has no "create if missing"
+    # connection option, which is the safer default anyway: an app that can create
+    # databases is an app that can silently create the wrong one after a typo in
+    # DB_NAME — then run Flyway into it and look perfectly healthy.
+    #
+    # reWriteBatchedInserts is the PostgreSQL equivalent of MySQL's
+    # rewriteBatchedStatements: it collapses a JDBC batch into one multi-row INSERT,
+    # which is what makes the CSV bulk import and the api_request_log writes cheap.
+    # (The prepared-statement cache settings from the MySQL URL have no equivalent —
+    # the PostgreSQL driver caches server-side prepared statements by default.)
+    url: jdbc:postgresql://${DB_HOST:postgres}:${DB_PORT:5432}/${DB_NAME:pg_manager}?reWriteBatchedInserts=true&ApplicationName=pg-manager-backend
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
-    driver-class-name: com.mysql.cj.jdbc.Driver
+    driver-class-name: org.postgresql.Driver
 
     hikari:
       pool-name: pgm-pool
@@ -92,9 +100,9 @@ spring:
       validation-timeout: 5000
       idle-timeout: 300000
 
-      # MUST be lower than MySQL's wait_timeout (600s in mysql/my.cnf). If the server
-      # closes an idle connection the pool still considers valid, the next query on it
-      # fails with "communications link failure". 540s leaves a 60s margin.
+      # MUST be lower than idle_session_timeout (600s in postgres/postgresql.conf). If the
+      # server closes an idle connection the pool still considers valid, the next query on
+      # it fails with "connection has been closed". 540s leaves a 60s margin.
       max-lifetime: 540000
 
       # Log a warning when a connection is held for over 30s. Almost always an
@@ -102,8 +110,8 @@ spring:
       # single batched query.
       leak-detection-threshold: 30000
 
-      # Cheap liveness probe. Connector/J implements JDBC4 isValid(), so no query is
-      # actually sent; this is here as an explicit fallback.
+      # Cheap liveness probe. The PostgreSQL driver implements JDBC4 isValid(), so no
+      # query is actually sent; this is here as an explicit fallback.
       connection-test-query: SELECT 1
 
   jpa:
@@ -246,8 +254,8 @@ management:
         enabled: true
       group:
         # Liveness = "is this JVM still functioning". Deliberately does NOT include
-        # the database: a MySQL outage must not cause the container to be reported
-        # dead and restarted, because restarting the API does not fix MySQL and a
+        # the database: a PostgreSQL outage must not cause the container to be reported
+        # dead and restarted, because restarting the API does not fix PostgreSQL and a
         # crash-loop makes recovery slower.
         liveness:
           include: livenessState,ping

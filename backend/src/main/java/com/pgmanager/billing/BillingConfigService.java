@@ -53,8 +53,9 @@ public class BillingConfigService {
         Map<String, Object> row = rows.getFirst();
         int leadDays = JdbcValues.toInt(row.get("invoice_lead_days"), DEFAULT.invoiceLeadDays());
         int graceDays = JdbcValues.toInt(row.get("checkout_grace_days"), DEFAULT.checkoutGraceDays());
-        // auto_generate_enabled is TINYINT(1) — MySQL hands it back as a Boolean, so it must
-        // not be cast to Number (that threw once an org actually had a config row).
+        // auto_generate_enabled is a PostgreSQL BOOLEAN, so the driver hands back a real
+        // Boolean here. JdbcValues.toBoolean still covers the COALESCE/aggregate cases that
+        // return a Number, and is kept so this read cannot break if the query grows one.
         boolean enabled = JdbcValues.toBoolean(row.get("auto_generate_enabled"), true);
         return new BillingConfig(clampLeadDays(leadDays), clampGraceDays(graceDays), enabled);
     }
@@ -69,10 +70,13 @@ public class BillingConfigService {
                 "INSERT INTO organization_billing_config" +
                 "(organization_id,invoice_lead_days,checkout_grace_days,auto_generate_enabled,created_at,updated_at) " +
                 "VALUES(?,?,?,?,?,?) " +
-                "ON DUPLICATE KEY UPDATE invoice_lead_days=VALUES(invoice_lead_days)," +
-                "checkout_grace_days=VALUES(checkout_grace_days)," +
-                "auto_generate_enabled=VALUES(auto_generate_enabled),updated_at=VALUES(updated_at)",
-                organizationId, leadDays, graceDays, autoGenerateEnabled ? 1 : 0, now, now);
+                "ON CONFLICT (organization_id) DO UPDATE SET " +
+                "invoice_lead_days=EXCLUDED.invoice_lead_days," +
+                "checkout_grace_days=EXCLUDED.checkout_grace_days," +
+                "auto_generate_enabled=EXCLUDED.auto_generate_enabled,updated_at=EXCLUDED.updated_at",
+                // The boolean is bound as a boolean, not 1/0: PostgreSQL will not coerce an
+                // integer into a BOOLEAN column the way MySQL's TINYINT(1) did.
+                organizationId, leadDays, graceDays, autoGenerateEnabled, now, now);
         return new BillingConfig(leadDays, graceDays, autoGenerateEnabled);
     }
 

@@ -61,14 +61,15 @@ log "Deploying:         $NEW_IMAGE"
 # -----------------------------------------------------------------------------
 # Host-side prerequisites
 #
-# MySQL runs as uid 999 inside the container and writes its error and slow-query
-# logs into a bind mount. On a fresh host that directory is root-owned and MySQL
+# PostgreSQL runs as uid 70 in the alpine image (not 999, which was MySQL's uid in
+# the Debian-based image) and writes its server log into a bind mount. On a fresh
+# host that directory is root-owned and PostgreSQL
 # fails to start with a permission error that reads like a corruption problem.
 # -----------------------------------------------------------------------------
-mkdir -p logs/mysql logs/nginx logs/api backups/mysql backups/redis
-if [[ "$(stat -c '%u' logs/mysql)" != "999" ]]; then
-    log "Fixing ownership on logs/mysql (uid 999)"
-    sudo chown -R 999:999 logs/mysql
+mkdir -p logs/postgres logs/nginx logs/api backups/postgres backups/redis
+if [[ "$(stat -c '%u' logs/postgres)" != "70" ]]; then
+    log "Fixing ownership on logs/postgres (uid 70)"
+    sudo chown -R 70:70 logs/postgres
 fi
 
 chmod 600 .env 2>/dev/null || true
@@ -88,8 +89,9 @@ IMAGE_TAG="$NEW_TAG" $COMPOSE config --quiet \
 # -----------------------------------------------------------------------------
 # Apply
 #
-# --no-deps: do not restart mysql, redis or nginx. Only the API changed, and
-# needlessly bouncing MySQL would add a crash-recovery cycle to every deploy.
+# --no-deps: do not restart postgres, redis or nginx. Only the API changed, and
+# needlessly bouncing PostgreSQL would add a checkpoint + recovery cycle to every
+# deploy.
 # -----------------------------------------------------------------------------
 log "Starting new container"
 IMAGE_TAG="$NEW_TAG" $COMPOSE up -d --no-deps --force-recreate api

@@ -118,7 +118,7 @@ public class RentReminderScheduler {
                 "LEFT JOIN facility froom ON froom.facility_id = fgm.parent_facility_id " +
                 "WHERE fp.role_type_id = 'OCCUPANT' AND fp.thru_date IS NULL " +
                 "  AND fp.expected_checkout_date IS NOT NULL " +
-                "  AND DATEDIFF(fp.expected_checkout_date, ?) IN (5, 1, 0)",
+                "  AND (fp.expected_checkout_date - CAST(? AS date)) IN (5, 1, 0)",
                 today
         );
 
