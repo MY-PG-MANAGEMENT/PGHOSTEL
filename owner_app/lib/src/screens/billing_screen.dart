@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../app_state.dart';
 import '../theme/app_theme.dart';
@@ -10,6 +11,8 @@ import '../widgets/app_toast.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/async_action_button.dart';
 import '../widgets/error_retry_view.dart';
+import '../utils/whatsapp_link.dart';
+import '../widgets/whatsapp_icon.dart';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1027,11 +1030,57 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
   // on the next refresh.
   late String _status;
 
+  // The server-built payment reminder (reminder type, message text, normalised number,
+  // and whether it may be sent). Rides along on the invoice detail payload the sheet
+  // already fetches, so the action needs no extra round trip and no loading state on tap.
+  // Null until that fetch lands — the action is not offered until the server has spoken.
+  Map<String, dynamic>? _reminder;
+
   @override
   void initState() {
     super.initState();
     _status = '${invoice['status'] ?? 'PENDING'}';
     _loadItems();
+  }
+
+  /// Opens WhatsApp on the tenant's chat with the reminder pre-filled. The owner presses
+  /// Send themselves.
+  ///
+  /// No confirmation dialog: the whole point of this flow is that it is one tap, and
+  /// WhatsApp's own compose screen *is* the confirmation — nothing is sent until the owner
+  /// taps Send there.
+  Future<void> _sendWhatsAppReminder() async {
+    final reminder = _reminder;
+    if (reminder == null) return;
+
+    // The server already decided; the app only reports its reason.
+    if (reminder['canRemind'] != true) {
+      final reason = '${reminder['blockedReason'] ?? ''}';
+      AppToast.error(context,
+          reason.isEmpty ? 'A reminder cannot be sent for this invoice.' : reason);
+      return;
+    }
+
+    final uri = whatsAppChatUri(
+        '${reminder['whatsappNumber'] ?? ''}', '${reminder['message'] ?? ''}');
+    if (uri == null) {
+      AppToast.error(context, 'WhatsApp number is not available for this tenant.');
+      return;
+    }
+
+    // "Opening WhatsApp", never "Message sent". The app hands off to WhatsApp and has no way
+    // to know whether the owner actually pressed Send — claiming delivery would be a lie, and
+    // would let an owner believe a tenant was chased when they were not. Real delivery status
+    // arrives with the Cloud API in Phase 2.
+    AppToast.info(context, 'Opening WhatsApp…');
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        AppToast.error(context, 'WhatsApp is not installed on this device');
+      }
+    } catch (_) {
+      if (mounted) AppToast.error(context, 'Could not open WhatsApp');
+    }
   }
 
   Future<void> _confirmDelete() async {
@@ -1266,13 +1315,24 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
       if (mounted) {
         setState(() {
           _items = items;
+          _reminder = res['reminder'] is Map<String, dynamic>
+              ? res['reminder'] as Map<String, dynamic>
+              : null;
           _itemsLoading = false;
         });
       }
     } catch (_) {
-      // Breakdown is a nice-to-have — the sheet still shows the total.
+      // Breakdown is a nice-to-have — the sheet still shows the total. The reminder stays
+      // null, so the WhatsApp action is simply not offered rather than offered with no
+      // message to pre-fill.
       if (mounted) setState(() => _itemsLoading = false);
     }
+  }
+
+  /// Why the WhatsApp action is greyed out, straight from the server.
+  String _blockedTooltip() {
+    final reason = '${_reminder?['blockedReason'] ?? ''}';
+    return reason.isEmpty ? 'No reminder needed for this invoice' : reason;
   }
 
   String _itemLabel(Map<String, dynamic> item) {
@@ -1292,23 +1352,20 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
   Widget _chargesBreakdown(dynamic total) {
     final items = _items ?? const <Map<String, dynamic>>[];
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
+        color: PgColors.primary.withValues(alpha: 0.045),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const Text('Charge Details',
               style: TextStyle(
-                  fontSize: 11.5,
+                  fontSize: 13.5,
                   fontWeight: FontWeight.w700,
-                  color: Colors.grey,
-                  letterSpacing: 0.4)),
-          const SizedBox(height: 8),
+                  color: PgColors.primary)),
+          const SizedBox(height: 10),
           if (_itemsLoading)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
@@ -1321,31 +1378,35 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
           else
             for (final item in items)
               Padding(
-                padding: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
                   children: [
                     Expanded(
                       child: Text(_itemLabel(item),
                           style: const TextStyle(
-                              fontSize: 13, color: PgColors.textSecondary)),
+                              fontSize: 14.5, color: PgColors.textSecondary)),
                     ),
+                    const SizedBox(width: 12),
                     Text(_rupees(item['amount']),
                         style: const TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w600)),
+                            fontSize: 14.5, fontWeight: FontWeight.w600)),
                   ],
                 ),
               ),
-          const Divider(height: 14),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 6),
+            child: _DashedDivider(),
+          ),
           Row(
             children: [
               const Expanded(
                 child: Text('Total',
                     style:
-                        TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
               ),
               Text(_rupees(total),
                   style: const TextStyle(
-                      fontSize: 15,
+                      fontSize: 17,
                       fontWeight: FontWeight.w800,
                       color: PgColors.primary)),
             ],
@@ -1371,151 +1432,548 @@ class _InvoiceDetailSheetState extends State<InvoiceDetailSheet> {
     // written off instead, so the server rejects it and the icon is not offered.
     final canDelete = canEdit;
     final canRestore = status == 'CANCELLED';
+    // Deep linking needs no provisioning, so the action is offered to every org — there is
+    // nothing to enable and no credential to configure. It appears as soon as the server's
+    // reminder block arrives, and is hidden only for a cancelled invoice (not a due at all).
+    // When the invoice is settled or otherwise not chaseable it is rendered **disabled**
+    // rather than removed, so the affordance stays where the owner learned to look instead
+    // of appearing and vanishing between invoices.
+    final showWhatsApp = _reminder != null && !canRestore;
+    final canRemind = showWhatsApp && _reminder!['canRemind'] == true;
 
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(children: [
-            Text('Invoice', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-            const Spacer(),
-            if (canEdit)
-              IconButton(
-                icon: const Icon(Icons.edit_outlined),
-                color: PgColors.primary,
-                tooltip: 'Edit Amount',
-                style: IconButton.styleFrom(
-                  backgroundColor: PgColors.primary.withValues(alpha: 0.1),
-                ),
-                onPressed: _busy ? null : _editAmount,
-              ),
-            if (canEdit) const SizedBox(width: 8),
-            if (canDelete)
-              IconButton(
-                icon: const Icon(Icons.delete_outline),
-                color: PgColors.danger,
-                tooltip: 'Delete Invoice',
-                style: IconButton.styleFrom(
-                  backgroundColor: PgColors.danger.withValues(alpha: 0.1),
-                ),
-                onPressed: _busy ? null : _confirmDelete,
-              ),
-            const SizedBox(width: 8),
-            IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
-          ]),
-          const SizedBox(height: 4),
-          _DetailRow('Tenant', name),
-          _DetailRow('Month', _fmtMonth(invoice['invoice_month'])),
-          _DetailRow('Due Date', _fmtDate(invoice['due_date'])),
-          _StatusRow('Status', status, color),
-          _chargesBreakdown(total),
-          _DetailRow('Paid', _rupees(paid)),
-          _DetailRow('Balance', _rupees(balance), color: (balance is num && balance > 0) ? PgColors.danger : PgColors.success),
-          const SizedBox(height: 20),
-          if (canRestore) ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.grey.shade300),
-              ),
-              child: const Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.info_outline, size: 18, color: PgColors.textSecondary),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'This invoice is deleted, so it is not counted in dues or collections. '
-                      'Nothing was erased — restoring puts it back as pending.',
-                      style: TextStyle(
-                          fontSize: 12, height: 1.3, color: PgColors.textSecondary),
+    final balanceColor =
+        (balance is num && balance > 0) ? PgColors.danger : PgColors.success;
+
+    return SafeArea(
+      top: false,
+      child: ConstrainedBox(
+        // The sheet is opened with isScrollControlled, so it sizes to its content — and this
+        // content is tall enough to run off a small phone once the charge list has several
+        // lines. Cap it and scroll rather than overflow.
+        constraints:
+            BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.92),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: 40,
+                child: Stack(
+                  children: [
+                    const Align(alignment: Alignment.topCenter, child: _GrabHandle()),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: IconButton(
+                        icon: const Icon(Icons.close, size: 22),
+                        color: PgColors.textSecondary,
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.pop(context),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              icon: const Icon(Icons.restore),
-              label: const Text('Restore Invoice'),
-              onPressed: _busy ? null : _restore,
-            ),
-          ],
-          if (canPay)
-            FilledButton.icon(
-              icon: const Icon(Icons.payments_outlined),
-              label: Text('Collect Payment · ${_rupees(balance)}'),
-              onPressed: () {
-                Navigator.pop(context);
-                showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.white,
-                  shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              _header(showWhatsApp, canRemind, canEdit, canDelete),
+              const Divider(height: 28),
+              _metrics(name, status, color),
+              const SizedBox(height: 18),
+              _chargesBreakdown(total),
+              const SizedBox(height: 16),
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: _MoneyCell(
+                        icon: Icons.credit_card,
+                        tint: PgColors.success,
+                        label: 'Paid',
+                        value: _rupees(paid),
+                      ),
+                    ),
+                    const VerticalDivider(width: 24, thickness: 1),
+                    Expanded(
+                      child: _MoneyCell(
+                        icon: Icons.account_balance_wallet_outlined,
+                        tint: balanceColor,
+                        label: 'Balance',
+                        value: _rupees(balance),
+                        valueColor: balanceColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 22),
+              if (canRestore) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade300),
                   ),
-                  builder: (_) => CollectPaymentSheet(preselectedInvoice: invoice),
-                ).then((done) { if (done == true) widget.onRefresh(); });
-              },
-            ),
-        ],
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline, size: 18, color: PgColors.textSecondary),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'This invoice is deleted, so it is not counted in dues or collections. '
+                          'Nothing was erased — restoring puts it back as pending.',
+                          style: TextStyle(
+                              fontSize: 12, height: 1.3, color: PgColors.textSecondary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 54,
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.restore),
+                    label: const Text('Restore Invoice'),
+                    style: _primaryActionStyle,
+                    onPressed: _busy ? null : _restore,
+                  ),
+                ),
+              ],
+              if (canPay)
+                SizedBox(
+                  height: 54,
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.payments_outlined, size: 24),
+                    label: Text('Collect Payment · ${_rupees(balance)}',
+                        style: const TextStyle(
+                            fontSize: 16.5, fontWeight: FontWeight.w700)),
+                    style: _primaryActionStyle,
+                    onPressed: () {
+                      Navigator.pop(context);
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.white,
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                        ),
+                        builder: (_) => CollectPaymentSheet(preselectedInvoice: invoice),
+                      ).then((done) { if (done == true) widget.onRefresh(); });
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
+    );
+  }
+
+  static final ButtonStyle _primaryActionStyle = FilledButton.styleFrom(
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+  );
+
+  /// Invoice identity on the left, the actions on the right — always one row.
+  ///
+  /// The actions are labelled tiles rather than bare icons: an unlabelled trash can next to an
+  /// unlabelled pencil is exactly the pair an owner mis-taps. They are sized to fit beside the
+  /// title on a 360 px phone rather than wrapping below it — a wrapped row of right-aligned
+  /// tiles reads as a detached second toolbar, not as this invoice's actions.
+  ///
+  /// **The invoice number is what gives way, not the icon tile.** Three tiles plus the icon
+  /// leave the title about 78 px on a phone: enough for the word "Invoice", nowhere near enough
+  /// for `Invoice #INV-JUL-2026-0012`. So on a narrow sheet the number drops to its own
+  /// full-width line under the row, where it is fully readable. Dropping the icon instead would
+  /// buy the number 54 px — still not enough to show it, and it would cost the header its anchor.
+  Widget _header(bool showWhatsApp, bool canRemind, bool canEdit, bool canDelete) {
+    final number = '${invoice['invoice_number'] ?? ''}'.trim();
+    final numberLabel = number.isEmpty
+        ? 'Invoice #${invoice['invoice_id'] ?? ''}'
+        : 'Invoice #$number';
+
+    final actions = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (showWhatsApp)
+          _ActionTile(
+            tint: kWhatsAppGreen,
+            background: canRemind ? kWhatsAppSurface : null,
+            label: 'WhatsApp',
+            enabled: canRemind && !_busy,
+            // The tooltip when disabled is the server's own reason ("This invoice is fully
+            // paid…", "Invalid WhatsApp number."), so the app never has to guess at why.
+            tooltip: canRemind
+                ? 'Send payment reminder on WhatsApp'
+                : _blockedTooltip(),
+            icon: WhatsAppIcon(
+              size: 19,
+              color: canRemind ? kWhatsAppGreen : Colors.grey.shade400,
+            ),
+            onPressed: _sendWhatsAppReminder,
+          ),
+        if (canEdit)
+          _ActionTile(
+            tint: PgColors.primary,
+            label: 'Edit',
+            enabled: !_busy,
+            tooltip: 'Edit Amount',
+            icon: const Icon(Icons.edit_outlined, size: 19),
+            onPressed: _editAmount,
+          ),
+        if (canDelete)
+          _ActionTile(
+            tint: PgColors.danger,
+            label: 'Delete',
+            enabled: !_busy,
+            tooltip: 'Delete Invoice',
+            icon: const Icon(Icons.delete_outline, size: 19),
+            onPressed: _confirmDelete,
+          ),
+      ],
+    );
+
+    const numberStyle =
+        TextStyle(fontSize: 12.5, color: PgColors.textSecondary);
+
+    return LayoutBuilder(builder: (context, c) {
+      // 420 leaves the title ~178px beside the icon and the three tiles — enough for a full
+      // `Invoice #INV-JUL-2026-0012`. At 390 it is 148px, which ellipsises the tail off.
+      final numberFitsBesideActions = c.maxWidth >= 420;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: PgColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.receipt_long_rounded,
+                    color: PgColors.primary, size: 23),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Invoice',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+                    if (numberFitsBesideActions) ...[
+                      const SizedBox(height: 1),
+                      Text(numberLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: numberStyle),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              actions,
+            ],
+          ),
+          if (!numberFitsBesideActions) ...[
+            const SizedBox(height: 6),
+            Text(numberLabel,
+                maxLines: 1, overflow: TextOverflow.ellipsis, style: numberStyle),
+          ],
+        ],
+      );
+    });
+  }
+
+  /// Tenant / Month / Due Date / Status, divided into columns.
+  ///
+  /// Four across only fits a tablet-width sheet — on a phone a name like "Rahul Kumar" and a
+  /// date like "20 Jul 2026" each need more than the ~78px a quarter leaves, so it falls back
+  /// to 2×2 instead of wrapping every value onto three lines.
+  Widget _metrics(String name, String status, Color color) {
+    final cells = <Widget>[
+      _MetricCell(
+          icon: Icons.person_outline, label: 'Tenant', value: name),
+      _MetricCell(
+          icon: Icons.calendar_month_outlined,
+          label: 'Month',
+          value: _fmtMonth(invoice['invoice_month'])),
+      _MetricCell(
+          icon: Icons.event_available_outlined,
+          label: 'Due Date',
+          value: _fmtDate(invoice['due_date'])),
+      _MetricCell(
+        icon: Icons.local_offer_outlined,
+        label: 'Status',
+        tint: color,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(status,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: color, fontWeight: FontWeight.w800, fontSize: 13)),
+        ),
+      ),
+    ];
+
+    Widget row(List<Widget> cells) => IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (int i = 0; i < cells.length; i++) ...[
+                if (i > 0) const VerticalDivider(width: 24, thickness: 1),
+                Expanded(child: cells[i]),
+              ],
+            ],
+          ),
+        );
+
+    return LayoutBuilder(
+      builder: (context, c) => c.maxWidth >= 460
+          ? row(cells)
+          : Column(children: [
+              row(cells.sublist(0, 2)),
+              const SizedBox(height: 18),
+              row(cells.sublist(2)),
+            ]),
     );
   }
 }
 
-class _DetailRow extends StatelessWidget {
-  const _DetailRow(this.label, this.value, {this.color});
+/// The pill at the top of the sheet that says it can be dragged away.
+class _GrabHandle extends StatelessWidget {
+  const _GrabHandle();
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 44,
+        height: 5,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade400,
+          borderRadius: BorderRadius.circular(3),
+        ),
+      );
+}
+
+/// A labelled action in the sheet header.
+///
+/// The tap target stays an [IconButton] — it carries the tooltip and the disabled state, so a
+/// blocked action reports the server's reason on long-press instead of silently doing nothing.
+/// The label is decoration under it, not a second target.
+class _ActionTile extends StatelessWidget {
+  const _ActionTile({
+    required this.icon,
+    required this.label,
+    required this.tint,
+    required this.tooltip,
+    required this.enabled,
+    required this.onPressed,
+    this.background,
+  });
+
+  final Widget icon;
   final String label;
-  final String value;
-  final Color? color;
+  final Color tint;
+  final String tooltip;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  /// Overrides the tint-derived fill (the WhatsApp tile uses the brand surface colour).
+  final Color? background;
+
+  /// Wide enough for "WhatsApp" at 9.5px and narrow enough that three tiles plus the title fit
+  /// one row on a 360px phone. Sized here rather than by the content so the three stay equal —
+  /// tiles that each hug their own label read as a ragged row.
+  static const double _width = 54;
 
   @override
   Widget build(BuildContext context) {
+    final active = enabled ? tint : Colors.grey.shade400;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          SizedBox(width: 100, child: Text(label, style: const TextStyle(color: Colors.grey))),
-          Expanded(
-            child: Text(value, style: TextStyle(fontWeight: FontWeight.w600, color: color)),
-          ),
-        ],
+      padding: const EdgeInsets.only(left: 6),
+      child: Container(
+        width: _width,
+        padding: const EdgeInsets.only(bottom: 5),
+        decoration: BoxDecoration(
+          color: enabled
+              ? (background ?? tint.withValues(alpha: 0.1))
+              : Colors.grey.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: icon,
+              color: active,
+              tooltip: tooltip,
+              padding: EdgeInsets.zero,
+              // The default 48px minimum would blow past the tile width. Filling the tile
+              // instead keeps the tap target as large as the tile looks, rather than a small
+              // hit box floating inside a big coloured square.
+              constraints: const BoxConstraints(minWidth: _width, minHeight: 38),
+              onPressed: enabled ? onPressed : null,
+            ),
+            Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 9.5, fontWeight: FontWeight.w700, color: active)),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _StatusRow extends StatelessWidget {
-  const _StatusRow(this.label, this.status, this.color);
+/// One column of the Tenant / Month / Due Date / Status strip.
+class _MetricCell extends StatelessWidget {
+  const _MetricCell({
+    required this.icon,
+    required this.label,
+    this.value,
+    this.child,
+    this.tint,
+  });
+
+  final IconData icon;
   final String label;
-  final String status;
+
+  /// Plain text value. Ignored when [child] is given (the Status cell renders a pill).
+  final String? value;
+  final Widget? child;
+  final Color? tint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 17, color: tint ?? PgColors.primary),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 13.5, color: PgColors.textSecondary)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        child ??
+            Text(value ?? '-',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
+      ],
+    );
+  }
+}
+
+/// Paid / Balance: a tinted circular glyph beside the figure.
+class _MoneyCell extends StatelessWidget {
+  const _MoneyCell({
+    required this.icon,
+    required this.tint,
+    required this.label,
+    required this.value,
+    this.valueColor,
+  });
+
+  final IconData icon;
+  final Color tint;
+  final String label;
+  final String value;
+  final Color? valueColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: tint.withValues(alpha: 0.12),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, size: 21, color: tint),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 13.5, color: PgColors.textSecondary)),
+              const SizedBox(height: 2),
+              Text(value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                      color: valueColor)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The rule between the charge lines and the total. Dashed so it reads as a subtotal rule
+/// rather than another section boundary.
+class _DashedDivider extends StatelessWidget {
+  const _DashedDivider();
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+        size: const Size(double.infinity, 1),
+        painter: _DashedLinePainter(Colors.grey.shade400),
+      );
+}
+
+class _DashedLinePainter extends CustomPainter {
+  const _DashedLinePainter(this.color);
   final Color color;
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          SizedBox(width: 100, child: Text(label, style: const TextStyle(color: Colors.grey))),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: color.withValues(alpha: 0.3)),
-            ),
-            child: Text(status, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12)),
-          ),
-        ],
-      ),
-    );
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1;
+    const dash = 4.0;
+    const gap = 4.0;
+    for (double x = 0; x < size.width; x += dash + gap) {
+      canvas.drawLine(
+          Offset(x, 0), Offset(x + dash > size.width ? size.width : x + dash, 0), paint);
+    }
   }
+
+  @override
+  bool shouldRepaint(_DashedLinePainter old) => old.color != color;
 }
 
 // ─── Collect Payment Sheet ────────────────────────────────────────────────

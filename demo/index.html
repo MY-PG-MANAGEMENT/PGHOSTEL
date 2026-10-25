@@ -1,0 +1,2745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PG Manager — Manage Your PG. Simple. Smart. Complete.</title>
+<meta name="description" content="Manage tenants, rooms, rent, payments and daily PG operations from one simple application." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   PG Manager — client demo site
+   Design tokens
+   ============================================================ */
+:root{
+  --brand:#2563EB;
+  --brand-dark:#1D4ED8;
+  --brand-ink:#12245C;
+  --brand-50:#F1F5FF;
+  --brand-100:#DEE8FF;
+  --brand-200:#C3D4FF;
+
+  --ink:#0F1B33;
+  --body:#546076;
+  --muted:#8C97AB;
+
+  --line:#E8EDF5;
+  --bg:#FFFFFF;
+  --soft:#F6F8FC;
+
+  --ok:#0E9F6E;
+  --ok-bg:#E6F7F0;
+  --warn:#D97706;
+  --warn-bg:#FEF4E6;
+  --bad:#DC2626;
+  --bad-bg:#FDECEC;
+  --wa:#25D366;
+  --wa-dark:#128C7E;
+
+  --r-sm:10px;
+  --r:16px;
+  --r-lg:22px;
+  --shadow-sm:0 1px 2px rgba(15,27,51,.05), 0 4px 12px -6px rgba(15,27,51,.10);
+  --shadow:0 1px 2px rgba(15,27,51,.05), 0 18px 40px -20px rgba(15,27,51,.22);
+  --shadow-lg:0 2px 4px rgba(15,27,51,.04), 0 40px 80px -32px rgba(15,27,51,.28);
+  --maxw:1180px;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  color:var(--body);
+  background:var(--bg);
+  font-size:16px;
+  line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{color:var(--ink);margin:0;line-height:1.2;letter-spacing:-.02em;font-weight:700}
+p{margin:0}
+a{color:inherit;text-decoration:none}
+img,svg{display:block;max-width:100%}
+ul{margin:0;padding:0;list-style:none}
+
+.wrap{width:100%;max-width:var(--maxw);margin:0 auto;padding:0 24px}
+section{padding:96px 0}
+.soft{background:var(--soft)}
+
+/* ---------- Type helpers ---------- */
+.eyebrow{
+  display:inline-flex;align-items:center;gap:8px;
+  font-size:12.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--brand);background:var(--brand-50);
+  border:1px solid var(--brand-100);
+  padding:7px 14px;border-radius:999px;margin-bottom:18px;
+}
+.eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+h2.title{font-size:clamp(28px,3.6vw,42px);font-weight:800;margin-bottom:14px}
+.lede{font-size:17.5px;max-width:640px}
+.sec-head{margin-bottom:52px}
+.sec-head.center{text-align:center}
+.sec-head.center .lede{margin:0 auto}
+
+/* ---------- Buttons ---------- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  font-weight:600;font-size:15.5px;padding:14px 26px;border-radius:12px;
+  border:1px solid transparent;cursor:pointer;transition:.22s ease;
+  font-family:inherit;white-space:nowrap;
+}
+.btn-primary{background:var(--brand);color:#fff;box-shadow:0 10px 24px -10px rgba(37,99,235,.75)}
+.btn-primary:hover{background:var(--brand-dark);transform:translateY(-2px);box-shadow:0 16px 30px -12px rgba(37,99,235,.8)}
+.btn-ghost{background:#fff;color:var(--ink);border-color:var(--line);box-shadow:var(--shadow-sm)}
+.btn-ghost:hover{border-color:var(--brand-200);color:var(--brand);transform:translateY(-2px)}
+.btn-white{background:#fff;color:var(--brand);box-shadow:0 14px 30px -14px rgba(0,0,0,.5)}
+.btn-white:hover{transform:translateY(-2px)}
+.btn-lg{padding:16px 32px;font-size:16.5px}
+
+/* ============================================================
+   Header
+   ============================================================ */
+header{
+  position:sticky;top:0;z-index:60;background:rgba(255,255,255,.88);
+  backdrop-filter:saturate(180%) blur(14px);
+  border-bottom:1px solid transparent;transition:.25s ease;
+}
+header.stuck{border-bottom-color:var(--line);box-shadow:0 4px 20px -14px rgba(15,27,51,.4)}
+.nav{display:flex;align-items:center;justify-content:space-between;height:72px}
+.brand{display:flex;align-items:center;gap:11px;font-weight:800;color:var(--ink);font-size:18px;letter-spacing:-.02em}
+.brand .mark{width:38px;height:38px;border-radius:11px;background:var(--brand);display:grid;place-items:center;box-shadow:0 8px 18px -8px rgba(37,99,235,.9)}
+.nav-links{display:flex;align-items:center;gap:4px}
+.nav-links a{
+  font-size:14.5px;font-weight:500;color:var(--body);padding:9px 14px;border-radius:9px;transition:.18s;
+}
+.nav-links a:hover{color:var(--brand);background:var(--brand-50)}
+.nav-cta{display:flex;align-items:center;gap:10px}
+.burger{display:none;width:44px;height:44px;border-radius:11px;border:1px solid var(--line);background:#fff;cursor:pointer;align-items:center;justify-content:center}
+.burger span{display:block;width:18px;height:2px;background:var(--ink);border-radius:2px;position:relative;transition:.2s}
+.burger span::before,.burger span::after{content:'';position:absolute;left:0;width:18px;height:2px;background:var(--ink);border-radius:2px;transition:.2s}
+.burger span::before{top:-6px}.burger span::after{top:6px}
+.burger.open span{background:transparent}
+.burger.open span::before{top:0;transform:rotate(45deg)}
+.burger.open span::after{top:0;transform:rotate(-45deg)}
+.mobile-menu{display:none;border-top:1px solid var(--line);background:#fff;padding:14px 24px 22px}
+.mobile-menu.show{display:block}
+.mobile-menu a{display:block;padding:13px 8px;font-weight:500;border-bottom:1px solid var(--line);color:var(--ink)}
+.mobile-menu a:last-of-type{border-bottom:0}
+.mobile-menu .btn{width:100%;margin-top:14px}
+
+/* ============================================================
+   Hero
+   ============================================================ */
+.hero{padding:74px 0 88px;position:relative;overflow:hidden}
+.hero::before{
+  content:'';position:absolute;inset:0;z-index:-1;
+  background:
+    radial-gradient(760px 420px at 78% 8%, rgba(37,99,235,.10), transparent 62%),
+    radial-gradient(620px 380px at 4% 84%, rgba(14,159,110,.07), transparent 60%);
+}
+.hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:56px;align-items:center}
+.hero h1{font-size:clamp(36px,5vw,58px);font-weight:800;letter-spacing:-.035em;margin-bottom:20px}
+.hero h1 .accent{
+  background:linear-gradient(180deg,transparent 62%, var(--brand-100) 62%);
+  padding:0 4px;border-radius:3px;
+}
+.hero .lede{font-size:19px;margin-bottom:32px;max-width:520px}
+.hero-actions{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:30px}
+.trust{display:flex;align-items:center;gap:11px;font-size:14.5px;color:var(--muted);font-weight:500}
+.trust .check{width:22px;height:22px;border-radius:50%;background:var(--ok-bg);display:grid;place-items:center;flex:none}
+.hero-visual{position:relative}
+.float-chip{
+  position:absolute;background:#fff;border:1px solid var(--line);border-radius:14px;
+  padding:11px 15px;box-shadow:var(--shadow);display:flex;align-items:center;gap:11px;
+  font-size:13.5px;font-weight:600;color:var(--ink);
+}
+.float-chip .ic{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;flex:none}
+.float-chip small{display:block;font-size:11.5px;font-weight:500;color:var(--muted);letter-spacing:.02em}
+.chip-a{top:6%;left:-4%;animation:floaty 5.5s ease-in-out infinite}
+.chip-b{bottom:14%;right:-3%;animation:floaty 6.5s ease-in-out infinite .8s}
+.chip-c{bottom:-2%;left:8%;animation:floaty 6s ease-in-out infinite .4s}
+@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-11px)}}
+@media(max-width:620px){
+  .float-chip{font-size:12.5px;padding:9px 12px}
+  .chip-a{left:0}.chip-b{right:0}.chip-c{left:2%;bottom:2%}
+}
+
+/* ============================================================
+   Journey / overview
+   ============================================================ */
+.journey{display:flex;align-items:stretch;gap:0;flex-wrap:nowrap;overflow-x:auto;padding-bottom:8px}
+.j-step{
+  flex:1 1 0;min-width:158px;background:#fff;border:1px solid var(--line);border-radius:var(--r);
+  padding:24px 18px;text-align:center;box-shadow:var(--shadow-sm);transition:.25s ease;
+}
+.j-step:hover{transform:translateY(-6px);border-color:var(--brand-200);box-shadow:var(--shadow)}
+.j-step .ic{width:52px;height:52px;border-radius:15px;background:var(--brand-50);display:grid;place-items:center;margin:0 auto 14px}
+.j-step h4{font-size:15.5px;margin-bottom:5px}
+.j-step p{font-size:13px;color:var(--muted);line-height:1.5}
+.j-arrow{display:grid;place-items:center;flex:0 0 34px;color:var(--brand-200)}
+.j-arrow svg{transition:.3s}
+@media(max-width:900px){
+  .journey{flex-direction:column;overflow:visible}
+  .j-arrow{flex:0 0 26px;padding:6px 0}
+  .j-arrow svg{transform:rotate(90deg)}
+}
+
+/* ============================================================
+   App mockup shell (used by several sections)
+   ============================================================ */
+.app{
+  background:#fff;border:1px solid var(--line);border-radius:var(--r-lg);
+  box-shadow:var(--shadow-lg);overflow:hidden;
+}
+.app-bar{
+  height:44px;display:flex;align-items:center;gap:8px;padding:0 16px;
+  background:#FBFCFE;border-bottom:1px solid var(--line);
+}
+.dots{display:flex;gap:6px}
+.dots i{width:10px;height:10px;border-radius:50%;background:#E2E8F2;display:block}
+.dots i:first-child{background:#FFBFB6}.dots i:nth-child(2){background:#FFE1A8}.dots i:nth-child(3){background:#BFE8D2}
+.app-url{
+  flex:1;text-align:center;font-size:12px;color:var(--muted);font-weight:500;
+  background:#fff;border:1px solid var(--line);border-radius:7px;padding:4px 12px;max-width:280px;margin:0 auto;
+}
+.app-body{display:grid;grid-template-columns:200px 1fr}
+.app-side{background:#FBFCFE;border-right:1px solid var(--line);padding:18px 12px}
+.app-side .s-lab{font-size:10.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);padding:0 10px;margin:0 0 10px}
+.s-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;font-size:13.5px;font-weight:500;color:var(--body);margin-bottom:2px}
+.s-item.active{background:var(--brand);color:#fff;font-weight:600;box-shadow:0 8px 16px -10px rgba(37,99,235,.9)}
+.s-item .sq{width:16px;height:16px;border-radius:5px;background:currentColor;opacity:.28;flex:none}
+.s-item.active .sq{opacity:.95}
+.app-main{padding:24px}
+.app-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+.app-head h4{font-size:19px;margin-bottom:2px}
+.app-head p{font-size:13.5px;color:var(--muted)}
+.pill-select{
+  display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--ink);
+  border:1px solid var(--line);border-radius:10px;padding:8px 14px;background:#fff;
+}
+@media(max-width:860px){ .app-body{grid-template-columns:1fr} .app-side{display:none} .app-main{padding:18px} }
+
+/* ---------- Stat tiles ---------- */
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}
+.stat{
+  border:1px solid var(--line);border-radius:14px;padding:15px 15px 14px;background:#fff;transition:.22s;
+}
+.stat:hover{border-color:var(--brand-200);transform:translateY(-3px);box-shadow:var(--shadow-sm)}
+.stat .lab{font-size:11.5px;font-weight:600;color:var(--muted);letter-spacing:.03em;margin-bottom:7px;display:flex;align-items:center;gap:6px}
+.stat .lab i{width:7px;height:7px;border-radius:50%;flex:none;display:block}
+.stat .val{font-size:23px;font-weight:800;color:var(--ink);letter-spacing:-.03em;line-height:1.15}
+.stat .sub{font-size:11.5px;color:var(--muted);margin-top:4px;font-weight:500}
+.stat.good .val{color:var(--ok)} .stat.warn .val{color:var(--warn)}
+.stats.four{grid-template-columns:repeat(4,1fr)}
+@media(max-width:980px){.stats,.stats.four{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:420px){.stats,.stats.four{grid-template-columns:1fr}}
+
+/* ---------- Panels & charts ---------- */
+.panels{display:grid;grid-template-columns:1.25fr 1fr;gap:16px}
+.panel{border:1px solid var(--line);border-radius:14px;padding:18px}
+.panel h5{font-size:14.5px;color:var(--ink);font-weight:700;margin:0 0 2px}
+.panel .psub{font-size:12px;color:var(--muted);margin-bottom:16px}
+.bars{display:flex;align-items:flex-end;gap:min(3.2%,18px);height:150px;padding-top:8px}
+.bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;height:100%;justify-content:flex-end}
+/* the track is "expected", the fill inside it is "collected" */
+.track{
+  width:100%;max-width:36px;flex:1;border-radius:7px 7px 3px 3px;
+  background:linear-gradient(180deg,#DCE6F8 0%, #EEF3FC 100%);
+  display:flex;align-items:flex-end;overflow:hidden;
+}
+.bar{
+  width:100%;border-radius:7px 7px 3px 3px;
+  background:linear-gradient(180deg,var(--brand) 0%, #6E9BFF 100%);
+  height:0;transition:height 1.1s cubic-bezier(.16,.84,.44,1);
+}
+.bar-col span{font-size:11.5px;color:var(--muted);font-weight:600}
+.legend{display:flex;gap:16px;font-size:12px;color:var(--muted);font-weight:500;margin-top:14px}
+.legend i{width:9px;height:9px;border-radius:3px;display:inline-block;margin-right:6px}
+.donut-wrap{display:flex;align-items:center;gap:20px}
+.donut{position:relative;width:132px;height:132px;flex:none}
+.donut svg{transform:rotate(-90deg)}
+.donut .mid{position:absolute;inset:0;display:grid;place-items:center;text-align:center}
+.donut .mid b{font-size:26px;font-weight:800;color:var(--ink);display:block;line-height:1}
+.donut .mid small{font-size:11px;color:var(--muted);font-weight:600}
+.dkey{font-size:13px}
+.dkey li{display:flex;align-items:center;gap:9px;margin-bottom:11px;font-weight:500;color:var(--body)}
+.dkey i{width:10px;height:10px;border-radius:3px;flex:none}
+.dkey b{color:var(--ink);margin-left:auto;padding-left:14px}
+@media(max-width:860px){.panels{grid-template-columns:1fr}}
+
+/* ---------- Mini list rows ---------- */
+.rowlist{margin-top:4px}
+.rowl{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.rowl:last-child{border-bottom:0}
+.avatar{
+  width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none;
+  font-size:12.5px;font-weight:700;color:var(--brand);background:var(--brand-50);
+}
+.avatar.g{color:var(--ok);background:var(--ok-bg)}
+.avatar.w{color:var(--warn);background:var(--warn-bg)}
+.avatar.r{color:var(--bad);background:var(--bad-bg)}
+.rowl .nm{font-weight:600;color:var(--ink)}
+.rowl .mt{font-size:12px;color:var(--muted)}
+.rowl .amt{margin-left:auto;font-weight:700;color:var(--ink);white-space:nowrap}
+
+/* ---------- Badges ---------- */
+.badge{
+  display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;
+  padding:5px 11px;border-radius:999px;letter-spacing:.01em;white-space:nowrap;
+}
+.badge i{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.b-paid{color:var(--ok);background:var(--ok-bg)}
+.b-due{color:var(--warn);background:var(--warn-bg)}
+.b-over{color:var(--bad);background:var(--bad-bg)}
+.b-info{color:var(--brand);background:var(--brand-50)}
+.b-grey{color:var(--muted);background:#F1F4F9}
+
+/* ============================================================
+   Split layout (text + visual)
+   ============================================================ */
+.split{display:grid;grid-template-columns:1fr 1.12fr;gap:56px;align-items:center}
+.split.rev .s-text{order:2}
+.split .s-text .lede{font-size:17px;margin-bottom:24px}
+.tick{display:flex;gap:12px;margin-bottom:14px;align-items:flex-start}
+.tick .ic{width:24px;height:24px;border-radius:7px;background:var(--brand-50);display:grid;place-items:center;flex:none;margin-top:2px}
+.tick b{color:var(--ink);font-weight:600;font-size:15px;display:block}
+.tick p{font-size:14px;color:var(--body);line-height:1.55}
+/* Column-ratio variants. Kept as classes, never inline styles — an inline
+   grid-template-columns would outrank the stacking media query below and the
+   section would stay two-up on a phone. */
+.split.r-a{grid-template-columns:1.05fr .95fr}
+.split.r-b{grid-template-columns:1fr 1.05fr}
+.split.r-c{grid-template-columns:1fr .9fr}
+.split.r-d{grid-template-columns:1fr 1.15fr}
+.split.top{align-items:start}
+.gap-top{margin-top:56px}
+
+@media(max-width:960px){
+  .split,.split.r-a,.split.r-b,.split.r-c,.split.r-d{grid-template-columns:1fr;gap:40px}
+  .split.rev .s-text{order:0}
+  .hero-grid{grid-template-columns:1fr;gap:44px}
+  .hero{padding:48px 0 64px}
+}
+
+/* ============================================================
+   Property hierarchy
+   ============================================================ */
+.hier{display:flex;flex-direction:column;gap:0}
+.h-node{
+  background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;
+  box-shadow:var(--shadow-sm);display:flex;align-items:center;gap:14px;transition:.24s;
+}
+.h-node:hover{border-color:var(--brand-200);box-shadow:var(--shadow);transform:translateX(4px)}
+.h-node .ic{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;flex:none;background:var(--brand-50)}
+.h-node .t{font-weight:700;color:var(--ink);font-size:15.5px}
+.h-node .s{font-size:12.5px;color:var(--muted)}
+.h-node .tag{margin-left:auto}
+.h-line{width:2px;height:20px;background:var(--brand-100);margin-left:39px;border-radius:2px}
+.h-indent-1{margin-left:26px}
+.h-indent-2{margin-left:52px}
+.beds{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-left:52px;margin-top:14px}
+.bed{
+  border:1px solid var(--line);border-radius:14px;padding:14px;background:#fff;
+  display:flex;align-items:center;gap:12px;box-shadow:var(--shadow-sm);transition:.22s;
+}
+.bed:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
+.bed.occ{background:#FBFCFE}
+.bed .ic{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;flex:none}
+.bed.free .ic{background:var(--ok-bg)} .bed.occ .ic{background:#EEF1F6}
+.bed .t{font-weight:700;color:var(--ink);font-size:14.5px;line-height:1.3}
+.bed .s{font-size:12px;color:var(--muted)}
+@media(max-width:560px){
+  .beds{grid-template-columns:1fr;margin-left:20px}
+  .h-indent-1{margin-left:12px}.h-indent-2{margin-left:24px}
+}
+
+/* ============================================================
+   Tenant table
+   ============================================================ */
+.tbl{width:100%;border-collapse:collapse;font-size:13.8px}
+.tbl th{
+  text-align:left;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted);padding:0 14px 12px;border-bottom:1px solid var(--line);white-space:nowrap;
+}
+.tbl td{padding:14px;border-bottom:1px solid var(--line);vertical-align:middle;color:var(--body)}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr{transition:.16s}
+.tbl tbody tr:hover{background:var(--brand-50)}
+.tbl .who{display:flex;align-items:center;gap:11px}
+.tbl .who b{color:var(--ink);font-weight:600;display:block;line-height:1.35}
+.tbl .who span{font-size:12px;color:var(--muted)}
+.tbl .money{font-weight:700;color:var(--ink);white-space:nowrap}
+.tbl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tbl-scroll .tbl{min-width:720px}
+.wa-mini{
+  width:32px;height:32px;border-radius:9px;background:#E8FAF0;display:grid;place-items:center;
+  transition:.2s;cursor:pointer;border:1px solid #CFF0DE;
+}
+.wa-mini:hover{background:var(--wa);transform:scale(1.08)}
+.wa-mini:hover svg path{fill:#fff}
+
+/* ---------- Tenant cards (mobile) ---------- */
+.tcards{display:none;gap:12px;flex-direction:column}
+.tcard{border:1px solid var(--line);border-radius:14px;padding:15px}
+.tcard .top{display:flex;align-items:center;gap:11px;margin-bottom:12px}
+.tcard .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px}
+.tcard .grid small{display:block;color:var(--muted);font-size:11.5px;font-weight:600}
+.tcard .grid b{color:var(--ink);font-weight:600}
+@media(max-width:700px){ .tbl-scroll{display:none} .tcards{display:flex} }
+
+/* ============================================================
+   Rent cycle
+   ============================================================ */
+.cycle{display:flex;align-items:center;justify-content:space-between;gap:0;flex-wrap:nowrap;overflow-x:auto;padding:6px 0 14px}
+.cy{
+  flex:1 1 0;min-width:132px;text-align:center;background:#fff;border:1px solid var(--line);
+  border-radius:14px;padding:20px 12px;box-shadow:var(--shadow-sm);transition:.25s;
+}
+.cy:hover{transform:translateY(-5px);border-color:var(--brand-200);box-shadow:var(--shadow)}
+.cy .ic{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;margin:0 auto 11px;background:var(--brand-50)}
+.cy b{display:block;font-size:14px;color:var(--ink)}
+.cy small{font-size:12px;color:var(--muted)}
+.cy-arrow{flex:0 0 28px;display:grid;place-items:center;color:var(--brand-200)}
+@media(max-width:820px){
+  .cycle{flex-direction:column}
+  .cy{width:100%}
+  .cy-arrow{padding:5px 0}
+  .cy-arrow svg{transform:rotate(90deg)}
+}
+.inv-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:44px}
+.inv{
+  background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:20px;
+  box-shadow:var(--shadow-sm);transition:.25s;position:relative;overflow:hidden;
+}
+.inv::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--line)}
+.inv.paid::before{background:var(--ok)}
+.inv.due::before{background:var(--warn)}
+.inv.over::before{background:var(--bad)}
+.inv:hover{transform:translateY(-6px);box-shadow:var(--shadow)}
+.inv .ih{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px}
+.inv .num{font-size:11.5px;color:var(--muted);font-weight:600;letter-spacing:.04em}
+.inv .ttl{font-size:16.5px;font-weight:700;color:var(--ink);margin-top:2px}
+.inv .amt{font-size:29px;font-weight:800;color:var(--ink);letter-spacing:-.035em;margin-bottom:4px}
+.inv .meta{font-size:13px;color:var(--muted);margin-bottom:16px}
+.inv .foot{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding-top:14px}
+.inv .who2{font-size:13px;color:var(--body);font-weight:500}
+.inv .who2 b{color:var(--ink);display:block;font-weight:600}
+@media(max-width:900px){.inv-grid{grid-template-columns:1fr}}
+
+/* ============================================================
+   WhatsApp
+   ============================================================ */
+.wa-sec{background:linear-gradient(180deg,#F6FBF8 0%, #FFFFFF 100%)}
+.wa-steps .num{
+  width:28px;height:28px;border-radius:9px;background:var(--wa);color:#fff;display:grid;place-items:center;
+  font-size:13px;font-weight:800;flex:none;margin-top:1px;box-shadow:0 8px 16px -8px rgba(37,211,102,.9)
+}
+.wa-note{
+  margin-top:26px;background:#fff;border:1px solid #D9EFE3;border-left:4px solid var(--wa);
+  border-radius:12px;padding:16px 18px;font-size:14px;display:flex;gap:12px;align-items:flex-start;
+  box-shadow:var(--shadow-sm)
+}
+.wa-note b{color:var(--ink)}
+.phone-stage{display:flex;justify-content:center;position:relative}
+.phone{
+  width:308px;background:#101820;border-radius:40px;padding:11px;
+  box-shadow:0 50px 90px -40px rgba(15,27,51,.55), 0 0 0 1px rgba(15,27,51,.08);
+  position:relative;
+}
+.phone .notch{
+  position:absolute;top:11px;left:50%;transform:translateX(-50%);
+  width:110px;height:23px;background:#101820;border-radius:0 0 14px 14px;z-index:3;
+}
+.screen{background:#ECE5DD;border-radius:31px;overflow:hidden;position:relative}
+.wa-top{background:var(--wa-dark);padding:32px 14px 12px;display:flex;align-items:center;gap:11px;color:#fff}
+.wa-top .pic{width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.22);display:grid;place-items:center;font-weight:700;font-size:13px;flex:none}
+.wa-top b{font-size:14.5px;display:block;line-height:1.25;color:#fff;font-weight:600}
+.wa-top small{font-size:11px;opacity:.78}
+.wa-chat{
+  padding:16px 12px 14px;min-height:352px;display:flex;flex-direction:column;gap:10px;justify-content:flex-end;
+  background-color:#ECE5DD;
+  background-image:radial-gradient(rgba(0,0,0,.035) 1px, transparent 1px);
+  background-size:16px 16px;
+}
+.wa-date{align-self:center;background:rgba(255,255,255,.75);color:#5A6570;font-size:10.5px;font-weight:600;padding:4px 11px;border-radius:8px}
+.bubble{
+  background:#fff;border-radius:10px 10px 10px 2px;padding:9px 12px;font-size:13.2px;color:#111B21;line-height:1.5;
+  max-width:88%;box-shadow:0 1px 1px rgba(0,0,0,.09);align-self:flex-start;
+}
+.bubble.out{background:#D9FDD3;border-radius:10px 10px 2px 10px;align-self:flex-end}
+.bubble .time{display:block;text-align:right;font-size:10px;color:#667781;margin-top:3px}
+.bubble .time .ticks{color:#53BDEB;font-weight:700;margin-left:3px}
+.bubble.pending{opacity:0;transform:translateY(10px);transition:.45s ease}
+.bubble.pending.show{opacity:1;transform:none}
+.wa-input{background:#F0F2F5;padding:9px 12px;display:flex;align-items:center;gap:9px}
+.wa-input .fake{flex:1;background:#fff;border-radius:18px;padding:8px 14px;font-size:12.5px;color:#8696A0}
+.wa-input .send{width:34px;height:34px;border-radius:50%;background:var(--wa);display:grid;place-items:center;flex:none}
+.wa-trigger{
+  display:flex;align-items:center;gap:14px;background:#fff;border:1px solid var(--line);
+  border-radius:14px;padding:14px 16px;box-shadow:var(--shadow);margin-bottom:22px;
+}
+.wa-trigger .who3 b{display:block;color:var(--ink);font-size:14.5px;font-weight:600;line-height:1.3}
+.wa-trigger .who3 small{font-size:12.5px;color:var(--muted)}
+.btn-wa{
+  margin-left:auto;background:var(--wa);color:#fff;border:0;border-radius:11px;padding:11px 18px;
+  font-weight:600;font-size:14px;display:inline-flex;align-items:center;gap:9px;cursor:pointer;
+  font-family:inherit;transition:.22s;box-shadow:0 10px 22px -10px rgba(37,211,102,.95);white-space:nowrap;
+}
+.btn-wa:hover{background:#1FBE5B;transform:translateY(-2px)}
+.btn-wa:disabled{opacity:.55;cursor:default;transform:none}
+@media(max-width:420px){
+  .phone{width:100%;max-width:308px}
+  .wa-trigger{flex-wrap:wrap}
+  .btn-wa{margin-left:0;width:100%;justify-content:center}
+}
+
+/* ============================================================
+   Payments
+   ============================================================ */
+.pay-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:32px}
+.pay{
+  background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:22px;
+  box-shadow:var(--shadow-sm);transition:.25s;
+}
+.pay:hover{transform:translateY(-5px);box-shadow:var(--shadow);border-color:var(--brand-200)}
+.pay .ic{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;margin-bottom:14px}
+.pay .lab{font-size:13px;color:var(--muted);font-weight:600;margin-bottom:6px}
+.pay .val{font-size:28px;font-weight:800;color:var(--ink);letter-spacing:-.035em;line-height:1.1}
+.pay .delta{font-size:12.5px;font-weight:600;margin-top:7px;display:flex;align-items:center;gap:5px}
+@media(max-width:960px){.pay-cards{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:480px){.pay-cards{grid-template-columns:1fr}}
+
+/* ============================================================
+   Reports
+   ============================================================ */
+.rep-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.rep{
+  background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:20px;
+  display:flex;align-items:flex-start;gap:14px;box-shadow:var(--shadow-sm);transition:.25s;cursor:default;
+}
+.rep:hover{transform:translateY(-5px);box-shadow:var(--shadow);border-color:var(--brand-200)}
+.rep .ic{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;flex:none}
+.rep b{display:block;color:var(--ink);font-size:15px;margin-bottom:3px}
+.rep p{font-size:13px;color:var(--muted);line-height:1.5}
+.rep .dl{margin-left:auto;color:var(--brand);flex:none;opacity:.35;transition:.2s}
+.rep:hover .dl{opacity:1;transform:translateY(2px)}
+.rep-grid.two{grid-template-columns:1fr 1fr}
+@media(max-width:900px){.rep-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.rep-grid,.rep-grid.two{grid-template-columns:1fr}}
+
+.paper{
+  background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);
+  padding:26px;font-size:13px;
+}
+.paper .ph{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid var(--ink);padding-bottom:14px;margin-bottom:16px;gap:14px;flex-wrap:wrap}
+.paper .ph h6{margin:0;font-size:16px;color:var(--ink);font-weight:800;letter-spacing:-.02em}
+.paper .ph small{color:var(--muted);font-size:12px}
+.paper .sumstrip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}
+.paper .sumstrip div{background:var(--soft);border-radius:10px;padding:11px 12px}
+.paper .sumstrip small{display:block;font-size:10.5px;color:var(--muted);font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+.paper .sumstrip b{font-size:15.5px;color:var(--ink)}
+.paper-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.paper-scroll .tbl{min-width:400px}
+@media(max-width:600px){.paper .sumstrip{grid-template-columns:1fr 1fr}.paper{padding:20px}}
+
+/* ============================================================
+   Benefits / steps
+   ============================================================ */
+.ben-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.ben{
+  background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:26px;
+  box-shadow:var(--shadow-sm);transition:.28s;
+}
+.ben:hover{transform:translateY(-6px);box-shadow:var(--shadow);border-color:var(--brand-200)}
+.ben .ic{width:50px;height:50px;border-radius:15px;display:grid;place-items:center;margin-bottom:16px}
+.ben h4{font-size:17px;margin-bottom:8px}
+.ben p{font-size:14.2px;line-height:1.6}
+@media(max-width:900px){.ben-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:600px){.ben-grid{grid-template-columns:1fr}}
+
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:22px;position:relative}
+.step{position:relative;padding-top:8px}
+.step .n{
+  font-size:46px;font-weight:800;color:var(--brand-100);letter-spacing:-.05em;line-height:1;margin-bottom:14px;
+  transition:.3s;
+}
+.step:hover .n{color:var(--brand)}
+.step .ic{width:52px;height:52px;border-radius:15px;background:#fff;border:1px solid var(--line);display:grid;place-items:center;margin-bottom:16px;box-shadow:var(--shadow-sm)}
+.step h4{font-size:17px;margin-bottom:7px}
+.step p{font-size:14px}
+@media(max-width:900px){.steps{grid-template-columns:1fr 1fr;gap:28px}}
+@media(max-width:520px){.steps{grid-template-columns:1fr}}
+
+/* ============================================================
+   CTA + footer
+   ============================================================ */
+.cta{
+  background:linear-gradient(135deg,#1D4ED8 0%, #2563EB 55%, #3B82F6 100%);
+  border-radius:26px;padding:64px 40px;text-align:center;color:#fff;position:relative;overflow:hidden;
+}
+.cta::before{content:'';position:absolute;width:420px;height:420px;border-radius:50%;background:rgba(255,255,255,.08);top:-190px;right:-120px}
+.cta::after{content:'';position:absolute;width:320px;height:320px;border-radius:50%;background:rgba(255,255,255,.07);bottom:-180px;left:-90px}
+.cta h2{color:#fff;font-size:clamp(28px,4vw,44px);font-weight:800;margin-bottom:16px;position:relative}
+.cta p{color:rgba(255,255,255,.9);font-size:18px;max-width:560px;margin:0 auto 32px;position:relative}
+.cta .btn{position:relative}
+.cta-badges{display:flex;gap:26px;justify-content:center;flex-wrap:wrap;margin-top:30px;position:relative}
+.cta-badges span{font-size:13.5px;color:rgba(255,255,255,.86);display:flex;align-items:center;gap:8px;font-weight:500}
+@media(max-width:600px){.cta{padding:48px 22px;border-radius:20px}}
+
+footer{border-top:1px solid var(--line);padding:40px 0;margin-top:0}
+.foot{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.foot p{font-size:13.5px;color:var(--muted)}
+.foot-links{display:flex;gap:22px;font-size:13.5px;color:var(--muted);font-weight:500}
+.foot-links a:hover{color:var(--brand)}
+
+/* ============================================================
+   Timeline — move-in / move-out journey
+   ============================================================ */
+.tl-item{display:flex;gap:18px;position:relative;padding-bottom:24px}
+.tl-item:last-child{padding-bottom:0}
+.tl-item::before{content:'';position:absolute;left:21px;top:50px;bottom:0;width:2px;background:var(--brand-100)}
+.tl-item:last-child::before{display:none}
+.tl-dot{
+  width:44px;height:44px;border-radius:13px;background:#fff;border:1px solid var(--line);
+  display:grid;place-items:center;flex:none;box-shadow:var(--shadow-sm);z-index:1;
+}
+.tl-body{padding-top:2px}
+.tl-body b{display:block;color:var(--ink);font-size:16px;margin-bottom:4px}
+.tl-body p{font-size:14px;line-height:1.55}
+.tl-body .badge{margin-top:9px}
+
+/* ---------- QR self check-in ---------- */
+.qr-card{
+  background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:24px;text-align:center;
+  box-shadow:var(--shadow);max-width:290px;
+}
+.qr{width:150px;height:150px;margin:0 auto 16px;display:grid;grid-template-columns:repeat(25,1fr);gap:0}
+.qr i{background:transparent}
+.qr i.on{background:var(--ink)}
+.qr-card b{display:block;color:var(--ink);font-size:15px;margin-bottom:4px}
+.qr-card p{font-size:12.8px;color:var(--muted);line-height:1.5}
+
+/* ============================================================
+   Expenses / staff / P&L
+   ============================================================ */
+.cats{display:flex;flex-wrap:wrap;gap:8px}
+.cat{
+  display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--ink);
+  background:#fff;border:1px solid var(--line);border-radius:999px;padding:7px 13px;transition:.2s;
+}
+.cat:hover{border-color:var(--brand-200);transform:translateY(-2px)}
+.cat i{width:8px;height:8px;border-radius:50%;flex:none}
+.cat span{color:var(--muted);font-weight:500}
+
+.prog{height:7px;background:#EEF1F6;border-radius:5px;overflow:hidden;margin-top:8px}
+.prog i{display:block;height:100%;border-radius:5px;background:var(--brand);width:0;transition:width 1.1s cubic-bezier(.16,.84,.44,1)}
+.prog i.warn{background:var(--warn)} .prog i.bad{background:var(--bad)}
+.bud{margin-bottom:16px}
+.bud:last-child{margin-bottom:0}
+.bud .bl{display:flex;justify-content:space-between;align-items:baseline;font-size:13.5px}
+.bud .bl b{color:var(--ink);font-weight:600}
+.bud .bl span{font-size:12.5px;color:var(--muted);font-weight:600}
+
+.pl{font-size:14px}
+.pl .r{display:flex;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--line)}
+.pl .r:last-child{border-bottom:0}
+.pl .r b{color:var(--ink);font-weight:600}
+.pl .tot{
+  display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding:15px 18px;
+  background:var(--ok-bg);border-radius:12px;
+}
+.pl .tot span{font-weight:700;color:#0B7A54;font-size:14.5px}
+.pl .tot b{font-size:22px;font-weight:800;color:#0B7A54;letter-spacing:-.03em}
+
+/* ============================================================
+   Tenant app (purple, matches the real tenant portal theme)
+   ============================================================ */
+.tphone{
+  width:302px;background:#1B1230;border-radius:40px;padding:11px;position:relative;
+  box-shadow:0 50px 90px -40px rgba(60,20,120,.5), 0 0 0 1px rgba(15,27,51,.08);
+}
+.tphone .notch{background:#1B1230}
+.tscreen{background:#FAF8FF;border-radius:31px;overflow:hidden}
+.t-top{background:linear-gradient(140deg,#6D28D9 0%,#7C3AED 60%,#8B5CF6 100%);color:#fff;padding:34px 18px 20px}
+.t-top .hi{font-size:12.5px;opacity:.85}
+.t-top .nm{font-size:18px;font-weight:700;letter-spacing:-.02em;line-height:1.3}
+.t-top .rm{font-size:12px;opacity:.85;margin-top:2px}
+.t-due{
+  background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.24);border-radius:14px;
+  padding:13px 15px;margin-top:16px;backdrop-filter:blur(4px);
+}
+.t-due small{font-size:11px;opacity:.9;font-weight:600;letter-spacing:.03em}
+.t-due b{display:block;font-size:25px;font-weight:800;letter-spacing:-.03em;line-height:1.2;margin:2px 0 1px}
+.t-due em{font-style:normal;font-size:11.5px;opacity:.9}
+.t-body{padding:16px 14px 8px}
+.t-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:14px}
+.t-tile{background:#fff;border:1px solid #EDE7FA;border-radius:13px;padding:12px;box-shadow:0 1px 2px rgba(80,40,140,.05)}
+.t-tile .ic{width:30px;height:30px;border-radius:9px;background:#F3EDFF;display:grid;place-items:center;margin-bottom:8px}
+.t-tile b{display:block;font-size:12.8px;color:var(--ink);font-weight:600;line-height:1.3}
+.t-tile small{font-size:10.8px;color:var(--muted)}
+.t-sec{font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#8B7BA8;margin:0 0 9px 2px}
+.t-row{
+  background:#fff;border:1px solid #EDE7FA;border-radius:12px;padding:11px 12px;margin-bottom:8px;
+  display:flex;align-items:center;gap:10px;
+}
+.t-row .dt{width:7px;height:7px;border-radius:50%;flex:none}
+.t-row b{font-size:12.6px;color:var(--ink);font-weight:600;display:block;line-height:1.35}
+.t-row small{font-size:10.8px;color:var(--muted)}
+.t-row .rt{margin-left:auto;font-size:11.5px;font-weight:700;color:var(--ink);white-space:nowrap}
+.t-nav{display:flex;background:#fff;border-top:1px solid #EDE7FA;padding:8px 4px 12px}
+.t-nav div{flex:1;text-align:center;font-size:9.8px;font-weight:600;color:#A99CC0}
+.t-nav div.on{color:#7C3AED}
+.t-nav div svg{margin:0 auto 3px}
+
+/* ============================================================
+   Complaint board
+   ============================================================ */
+.board{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.bcol{background:var(--soft);border:1px solid var(--line);border-radius:15px;padding:14px}
+.bcol .bh{display:flex;align-items:center;gap:8px;margin-bottom:13px;font-size:12.5px;font-weight:700;color:var(--ink)}
+.bcol .bh i{width:8px;height:8px;border-radius:50%;flex:none}
+.bcol .bh span{margin-left:auto;font-size:11px;font-weight:700;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:999px;padding:2px 8px}
+.ticket{
+  background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:9px;
+  box-shadow:var(--shadow-sm);transition:.22s;
+}
+.ticket:last-child{margin-bottom:0}
+.ticket:hover{transform:translateY(-3px);box-shadow:var(--shadow);border-color:var(--brand-200)}
+.ticket .tt{font-size:13.5px;font-weight:600;color:var(--ink);line-height:1.35;margin-bottom:6px}
+.ticket .tm{font-size:11.8px;color:var(--muted);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ticket .tf{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:9px;border-top:1px solid var(--line)}
+.ticket .tf .avatar{width:24px;height:24px;border-radius:7px;font-size:10px}
+.ticket .tf small{font-size:11.5px;color:var(--muted);font-weight:500}
+@media(max-width:820px){.board{grid-template-columns:1fr}}
+
+/* ---------- Notice cards ---------- */
+.notice{
+  background:#fff;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:12px;
+  padding:16px 18px;margin-bottom:12px;box-shadow:var(--shadow-sm);transition:.22s;
+}
+.notice:hover{transform:translateX(4px);box-shadow:var(--shadow)}
+.notice.warn{border-left-color:var(--warn)} .notice.bad{border-left-color:var(--bad)}
+.notice .nh{display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap}
+.notice .nh b{font-size:15px;color:var(--ink)}
+.notice p{font-size:13.5px;line-height:1.55}
+.notice .nf{font-size:12px;color:var(--muted);margin-top:9px;display:flex;align-items:center;gap:7px}
+
+/* ============================================================
+   Roles / access
+   ============================================================ */
+.roles{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.role{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:24px;box-shadow:var(--shadow-sm);transition:.26s}
+.role:hover{transform:translateY(-5px);box-shadow:var(--shadow);border-color:var(--brand-200)}
+.role .ic{width:48px;height:48px;border-radius:14px;display:grid;place-items:center;margin-bottom:15px}
+.role h4{font-size:17px;margin-bottom:5px}
+.role .sub{font-size:13px;color:var(--muted);margin-bottom:16px}
+.role ul li{display:flex;align-items:flex-start;gap:9px;font-size:13.5px;padding:5px 0;line-height:1.5}
+.role ul li svg{flex:none;margin-top:3px}
+.role ul li.no{color:var(--muted)}
+@media(max-width:900px){.roles{grid-template-columns:1fr}}
+
+/* ============================================================
+   Mini feature grid ("also included")
+   ============================================================ */
+.mini-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.mini{
+  background:#fff;border:1px solid var(--line);border-radius:15px;padding:19px;
+  box-shadow:var(--shadow-sm);transition:.25s;
+}
+.mini:hover{transform:translateY(-5px);box-shadow:var(--shadow);border-color:var(--brand-200)}
+.mini .ic{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;margin-bottom:13px}
+.mini b{display:block;color:var(--ink);font-size:14.5px;margin-bottom:5px;line-height:1.3}
+.mini p{font-size:12.8px;color:var(--muted);line-height:1.55}
+@media(max-width:980px){.mini-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:520px){.mini-grid{grid-template-columns:1fr}}
+
+/* ============================================================
+   Reveal animation
+   ============================================================ */
+.rv{opacity:0;transform:translateY(26px);transition:opacity .7s cubic-bezier(.16,.84,.44,1), transform .7s cubic-bezier(.16,.84,.44,1)}
+.rv.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){
+  .rv{opacity:1;transform:none;transition:none}
+  *{animation:none!important}
+  html{scroll-behavior:auto}
+}
+
+@media(max-width:980px){
+  .nav-links{display:none}
+  .nav-cta .btn{display:none}
+  .burger{display:flex}
+  section{padding:70px 0}
+}
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     HEADER
+     ============================================================ -->
+<header id="hdr">
+  <div class="wrap">
+    <nav class="nav">
+      <a href="#top" class="brand">
+        <span class="mark">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z" fill="#fff"/>
+          </svg>
+        </span>
+        PG Manager
+      </a>
+      <div class="nav-links">
+        <a href="#dashboard">Dashboard</a>
+        <a href="#property">Rooms</a>
+        <a href="#tenants">Tenants</a>
+        <a href="#rent">Rent</a>
+        <a href="#whatsapp">Reminders</a>
+        <a href="#expenses">Expenses</a>
+        <a href="#tenantapp">Tenant App</a>
+        <a href="#complaints">Complaints</a>
+        <a href="#reports">Reports</a>
+      </div>
+      <div class="nav-cta">
+        <a href="#cta" class="btn btn-primary" style="padding:11px 22px;font-size:14.5px">Get Started</a>
+        <button class="burger" id="burger" aria-label="Open menu" aria-expanded="false"><span></span></button>
+      </div>
+    </nav>
+  </div>
+  <div class="mobile-menu" id="mobileMenu">
+    <a href="#overview">Overview</a>
+    <a href="#dashboard">Dashboard</a>
+    <a href="#property">Rooms &amp; Beds</a>
+    <a href="#tenants">Tenants</a>
+    <a href="#movein">Joining &amp; Leaving</a>
+    <a href="#rent">Rent &amp; Invoices</a>
+    <a href="#whatsapp">WhatsApp Reminders</a>
+    <a href="#payments">Payments</a>
+    <a href="#expenses">Expenses &amp; Staff</a>
+    <a href="#tenantapp">Tenant App</a>
+    <a href="#complaints">Complaints &amp; Notices</a>
+    <a href="#reports">Reports</a>
+    <a href="#access">Owner &amp; Staff Access</a>
+    <a href="#more">Also Included</a>
+    <a href="#cta" class="btn btn-primary">Get Started</a>
+  </div>
+</header>
+
+<!-- ============================================================
+     1. HERO
+     IMAGE SLOT A — inline SVG illustration: a modern PG / hostel
+     building with residents, in the brand palette.
+     ============================================================ -->
+<section class="hero" id="top">
+  <div class="wrap">
+    <div class="hero-grid">
+      <div class="rv">
+        <span class="eyebrow"><span class="dot"></span> PG &amp; Hostel Management</span>
+        <h1>Manage Your PG.<br><span class="accent">Simple. Smart. Complete.</span></h1>
+        <p class="lede">Manage tenants, rooms, rent, payments and daily PG operations from one simple application.</p>
+        <div class="hero-actions">
+          <a href="#dashboard" class="btn btn-primary btn-lg">
+            Explore Features
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M5 12h14m0 0-5.5-5.5M19 12l-5.5 5.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </a>
+          <a href="#how" class="btn btn-ghost btn-lg">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M10 8.5v7l6-3.5-6-3.5Z" fill="currentColor"/></svg>
+            See How It Works
+          </a>
+        </div>
+        <div class="trust">
+          <span class="check">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#0E9F6E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          Everything you need to run your PG efficiently.
+        </div>
+      </div>
+
+      <div class="hero-visual rv">
+        <!-- IMAGE SLOT A: Modern PG / hostel building illustration -->
+        <svg viewBox="0 0 560 460" role="img" aria-label="Illustration of a modern PG building">
+          <defs>
+            <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#EFF4FF"/><stop offset="1" stop-color="#F7FAFF"/>
+            </linearGradient>
+            <linearGradient id="bld" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F2F6FD"/>
+            </linearGradient>
+            <linearGradient id="bldB" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#2563EB"/><stop offset="1" stop-color="#1D4ED8"/>
+            </linearGradient>
+            <linearGradient id="win" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#BFD5FF"/><stop offset="1" stop-color="#E3EBFB"/>
+            </linearGradient>
+          </defs>
+
+          <!-- backdrop -->
+          <rect x="34" y="14" width="492" height="392" rx="30" fill="url(#sky)"/>
+          <circle cx="452" cy="92" r="40" fill="#FFF1D6"/>
+          <circle cx="452" cy="92" r="26" fill="#FFE0A8"/>
+
+          <!-- side wing -->
+          <rect x="76" y="176" width="112" height="196" rx="10" fill="url(#bld)" stroke="#DCE5F4" stroke-width="2"/>
+          <g fill="url(#win)">
+            <rect x="94" y="196" width="30" height="26" rx="5"/><rect x="140" y="196" width="30" height="26" rx="5"/>
+            <rect x="94" y="238" width="30" height="26" rx="5"/><rect x="140" y="238" width="30" height="26" rx="5"/>
+            <rect x="94" y="280" width="30" height="26" rx="5"/><rect x="140" y="280" width="30" height="26" rx="5"/>
+          </g>
+          <rect x="112" y="322" width="40" height="50" rx="6" fill="#DCE5F4"/>
+
+          <!-- main tower -->
+          <rect x="196" y="104" width="180" height="268" rx="12" fill="url(#bld)" stroke="#DCE5F4" stroke-width="2"/>
+          <rect x="196" y="104" width="180" height="34" rx="12" fill="url(#bldB)"/>
+          <rect x="196" y="126" width="180" height="12" fill="#1D4ED8"/>
+          <text x="286" y="127" text-anchor="middle" font-family="Inter,sans-serif" font-size="14" font-weight="700" fill="#fff">SUNRISE PG</text>
+
+          <!-- window grid with lit rooms -->
+          <g>
+            <rect x="216" y="156" width="42" height="34" rx="6" fill="url(#win)"/>
+            <rect x="266" y="156" width="42" height="34" rx="6" fill="#FFE9BC"/>
+            <rect x="316" y="156" width="42" height="34" rx="6" fill="url(#win)"/>
+
+            <rect x="216" y="202" width="42" height="34" rx="6" fill="#FFE9BC"/>
+            <rect x="266" y="202" width="42" height="34" rx="6" fill="url(#win)"/>
+            <rect x="316" y="202" width="42" height="34" rx="6" fill="url(#win)"/>
+
+            <rect x="216" y="248" width="42" height="34" rx="6" fill="url(#win)"/>
+            <rect x="266" y="248" width="42" height="34" rx="6" fill="url(#win)"/>
+            <rect x="316" y="248" width="42" height="34" rx="6" fill="#FFE9BC"/>
+
+            <rect x="216" y="294" width="42" height="34" rx="6" fill="url(#win)"/>
+            <rect x="266" y="294" width="42" height="34" rx="6" fill="url(#win)"/>
+            <rect x="316" y="294" width="42" height="34" rx="6" fill="url(#win)"/>
+          </g>
+          <!-- entrance -->
+          <rect x="258" y="338" width="58" height="34" rx="6" fill="#2563EB" opacity=".16"/>
+          <rect x="266" y="344" width="42" height="28" rx="4" fill="#1D4ED8" opacity=".55"/>
+
+          <!-- right wing -->
+          <rect x="384" y="204" width="98" height="168" rx="10" fill="url(#bld)" stroke="#DCE5F4" stroke-width="2"/>
+          <g fill="url(#win)">
+            <rect x="400" y="224" width="28" height="24" rx="5"/><rect x="438" y="224" width="28" height="24" rx="5"/>
+            <rect x="400" y="262" width="28" height="24" rx="5"/><rect x="438" y="262" width="28" height="24" rx="5"/>
+            <rect x="400" y="300" width="28" height="24" rx="5"/><rect x="438" y="300" width="28" height="24" rx="5"/>
+          </g>
+
+          <!-- greenery + ground -->
+          <rect x="34" y="372" width="492" height="16" rx="8" fill="#E4EAF4"/>
+          <g>
+            <rect x="56" y="336" width="8" height="38" rx="4" fill="#B9C6DA"/>
+            <circle cx="60" cy="326" r="22" fill="#CFE8D8"/><circle cx="60" cy="326" r="14" fill="#B7DDC6"/>
+            <rect x="498" y="340" width="8" height="34" rx="4" fill="#B9C6DA"/>
+            <circle cx="502" cy="332" r="19" fill="#CFE8D8"/><circle cx="502" cy="332" r="12" fill="#B7DDC6"/>
+          </g>
+          <!-- residents -->
+          <g>
+            <circle cx="204" cy="346" r="9" fill="#2563EB"/><rect x="196" y="356" width="16" height="18" rx="8" fill="#2563EB" opacity=".82"/>
+            <circle cx="228" cy="350" r="8" fill="#0E9F6E"/><rect x="221" y="359" width="14" height="15" rx="7" fill="#0E9F6E" opacity=".82"/>
+            <circle cx="352" cy="348" r="9" fill="#D97706"/><rect x="344" y="358" width="16" height="16" rx="8" fill="#D97706" opacity=".82"/>
+          </g>
+        </svg>
+
+        <div class="float-chip chip-a">
+          <span class="ic" style="background:var(--ok-bg)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 17V9a2 2 0 0 1 2-2h6v10M3 17h18M21 17v-4a2 2 0 0 0-2-2h-8" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.5" cy="12" r="1.6" fill="#0E9F6E"/></svg>
+          </span>
+          <div>24 Beds Available<small>Updated just now</small></div>
+        </div>
+
+        <div class="float-chip chip-b">
+          <span class="ic" style="background:var(--brand-50)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 7h16v12H4zM4 11h16" stroke="#2563EB" stroke-width="2" stroke-linejoin="round"/><path d="M8 4v3M16 4v3" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg>
+          </span>
+          <div>&#8377;4,80,000<small>Collected this month</small></div>
+        </div>
+
+        <div class="float-chip chip-c">
+          <span class="ic" style="background:#E8FAF0">
+            <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#25D366" d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01c5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2Zm5.8 14.16c-.25.69-1.44 1.32-1.98 1.36-.53.05-1.02.24-3.45-.72-2.91-1.15-4.75-4.13-4.9-4.32-.14-.19-1.17-1.55-1.17-2.96s.74-2.1 1-2.39c.26-.29.57-.36.76-.36l.55.01c.17.01.41-.07.64.49.25.6.83 2.07.9 2.22.07.14.12.31.02.5-.09.19-.14.31-.28.48l-.42.49c-.14.14-.28.29-.12.57.16.29.71 1.17 1.53 1.9 1.05.94 1.94 1.23 2.22 1.37.28.14.44.12.6-.07.17-.19.69-.8.87-1.08.19-.29.37-.24.62-.14.26.09 1.63.77 1.91.91.28.14.47.21.53.33.07.12.07.69-.18 1.38Z"/></svg>
+          </span>
+          <div>Reminder Ready<small>Rahul &middot; Room 204</small></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     2. QUICK OVERVIEW
+     ============================================================ -->
+<section class="soft" id="overview">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="eyebrow"><span class="dot"></span> Quick Overview</span>
+      <h2 class="title">Everything Connected, End to End</h2>
+      <p class="lede">From your properties down to every rupee collected — one simple flow that mirrors how your PG already works.</p>
+    </div>
+
+    <div class="journey rv">
+      <div class="j-step">
+        <span class="ic">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.6" stroke="#2563EB" stroke-width="2"/><path d="M4.5 20c0-3.6 3.4-6 7.5-6s7.5 2.4 7.5 6" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg>
+        </span>
+        <h4>PG Owner</h4>
+        <p>You, in full control</p>
+      </div>
+      <div class="j-arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 12h14m0 0-5-5m5 5-5 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+      <div class="j-step">
+        <span class="ic">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M3 21h18M5 21V7l7-4 7 4v14" stroke="#2563EB" stroke-width="2" stroke-linejoin="round"/><path d="M10 21v-5h4v5" stroke="#2563EB" stroke-width="2" stroke-linejoin="round"/></svg>
+        </span>
+        <h4>Properties</h4>
+        <p>All your PGs in one list</p>
+      </div>
+      <div class="j-arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 12h14m0 0-5-5m5 5-5 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+      <div class="j-step">
+        <span class="ic">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M3 18V9a2 2 0 0 1 2-2h5v9M3 18h18M21 18v-4a2 2 0 0 0-2-2h-9" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.8" cy="11.5" r="1.7" fill="#2563EB"/></svg>
+        </span>
+        <h4>Rooms &amp; Beds</h4>
+        <p>Floors, rooms, every bed</p>
+      </div>
+      <div class="j-arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 12h14m0 0-5-5m5 5-5 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+      <div class="j-step">
+        <span class="ic">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3.4" stroke="#2563EB" stroke-width="2"/><path d="M2.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/><path d="M17 8.5h4.5M19.25 6.25v4.5" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg>
+        </span>
+        <h4>Tenants</h4>
+        <p>Who stays where</p>
+      </div>
+      <div class="j-arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 12h14m0 0-5-5m5 5-5 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+      <div class="j-step">
+        <span class="ic">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="2.5" y="6" width="19" height="12.5" rx="2.5" stroke="#2563EB" stroke-width="2"/><path d="M2.5 10h19" stroke="#2563EB" stroke-width="2"/><path d="M6.5 14.5h4" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg>
+        </span>
+        <h4>Rent &amp; Payments</h4>
+        <p>Invoices and collection</p>
+      </div>
+      <div class="j-arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 12h14m0 0-5-5m5 5-5 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+      <div class="j-step">
+        <span class="ic">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M4 20V11M10 20V5M16 20v-6M22 20H2" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg>
+        </span>
+        <h4>Reports</h4>
+        <p>Clear monthly picture</p>
+      </div>
+    </div>
+
+    <div class="rv" style="margin-top:40px;text-align:center">
+      <p style="font-size:13px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-bottom:16px">
+        Working alongside, all the time
+      </p>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
+        <a href="#whatsapp" class="cat" style="padding:10px 17px;font-size:13.5px"><i style="background:#25D366"></i>WhatsApp Reminders</a>
+        <a href="#tenantapp" class="cat" style="padding:10px 17px;font-size:13.5px"><i style="background:#7C3AED"></i>Tenant App</a>
+        <a href="#complaints" class="cat" style="padding:10px 17px;font-size:13.5px"><i style="background:#DC2626"></i>Complaints &amp; Notices</a>
+        <a href="#expenses" class="cat" style="padding:10px 17px;font-size:13.5px"><i style="background:#D97706"></i>Expenses &amp; Staff</a>
+        <a href="#movein" class="cat" style="padding:10px 17px;font-size:13.5px"><i style="background:#0E9F6E"></i>Joining &amp; Leaving</a>
+        <a href="#access" class="cat" style="padding:10px 17px;font-size:13.5px"><i style="background:#2563EB"></i>Manager Logins</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     3. DASHBOARD
+     ============================================================ -->
+<section id="dashboard">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="eyebrow"><span class="dot"></span> Dashboard</span>
+      <h2 class="title">Your Whole PG on One Screen</h2>
+      <p class="lede">Get a quick overview of your entire PG from one dashboard — beds, occupancy, collection and pending rent, updated as things happen.</p>
+    </div>
+
+    <div class="app rv" id="dashApp">
+      <div class="app-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="app-url">PG Manager &mdash; Dashboard</div>
+      </div>
+      <div class="app-body">
+        <aside class="app-side">
+          <p class="s-lab">Menu</p>
+          <div class="s-item active"><span class="sq"></span> Dashboard</div>
+          <div class="s-item"><span class="sq"></span> Properties</div>
+          <div class="s-item"><span class="sq"></span> Rooms &amp; Beds</div>
+          <div class="s-item"><span class="sq"></span> Tenants</div>
+          <div class="s-item"><span class="sq"></span> Rent &amp; Invoices</div>
+          <div class="s-item"><span class="sq"></span> Payments</div>
+          <div class="s-item"><span class="sq"></span> Expenses</div>
+          <div class="s-item"><span class="sq"></span> Staff</div>
+          <div class="s-item"><span class="sq"></span> Complaints</div>
+          <div class="s-item"><span class="sq"></span> Reports</div>
+        </aside>
+
+        <div class="app-main">
+          <div class="app-head">
+            <div>
+              <h4>Good morning, Ramesh</h4>
+              <p>Sunrise PG &middot; August 2026</p>
+            </div>
+            <div class="pill-select">
+              Sunrise PG
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="m6 9 6 6 6-6" stroke="#8C97AB" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+
+          <div class="stats">
+            <div class="stat">
+              <div class="lab"><i style="background:#2563EB"></i> Total Beds</div>
+              <div class="val" data-count="120">0</div>
+              <div class="sub">Across 3 floors</div>
+            </div>
+            <div class="stat">
+              <div class="lab"><i style="background:#8C97AB"></i> Occupied</div>
+              <div class="val" data-count="96">0</div>
+              <div class="sub">80% occupancy</div>
+            </div>
+            <div class="stat good">
+              <div class="lab"><i style="background:#0E9F6E"></i> Available</div>
+              <div class="val" data-count="24">0</div>
+              <div class="sub">Ready to fill</div>
+            </div>
+            <div class="stat">
+              <div class="lab"><i style="background:#2563EB"></i> Monthly Collection</div>
+              <div class="val" data-count="480000" data-money="1">&#8377;0</div>
+              <div class="sub">87% of expected</div>
+            </div>
+            <div class="stat warn">
+              <div class="lab"><i style="background:#D97706"></i> Pending Rent</div>
+              <div class="val" data-count="72000" data-money="1">&#8377;0</div>
+              <div class="sub">9 tenants</div>
+            </div>
+          </div>
+
+          <div class="panels">
+            <div class="panel">
+              <h5>Rent Collection</h5>
+              <p class="psub">Last 6 months</p>
+              <div class="bars" data-bars>
+                <div class="bar-col"><div class="track"><div class="bar" data-h="58"></div></div><span>Mar</span></div>
+                <div class="bar-col"><div class="track"><div class="bar" data-h="66"></div></div><span>Apr</span></div>
+                <div class="bar-col"><div class="track"><div class="bar" data-h="72"></div></div><span>May</span></div>
+                <div class="bar-col"><div class="track"><div class="bar" data-h="64"></div></div><span>Jun</span></div>
+                <div class="bar-col"><div class="track"><div class="bar" data-h="83"></div></div><span>Jul</span></div>
+                <div class="bar-col"><div class="track"><div class="bar" data-h="95"></div></div><span>Aug</span></div>
+              </div>
+              <div class="legend"><span><i style="background:#2563EB"></i>Collected</span><span><i style="background:#DCE6F8"></i>Expected</span></div>
+            </div>
+
+            <div class="panel">
+              <h5>Occupancy</h5>
+              <p class="psub">120 beds in total</p>
+              <div class="donut-wrap">
+                <div class="donut">
+                  <svg width="132" height="132" viewBox="0 0 132 132">
+                    <circle cx="66" cy="66" r="52" fill="none" stroke="#EAF0FB" stroke-width="18"/>
+                    <circle cx="66" cy="66" r="52" fill="none" stroke="#2563EB" stroke-width="18" stroke-linecap="round"
+                            stroke-dasharray="326.7" stroke-dashoffset="326.7" id="donutArc"/>
+                  </svg>
+                  <div class="mid"><b id="occPct">0%</b><small>Occupied</small></div>
+                </div>
+                <ul class="dkey">
+                  <li><i style="background:#2563EB"></i> Occupied <b>96</b></li>
+                  <li><i style="background:#EAF0FB"></i> Available <b>24</b></li>
+                  <li><i style="background:#0E9F6E"></i> Joining soon <b>5</b></li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" style="margin-top:16px">
+            <h5>Recent Payments</h5>
+            <p class="psub">Today</p>
+            <div class="rowlist">
+              <div class="rowl">
+                <span class="avatar g">RK</span>
+                <div><div class="nm">Rahul Kumar</div><div class="mt">Room 204 &middot; Bed B</div></div>
+                <span class="amt">&#8377;8,000</span>
+                <span class="badge b-paid" style="margin-left:14px"><i></i>Paid</span>
+              </div>
+              <div class="rowl">
+                <span class="avatar">SP</span>
+                <div><div class="nm">Sneha Patil</div><div class="mt">Room 105 &middot; Bed A</div></div>
+                <span class="amt">&#8377;7,500</span>
+                <span class="badge b-paid" style="margin-left:14px"><i></i>Paid</span>
+              </div>
+              <div class="rowl">
+                <span class="avatar w">AV</span>
+                <div><div class="nm">Arjun Verma</div><div class="mt">Room 302 &middot; Bed C</div></div>
+                <span class="amt">&#8377;9,000</span>
+                <span class="badge b-due" style="margin-left:14px"><i></i>Due</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     4. PROPERTY & ROOM MANAGEMENT
+     IMAGE SLOT B — the hierarchy card stack doubles as the visual
+     for "room and bed management".
+     ============================================================ -->
+<section class="soft" id="property">
+  <div class="wrap">
+    <div class="split">
+      <div class="s-text rv">
+        <span class="eyebrow"><span class="dot"></span> Property &amp; Rooms</span>
+        <h2 class="title">Manage Multiple PGs With Ease</h2>
+        <p class="lede">Manage multiple PG properties, floors, rooms and beds with ease. Set it up once and always know exactly what is free and what is filled.</p>
+
+        <div class="tick">
+          <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#2563EB" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><b>Add as many PGs as you own</b><p>Each property keeps its own floors, rooms, rent and tenants.</p></div>
+        </div>
+        <div class="tick">
+          <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#2563EB" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><b>Single, double, triple sharing</b><p>Set the rent for each sharing type once — it applies automatically.</p></div>
+        </div>
+        <div class="tick">
+          <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#2563EB" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><b>Bed-level clarity</b><p>See free beds instantly when someone calls asking for a room.</p></div>
+        </div>
+      </div>
+
+      <div class="rv">
+        <div class="hier">
+          <div class="h-node">
+            <span class="ic">
+              <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M3 21h18M5 21V7l7-4 7 4v14" stroke="#2563EB" stroke-width="2" stroke-linejoin="round"/><path d="M10 21v-5h4v5" stroke="#2563EB" stroke-width="2" stroke-linejoin="round"/></svg>
+            </span>
+            <div><div class="t">Sunrise PG</div><div class="s">Property &middot; Kondapur, Hyderabad</div></div>
+            <span class="badge b-info tag"><i></i>3 Floors</span>
+          </div>
+          <div class="h-line"></div>
+
+          <div class="h-node h-indent-1">
+            <span class="ic" style="background:#EEF1F6">
+              <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M4 20h16M4 20V9l8-5 8 5v11" stroke="#546076" stroke-width="2" stroke-linejoin="round"/><path d="M4 14h16" stroke="#546076" stroke-width="2"/></svg>
+            </span>
+            <div><div class="t">Floor 1</div><div class="s">8 rooms &middot; 24 beds</div></div>
+            <span class="badge b-grey tag"><i></i>Floor</span>
+          </div>
+          <div class="h-line" style="margin-left:65px"></div>
+
+          <div class="h-node h-indent-2">
+            <span class="ic" style="background:var(--brand-50)">
+              <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" stroke="#2563EB" stroke-width="2"/><path d="M3.5 9h17" stroke="#2563EB" stroke-width="2"/><circle cx="16.5" cy="14.5" r="1.4" fill="#2563EB"/></svg>
+            </span>
+            <div><div class="t">Room 101</div><div class="s">Double sharing &middot; &#8377;8,000 / bed</div></div>
+            <span class="badge b-due tag"><i></i>1 free</span>
+          </div>
+
+          <div class="beds">
+            <div class="bed occ">
+              <span class="ic">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M3 18V9a2 2 0 0 1 2-2h5v9M3 18h18M21 18v-4a2 2 0 0 0-2-2h-9" stroke="#546076" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.8" cy="11.5" r="1.7" fill="#546076"/></svg>
+              </span>
+              <div><div class="t">Bed A</div><div class="s">Rahul Kumar</div></div>
+              <span class="badge b-grey" style="margin-left:auto"><i></i>Occupied</span>
+            </div>
+            <div class="bed free">
+              <span class="ic">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M3 18V9a2 2 0 0 1 2-2h5v9M3 18h18M21 18v-4a2 2 0 0 0-2-2h-9" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.8" cy="11.5" r="1.7" fill="#0E9F6E"/></svg>
+              </span>
+              <div><div class="t">Bed B</div><div class="s">Ready to allot</div></div>
+              <span class="badge b-paid" style="margin-left:auto"><i></i>Available</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     5. TENANT MANAGEMENT
+     ============================================================ -->
+<section id="tenants">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="eyebrow"><span class="dot"></span> Tenants</span>
+      <h2 class="title">Every Tenant Detail in One Place</h2>
+      <p class="lede">Keep all tenant information organized and easily accessible — who stays where, what they pay, and whether this month is settled.</p>
+    </div>
+
+    <div class="app rv">
+      <div class="app-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="app-url">PG Manager &mdash; Tenants</div>
+      </div>
+      <div class="app-body">
+        <aside class="app-side">
+          <p class="s-lab">Menu</p>
+          <div class="s-item"><span class="sq"></span> Dashboard</div>
+          <div class="s-item"><span class="sq"></span> Properties</div>
+          <div class="s-item"><span class="sq"></span> Rooms &amp; Beds</div>
+          <div class="s-item active"><span class="sq"></span> Tenants</div>
+          <div class="s-item"><span class="sq"></span> Rent &amp; Invoices</div>
+          <div class="s-item"><span class="sq"></span> Payments</div>
+          <div class="s-item"><span class="sq"></span> Expenses</div>
+          <div class="s-item"><span class="sq"></span> Staff</div>
+          <div class="s-item"><span class="sq"></span> Complaints</div>
+          <div class="s-item"><span class="sq"></span> Reports</div>
+        </aside>
+
+        <div class="app-main">
+          <div class="app-head">
+            <div>
+              <h4>Tenants</h4>
+              <p>96 active tenants &middot; Sunrise PG</p>
+            </div>
+            <span class="btn btn-primary" style="padding:10px 18px;font-size:14px">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+              Add Tenant
+            </span>
+          </div>
+
+          <div class="tbl-scroll">
+            <table class="tbl">
+              <thead>
+                <tr>
+                  <th>Tenant</th><th>Room &amp; Bed</th><th>Phone</th><th>Monthly Rent</th><th>Due Date</th><th>Status</th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><div class="who"><span class="avatar w">RK</span><div><b>Rahul Kumar</b><span>Joined 12 Jan 2026</span></div></div></td>
+                  <td>Room 204 &middot; Bed B</td>
+                  <td>+91 98765 43210</td>
+                  <td class="money">&#8377;8,000</td>
+                  <td>5 Aug 2026</td>
+                  <td><span class="badge b-due"><i></i>Pending</span></td>
+                  <td><span class="wa-mini" title="Send WhatsApp reminder"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="#128C7E" d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01c5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2Zm5.8 14.16c-.25.69-1.44 1.32-1.98 1.36-.53.05-1.02.24-3.45-.72-2.91-1.15-4.75-4.13-4.9-4.32-.14-.19-1.17-1.55-1.17-2.96s.74-2.1 1-2.39c.26-.29.57-.36.76-.36l.55.01c.17.01.41-.07.64.49.25.6.83 2.07.9 2.22.07.14.12.31.02.5-.09.19-.14.31-.28.48l-.42.49c-.14.14-.28.29-.12.57.16.29.71 1.17 1.53 1.9 1.05.94 1.94 1.23 2.22 1.37.28.14.44.12.6-.07.17-.19.69-.8.87-1.08.19-.29.37-.24.62-.14.26.09 1.63.77 1.91.91.28.14.47.21.53.33.07.12.07.69-.18 1.38Z"/></svg></span></td>
+                </tr>
+                <tr>
+                  <td><div class="who"><span class="avatar g">SP</span><div><b>Sneha Patil</b><span>Joined 03 Mar 2026</span></div></div></td>
+                  <td>Room 105 &middot; Bed A</td>
+                  <td>+91 91234 56780</td>
+                  <td class="money">&#8377;7,500</td>
+                  <td>5 Aug 2026</td>
+                  <td><span class="badge b-paid"><i></i>Paid</span></td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><div class="who"><span class="avatar r">AV</span><div><b>Arjun Verma</b><span>Joined 21 Nov 2025</span></div></div></td>
+                  <td>Room 302 &middot; Bed C</td>
+                  <td>+91 99887 76655</td>
+                  <td class="money">&#8377;9,000</td>
+                  <td>1 Aug 2026</td>
+                  <td><span class="badge b-over"><i></i>Overdue</span></td>
+                  <td><span class="wa-mini" title="Send WhatsApp reminder"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="#128C7E" d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01c5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2Zm5.8 14.16c-.25.69-1.44 1.32-1.98 1.36-.53.05-1.02.24-3.45-.72-2.91-1.15-4.75-4.13-4.9-4.32-.14-.19-1.17-1.55-1.17-2.96s.74-2.1 1-2.39c.26-.29.57-.36.76-.36l.55.01c.17.01.41-.07.64.49.25.6.83 2.07.9 2.22.07.14.12.31.02.5-.09.19-.14.31-.28.48l-.42.49c-.14.14-.28.29-.12.57.16.29.71 1.17 1.53 1.9 1.05.94 1.94 1.23 2.22 1.37.28.14.44.12.6-.07.17-.19.69-.8.87-1.08.19-.29.37-.24.62-.14.26.09 1.63.77 1.91.91.28.14.47.21.53.33.07.12.07.69-.18 1.38Z"/></svg></span></td>
+                </tr>
+                <tr>
+                  <td><div class="who"><span class="avatar g">MK</span><div><b>Meena Krishnan</b><span>Joined 08 Jun 2026</span></div></div></td>
+                  <td>Room 108 &middot; Bed A</td>
+                  <td>+91 90000 12345</td>
+                  <td class="money">&#8377;8,000</td>
+                  <td>5 Aug 2026</td>
+                  <td><span class="badge b-paid"><i></i>Paid</span></td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><div class="who"><span class="avatar">DS</span><div><b>Deepak Shetty</b><span>Joining 15 Aug 2026</span></div></div></td>
+                  <td>Room 101 &middot; Bed B</td>
+                  <td>+91 93456 11122</td>
+                  <td class="money">&#8377;8,000</td>
+                  <td>&mdash;</td>
+                  <td><span class="badge b-info"><i></i>Joining soon</span></td>
+                  <td></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- mobile cards -->
+          <div class="tcards">
+            <div class="tcard">
+              <div class="top"><span class="avatar w">RK</span><div><b style="color:var(--ink)">Rahul Kumar</b><div style="font-size:12px;color:var(--muted)">Room 204 &middot; Bed B</div></div><span class="badge b-due" style="margin-left:auto"><i></i>Pending</span></div>
+              <div class="grid">
+                <div><small>Monthly Rent</small><b>&#8377;8,000</b></div>
+                <div><small>Due Date</small><b>5 Aug 2026</b></div>
+                <div><small>Phone</small><b>+91 98765 43210</b></div>
+                <div><small>Joined</small><b>12 Jan 2026</b></div>
+              </div>
+            </div>
+            <div class="tcard">
+              <div class="top"><span class="avatar g">SP</span><div><b style="color:var(--ink)">Sneha Patil</b><div style="font-size:12px;color:var(--muted)">Room 105 &middot; Bed A</div></div><span class="badge b-paid" style="margin-left:auto"><i></i>Paid</span></div>
+              <div class="grid">
+                <div><small>Monthly Rent</small><b>&#8377;7,500</b></div>
+                <div><small>Due Date</small><b>5 Aug 2026</b></div>
+                <div><small>Phone</small><b>+91 91234 56780</b></div>
+                <div><small>Joined</small><b>03 Mar 2026</b></div>
+              </div>
+            </div>
+            <div class="tcard">
+              <div class="top"><span class="avatar r">AV</span><div><b style="color:var(--ink)">Arjun Verma</b><div style="font-size:12px;color:var(--muted)">Room 302 &middot; Bed C</div></div><span class="badge b-over" style="margin-left:auto"><i></i>Overdue</span></div>
+              <div class="grid">
+                <div><small>Monthly Rent</small><b>&#8377;9,000</b></div>
+                <div><small>Due Date</small><b>1 Aug 2026</b></div>
+                <div><small>Phone</small><b>+91 99887 76655</b></div>
+                <div><small>Joined</small><b>21 Nov 2025</b></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     5b. MOVING IN & MOVING OUT
+     ============================================================ -->
+<section class="soft" id="movein">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="eyebrow"><span class="dot"></span> Joining &amp; Leaving</span>
+      <h2 class="title">From Joining Day to Final Settlement</h2>
+      <p class="lede">The app handles the whole stay — the day they join, every room change in between, and the day they leave with their deposit settled.</p>
+    </div>
+
+    <div class="split r-a">
+      <div class="rv">
+        <div class="tl">
+          <div class="tl-item">
+            <span class="tl-dot">
+              <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" stroke="#2563EB" stroke-width="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5" stroke="#2563EB" stroke-width="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5" stroke="#2563EB" stroke-width="2"/><path d="M14 14h3v3m3 0v3h-6" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg>
+            </span>
+            <div class="tl-body">
+              <b>New tenant fills their own details</b>
+              <p>Show them your PG's QR code. They scan it, fill in their name, phone, address and ID on their own phone, and they appear in your tenant list. No typing for you.</p>
+              <span class="badge b-info"><i></i>Self Check-in</span>
+            </div>
+          </div>
+
+          <div class="tl-item">
+            <span class="tl-dot">
+              <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M3 18V9a2 2 0 0 1 2-2h5v9M3 18h18M21 18v-4a2 2 0 0 0-2-2h-9" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.8" cy="11.5" r="1.7" fill="#2563EB"/></svg>
+            </span>
+            <div class="tl-body">
+              <b>Allot a bed and collect the first month</b>
+              <p>Pick any free bed. The first bill is raised straight away with the rent, AC charges and security deposit shown as separate lines, so the tenant sees exactly what they are paying for.</p>
+              <span class="badge b-info"><i></i>Deposit collected once</span>
+            </div>
+          </div>
+
+          <div class="tl-item">
+            <span class="tl-dot">
+              <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M4 8h14m0 0-3.5-3.5M18 8l-3.5 3.5M20 16H6m0 0 3.5-3.5M6 16l3.5 3.5" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            <div class="tl-body">
+              <b>Room change, handled fairly</b>
+              <p>Moving to another bed of the same sharing type happens right away and the rent stays the same. Moving to a different sharing type is scheduled for the start of their next rent month — so nobody is charged twice in one month.</p>
+              <span class="badge b-paid"><i></i>No mid-month surprises</span>
+            </div>
+          </div>
+
+          <div class="tl-item">
+            <span class="tl-dot">
+              <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M14 3.5h4a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1h-4" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round"/><path d="M10 8 5.5 12 10 16M5.5 12H15" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            <div class="tl-body">
+              <b>Checkout with the deposit settled</b>
+              <p>On checkout the app shows any dues left to collect and offers to refund the deposit you are holding. Refunds are recorded as money going out, so your accounts stay correct. The bed turns green immediately.</p>
+              <span class="badge b-paid"><i></i>Deposit refund recorded</span>
+            </div>
+          </div>
+
+          <div class="tl-item">
+            <span class="tl-dot">
+              <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M20 11.5A8 8 0 1 1 17.6 6M20 4v4h-4" stroke="#D97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            <div class="tl-body">
+              <b>If they come back, nothing is lost</b>
+              <p>Old tenants are hidden from your list, never erased. When a former tenant rejoins, just enter their phone number — their old profile, invoices and payment history come straight back.</p>
+              <span class="badge b-due"><i></i>Rejoin in seconds</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rv">
+        <!-- IMAGE SLOT D: self check-in QR poster -->
+        <div style="display:flex;flex-direction:column;align-items:center;gap:20px">
+          <div class="qr-card">
+            <div class="qr" id="qrGrid" aria-label="Self check-in QR code"></div>
+            <b>Scan to Register</b>
+            <p>Sunrise PG &middot; Kondapur<br>New tenants fill their own details</p>
+          </div>
+
+          <div class="panel" style="width:100%;max-width:340px;background:#fff">
+            <h5>Guest &amp; Short Stays</h5>
+            <p class="psub">Charged per day, not per month</p>
+            <div class="rowlist">
+              <div class="rowl">
+                <span class="avatar">VJ</span>
+                <div><div class="nm">Vijay Nair</div><div class="mt">Room 106 &middot; 4 days &middot; &#8377;400/day</div></div>
+                <span class="amt">&#8377;1,600</span>
+              </div>
+              <div class="rowl">
+                <span class="avatar g">PT</span>
+                <div><div class="nm">Priya Thomas</div><div class="mt">Room 210 &middot; leaving today</div></div>
+                <span class="badge b-paid"><i></i>Paid</span>
+              </div>
+            </div>
+            <p style="font-size:12.5px;color:var(--muted);margin-top:14px;line-height:1.55">
+              Guests never enter your monthly rent cycle. If a guest decides to stay on, one tap turns them into a regular tenant.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     6. RENT & INVOICE
+     ============================================================ -->
+<section id="rent">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="eyebrow"><span class="dot"></span> Rent &amp; Invoices</span>
+      <h2 class="title">Rent That Runs on Its Own</h2>
+      <p class="lede">Know exactly who has paid, who is due, and who is overdue — every month, without a register or a spreadsheet.</p>
+    </div>
+
+    <div class="cycle rv">
+      <div class="cy">
+        <span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0 4-4m-4 4-4-4" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <b>Rent Generated</b><small>On the tenant's cycle</small>
+      </div>
+      <div class="cy-arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 12h14m0 0-5-5m5 5-5 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+      <div class="cy">
+        <span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M6 2.5h12v19l-3-2-3 2-3-2-3 2v-19Z" stroke="#2563EB" stroke-width="2" stroke-linejoin="round"/><path d="M9.5 8h5M9.5 12h5" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <b>Invoice</b><small>Itemised and clear</small>
+      </div>
+      <div class="cy-arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 12h14m0 0-5-5m5 5-5 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+      <div class="cy">
+        <span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#2563EB" stroke-width="2"/><path d="M12 7.5V12l3 2" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <b>Due Date</b><small>Everyone knows when</small>
+      </div>
+      <div class="cy-arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 12h14m0 0-5-5m5 5-5 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+      <div class="cy">
+        <span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="2.5" y="6" width="19" height="12.5" rx="2.5" stroke="#2563EB" stroke-width="2"/><path d="M2.5 10h19" stroke="#2563EB" stroke-width="2"/><path d="M6.5 14.5h4" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <b>Payment</b><small>Cash, UPI or bank</small>
+      </div>
+      <div class="cy-arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 12h14m0 0-5-5m5 5-5 5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+      <div class="cy">
+        <span class="ic" style="background:var(--ok-bg)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#0E9F6E" stroke-width="2"/><path d="m8 12.3 2.7 2.7L16 9.7" stroke="#0E9F6E" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <b>Paid</b><small>Recorded instantly</small>
+      </div>
+    </div>
+
+    <div class="inv-grid">
+      <div class="inv paid rv">
+        <div class="ih">
+          <div><div class="num">INV-2026-08-0142</div><div class="ttl">August Rent</div></div>
+          <span class="badge b-paid"><i></i>Paid</span>
+        </div>
+        <div class="amt">&#8377;7,500</div>
+        <div class="meta">Paid on 3 Aug 2026 &middot; UPI</div>
+        <div class="foot">
+          <div class="who2"><b>Sneha Patil</b>Room 105 &middot; Bed A</div>
+          <span class="avatar g">SP</span>
+        </div>
+      </div>
+
+      <div class="inv due rv">
+        <div class="ih">
+          <div><div class="num">INV-2026-08-0147</div><div class="ttl">August Rent</div></div>
+          <span class="badge b-due"><i></i>Due</span>
+        </div>
+        <div class="amt">&#8377;8,000</div>
+        <div class="meta">Due: 5 Aug 2026 &middot; in 2 days</div>
+        <div class="foot">
+          <div class="who2"><b>Rahul Kumar</b>Room 204 &middot; Bed B</div>
+          <span class="avatar w">RK</span>
+        </div>
+      </div>
+
+      <div class="inv over rv">
+        <div class="ih">
+          <div><div class="num">INV-2026-08-0119</div><div class="ttl">August Rent</div></div>
+          <span class="badge b-over"><i></i>Overdue</span>
+        </div>
+        <div class="amt">&#8377;9,000</div>
+        <div class="meta">Due: 1 Aug 2026 &middot; 6 days late</div>
+        <div class="foot">
+          <div class="who2"><b>Arjun Verma</b>Room 302 &middot; Bed C</div>
+          <span class="avatar r">AV</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     7. WHATSAPP REMINDERS
+     IMAGE SLOT C — phone mockup showing the WhatsApp reminder
+     ============================================================ -->
+<section class="wa-sec" id="whatsapp">
+  <div class="wrap">
+    <div class="split">
+      <div class="s-text rv">
+        <span class="eyebrow" style="color:var(--wa-dark);background:#E8FAF0;border-color:#CFF0DE"><span class="dot" style="background:var(--wa)"></span> WhatsApp Reminders</span>
+        <h2 class="title">Remind Tenants in One Tap</h2>
+        <p class="lede">Send predefined rent reminders to tenants directly through WhatsApp — polite, consistent, and always ready to go.</p>
+
+        <div class="wa-steps">
+          <div class="tick"><span class="num">1</span><div><b>You see who is due or overdue</b><p>The rent list already shows it — no searching required.</p></div></div>
+          <div class="tick"><span class="num">2</span><div><b>You tap the WhatsApp button</b><p>Right next to that tenant's name.</p></div></div>
+          <div class="tick"><span class="num">3</span><div><b>WhatsApp opens with the message ready</b><p>Tenant name, amount and month already filled in.</p></div></div>
+          <div class="tick"><span class="num">4</span><div><b>You press send</b><p>From your own WhatsApp, as you always have.</p></div></div>
+        </div>
+
+        <div class="wa-note">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="flex:none;margin-top:2px"><circle cx="12" cy="12" r="9" stroke="#128C7E" stroke-width="2"/><path d="M12 11v5.5" stroke="#128C7E" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="7.8" r="1.2" fill="#128C7E"/></svg>
+          <div><b>You always stay in control.</b> Nothing is sent automatically. The app only opens WhatsApp with the message written for you — you decide whether to press send.</div>
+        </div>
+      </div>
+
+      <div class="rv">
+        <div class="wa-trigger">
+          <span class="avatar w">RK</span>
+          <div class="who3">
+            <b>Rahul Kumar</b>
+            <small>Room 204 &middot; &#8377;8,000 &middot; due 5 Aug</small>
+          </div>
+          <button class="btn-wa" id="waBtn">
+            <svg width="17" height="17" viewBox="0 0 24 24"><path fill="#fff" d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01c5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2Zm5.8 14.16c-.25.69-1.44 1.32-1.98 1.36-.53.05-1.02.24-3.45-.72-2.91-1.15-4.75-4.13-4.9-4.32-.14-.19-1.17-1.55-1.17-2.96s.74-2.1 1-2.39c.26-.29.57-.36.76-.36l.55.01c.17.01.41-.07.64.49.25.6.83 2.07.9 2.22.07.14.12.31.02.5-.09.19-.14.31-.28.48l-.42.49c-.14.14-.28.29-.12.57.16.29.71 1.17 1.53 1.9 1.05.94 1.94 1.23 2.22 1.37.28.14.44.12.6-.07.17-.19.69-.8.87-1.08.19-.29.37-.24.62-.14.26.09 1.63.77 1.91.91.28.14.47.21.53.33.07.12.07.69-.18 1.38Z"/></svg>
+            <span id="waBtnLabel">Send Reminder</span>
+          </button>
+        </div>
+
+        <div class="phone-stage">
+          <div class="phone">
+            <div class="notch"></div>
+            <div class="screen">
+              <div class="wa-top">
+                <span class="pic">RK</span>
+                <div><b>Rahul Kumar</b><small>online</small></div>
+              </div>
+              <div class="wa-chat" id="waChat">
+                <span class="wa-date">TODAY</span>
+                <div class="bubble">Good morning sir</div>
+                <div class="bubble out pending" id="waMsg">
+                  Hello Rahul,<br>
+                  Your PG rent of &#8377;8,000 for August is due.<br>
+                  Please make the payment at your convenience.<br>
+                  Thank you.
+                  <span class="time">10:24 AM <span class="ticks">&#10003;&#10003;</span></span>
+                </div>
+              </div>
+              <div class="wa-input">
+                <div class="fake" id="waFake">Type a message</div>
+                <span class="send">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m3.5 20.5 18-8.5-18-8.5 4 8.5-4 8.5Z" fill="#fff"/></svg>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     8. PAYMENT TRACKING
+     ============================================================ -->
+<section class="soft" id="payments">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="eyebrow"><span class="dot"></span> Payments</span>
+      <h2 class="title">Know Where Your Money Stands</h2>
+      <p class="lede">Every payment recorded, every pending amount visible. No more guessing at the end of the month.</p>
+    </div>
+
+    <div class="pay-cards rv">
+      <div class="pay">
+        <span class="ic" style="background:var(--brand-50)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3v18M16.5 7.2C15.6 6 14 5.4 12 5.4c-2.5 0-4 1.1-4 3s1.7 2.7 4 3.2c2.6.6 4.3 1.3 4.3 3.3s-1.7 3.1-4.3 3.1c-2.1 0-3.7-.6-4.6-1.9" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg>
+        </span>
+        <div class="lab">Today's Collection</div>
+        <div class="val" data-count="32000" data-money="1">&#8377;0</div>
+        <div class="delta" style="color:var(--ok)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 19V5m0 0-6 6m6-6 6 6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          6 payments received
+        </div>
+      </div>
+
+      <div class="pay">
+        <span class="ic" style="background:var(--ok-bg)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 20V11M10 20V5M16 20v-6M22 20H2" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round"/></svg>
+        </span>
+        <div class="lab">This Month</div>
+        <div class="val" data-count="480000" data-money="1">&#8377;0</div>
+        <div class="delta" style="color:var(--ok)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 19V5m0 0-6 6m6-6 6 6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          12% more than July
+        </div>
+      </div>
+
+      <div class="pay">
+        <span class="ic" style="background:var(--warn-bg)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#D97706" stroke-width="2"/><path d="M12 7.5V12l3 2" stroke="#D97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <div class="lab">Pending</div>
+        <div class="val" data-count="72000" data-money="1">&#8377;0</div>
+        <div class="delta" style="color:var(--warn)">9 tenants yet to pay</div>
+      </div>
+
+      <div class="pay">
+        <span class="ic" style="background:var(--bad-bg)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 4 2.8 20h18.4L12 4Z" stroke="#DC2626" stroke-width="2" stroke-linejoin="round"/><path d="M12 10.5v4" stroke="#DC2626" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="17.3" r="1.1" fill="#DC2626"/></svg>
+        </span>
+        <div class="lab">Overdue</div>
+        <div class="val" data-count="24000" data-money="1">&#8377;0</div>
+        <div class="delta" style="color:var(--bad)">3 tenants past due date</div>
+      </div>
+    </div>
+
+    <div class="panels rv">
+      <div class="panel" style="background:#fff">
+        <h5>Monthly Collection Trend</h5>
+        <p class="psub">Collected vs expected, last 6 months</p>
+        <div class="bars" data-bars>
+          <div class="bar-col"><div class="track"><div class="bar" data-h="62"></div></div><span>Mar</span></div>
+          <div class="bar-col"><div class="track"><div class="bar" data-h="70"></div></div><span>Apr</span></div>
+          <div class="bar-col"><div class="track"><div class="bar" data-h="76"></div></div><span>May</span></div>
+          <div class="bar-col"><div class="track"><div class="bar" data-h="68"></div></div><span>Jun</span></div>
+          <div class="bar-col"><div class="track"><div class="bar" data-h="86"></div></div><span>Jul</span></div>
+          <div class="bar-col"><div class="track"><div class="bar" data-h="97"></div></div><span>Aug</span></div>
+        </div>
+        <div class="legend"><span><i style="background:#2563EB"></i>Collected</span><span><i style="background:#DCE6F8"></i>Expected</span></div>
+      </div>
+
+      <div class="panel" style="background:#fff">
+        <h5>How Tenants Paid</h5>
+        <p class="psub">This month</p>
+        <div class="rowlist" style="margin-top:14px">
+          <div class="rowl">
+            <span class="avatar" style="background:var(--brand-50)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m5 12 7-8 7 8-7 8-7-8Z" stroke="#2563EB" stroke-width="2" stroke-linejoin="round"/></svg>
+            </span>
+            <div><div class="nm">UPI</div><div class="mt">58 payments</div></div>
+            <span class="amt">&#8377;2,74,000</span>
+          </div>
+          <div class="rowl">
+            <span class="avatar g">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="2.5" y="6" width="19" height="12" rx="2.5" stroke="#0E9F6E" stroke-width="2"/><circle cx="12" cy="12" r="2.6" stroke="#0E9F6E" stroke-width="2"/></svg>
+            </span>
+            <div><div class="nm">Cash</div><div class="mt">31 payments</div></div>
+            <span class="amt">&#8377;1,52,000</span>
+          </div>
+          <div class="rowl">
+            <span class="avatar w">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 9.5 12 4l9 5.5M4.5 9.5v9m5-9v9m5-9v9m5-9v9M3 19.5h18" stroke="#D97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            <div><div class="nm">Bank Transfer</div><div class="mt">11 payments</div></div>
+            <span class="amt">&#8377;54,000</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     8b. EXPENSES, STAFF & PROFIT
+     ============================================================ -->
+<section id="expenses">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="eyebrow"><span class="dot"></span> Expenses &amp; Staff</span>
+      <h2 class="title">Not Just Rent In — Money Out Too</h2>
+      <p class="lede">Electricity, water, cook salary, repairs, cleaning — record what you spend and the app tells you what you actually earned this month.</p>
+    </div>
+
+    <div class="app rv">
+      <div class="app-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="app-url">PG Manager &mdash; Expenses</div>
+      </div>
+      <div class="app-body">
+        <aside class="app-side">
+          <p class="s-lab">Menu</p>
+          <div class="s-item"><span class="sq"></span> Dashboard</div>
+          <div class="s-item"><span class="sq"></span> Properties</div>
+          <div class="s-item"><span class="sq"></span> Rooms &amp; Beds</div>
+          <div class="s-item"><span class="sq"></span> Tenants</div>
+          <div class="s-item"><span class="sq"></span> Rent &amp; Invoices</div>
+          <div class="s-item"><span class="sq"></span> Payments</div>
+          <div class="s-item active"><span class="sq"></span> Expenses</div>
+          <div class="s-item"><span class="sq"></span> Staff</div>
+          <div class="s-item"><span class="sq"></span> Complaints</div>
+          <div class="s-item"><span class="sq"></span> Reports</div>
+        </aside>
+
+        <div class="app-main">
+          <div class="app-head">
+            <div>
+              <h4>Expenses</h4>
+              <p>Sunrise PG &middot; August 2026</p>
+            </div>
+            <span class="btn btn-primary" style="padding:10px 18px;font-size:14px">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+              Add Expense
+            </span>
+          </div>
+
+          <div class="stats four">
+            <div class="stat">
+              <div class="lab"><i style="background:#2563EB"></i> Total Spent</div>
+              <div class="val" data-count="138000" data-money="1">&#8377;0</div>
+              <div class="sub">Down 4% from July</div>
+            </div>
+            <div class="stat good">
+              <div class="lab"><i style="background:#0E9F6E"></i> Rent Collected</div>
+              <div class="val" data-count="480000" data-money="1">&#8377;0</div>
+              <div class="sub">96 tenants</div>
+            </div>
+            <div class="stat">
+              <div class="lab"><i style="background:#0E9F6E"></i> Profit</div>
+              <div class="val" style="color:#0B7A54" data-count="354000" data-money="1">&#8377;0</div>
+              <div class="sub">This month</div>
+            </div>
+            <div class="stat warn">
+              <div class="lab"><i style="background:#D97706"></i> Awaiting Approval</div>
+              <div class="val" data-count="3">0</div>
+              <div class="sub">&#8377;18,400 in total</div>
+            </div>
+          </div>
+
+          <p style="font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:6px 0 12px">
+            Where the money went
+          </p>
+          <div class="cats" style="margin-bottom:22px">
+            <span class="cat"><i style="background:#F59E0B"></i>Electricity <span>&#8377;42,000</span></span>
+            <span class="cat"><i style="background:#3B82F6"></i>Water <span>&#8377;9,500</span></span>
+            <span class="cat"><i style="background:#8B5CF6"></i>Staff Salary <span>&#8377;46,000</span></span>
+            <span class="cat"><i style="background:#EF4444"></i>Food <span>&#8377;21,000</span></span>
+            <span class="cat"><i style="background:#14B8A6"></i>Cleaning <span>&#8377;7,000</span></span>
+            <span class="cat"><i style="background:#F97316"></i>Repairs <span>&#8377;6,200</span></span>
+            <span class="cat"><i style="background:#6366F1"></i>Internet <span>&#8377;2,800</span></span>
+            <span class="cat"><i style="background:#EC4899"></i>Gas <span>&#8377;3,500</span></span>
+            <span class="cat"><i style="background:#0EA5E9"></i>Maintenance</span>
+            <span class="cat"><i style="background:#84CC16"></i>Laundry</span>
+            <span class="cat"><i style="background:#94A3B8"></i>Others</span>
+          </div>
+
+          <div class="panels">
+            <div class="panel">
+              <h5>Monthly Budgets</h5>
+              <p class="psub">Set a limit and the app warns you before you cross it</p>
+              <div class="bud">
+                <div class="bl"><b>Electricity</b><span>&#8377;42,000 of &#8377;40,000</span></div>
+                <div class="prog"><i class="bad" data-w="100"></i></div>
+              </div>
+              <div class="bud">
+                <div class="bl"><b>Food</b><span>&#8377;21,000 of &#8377;25,000</span></div>
+                <div class="prog"><i class="warn" data-w="84"></i></div>
+              </div>
+              <div class="bud">
+                <div class="bl"><b>Staff Salary</b><span>&#8377;46,000 of &#8377;50,000</span></div>
+                <div class="prog"><i data-w="92"></i></div>
+              </div>
+              <div class="bud">
+                <div class="bl"><b>Repairs</b><span>&#8377;6,200 of &#8377;15,000</span></div>
+                <div class="prog"><i data-w="41"></i></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h5>This Month's Profit</h5>
+              <p class="psub">What came in, minus what went out</p>
+              <div class="pl">
+                <div class="r"><span>Rent received</span><b>&#8377;4,80,000</b></div>
+                <div class="r"><span>Other income</span><b>&#8377;12,000</b></div>
+                <div class="r"><span>Total expenses</span><b style="color:var(--bad)">&minus; &#8377;1,38,000</b></div>
+                <div class="r"><span>Staff salaries paid</span><b style="color:var(--muted)">included above</b></div>
+                <div class="tot"><span>Profit for August</span><b>&#8377;3,54,000</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Staff -->
+    <div class="split r-b rv gap-top">
+      <div class="s-text">
+        <span class="eyebrow"><span class="dot"></span> Staff &amp; Salary</span>
+        <h2 class="title" style="font-size:clamp(24px,2.8vw,32px)">Pay Your Team Without a Register</h2>
+        <p class="lede">Keep your cook, warden, cleaner and security staff in one list with their monthly salary. Pay everyone for the month in one go.</p>
+        <div class="tick">
+          <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#2563EB" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><b>Pay all, or just a few</b><p>Select the staff you are paying today and record it in one action.</p></div>
+        </div>
+        <div class="tick">
+          <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#2563EB" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><b>Nobody gets paid twice</b><p>Once a month is marked paid for someone, the app will not let it happen again.</p></div>
+        </div>
+        <div class="tick">
+          <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#2563EB" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><b>Salary counts as an expense automatically</b><p>Every payment shows up in your expenses and profit figures on its own.</p></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel" style="background:#fff;box-shadow:var(--shadow)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+            <div><h5>Staff &mdash; August 2026</h5><p class="psub" style="margin:0">Monthly payroll &#8377;46,000</p></div>
+            <span class="badge b-due"><i></i>2 pending</span>
+          </div>
+          <div class="rowlist">
+            <div class="rowl">
+              <span class="avatar g">LK</span>
+              <div><div class="nm">Lakshmi K.</div><div class="mt">Cook &middot; &#8377;14,000</div></div>
+              <span class="badge b-paid" style="margin-left:auto"><i></i>Paid</span>
+            </div>
+            <div class="rowl">
+              <span class="avatar g">SR</span>
+              <div><div class="nm">Suresh R.</div><div class="mt">Warden &middot; &#8377;16,000</div></div>
+              <span class="badge b-paid" style="margin-left:auto"><i></i>Paid</span>
+            </div>
+            <div class="rowl">
+              <span class="avatar w">GM</span>
+              <div><div class="nm">Ganesh M.</div><div class="mt">Cleaning &middot; &#8377;9,000</div></div>
+              <span class="badge b-due" style="margin-left:auto"><i></i>Due</span>
+            </div>
+            <div class="rowl">
+              <span class="avatar w">AB</span>
+              <div><div class="nm">Anil B.</div><div class="mt">Security &middot; &#8377;7,000</div></div>
+              <span class="badge b-due" style="margin-left:auto"><i></i>Due</span>
+            </div>
+          </div>
+          <button class="btn btn-primary" style="width:100%;margin-top:18px;justify-content:center">
+            Pay Selected &mdash; &#8377;16,000
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     8c. TENANT APP (TENANT LOGIN)
+     IMAGE SLOT E — tenant phone app mockup, purple theme
+     ============================================================ -->
+<section class="soft" id="tenantapp">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="eyebrow" style="color:#6D28D9;background:#F3EDFF;border-color:#E4D9FA"><span class="dot" style="background:#7C3AED"></span> Tenant App</span>
+      <h2 class="title">Give Your Tenants Their Own Login</h2>
+      <p class="lede">Optional, and entirely your choice. Switch it on and every tenant gets their own simple app to check rent, pay history, complaints and your notices — so they stop calling you for small things.</p>
+    </div>
+
+    <div class="split r-c">
+      <div class="s-text rv">
+        <div class="tick">
+          <span class="ic" style="background:#F3EDFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 3v18M16.5 7.2C15.6 6 14 5.4 12 5.4c-2.5 0-4 1.1-4 3s1.7 2.7 4 3.2c2.6.6 4.3 1.3 4.3 3.3s-1.7 3.1-4.3 3.1c-2.1 0-3.7-.6-4.6-1.9" stroke="#7C3AED" stroke-width="2" stroke-linecap="round"/></svg></span>
+          <div><b>They see their own rent and dues</b><p>This month's amount, the due date, and whether it is paid — without asking you.</p></div>
+        </div>
+        <div class="tick">
+          <span class="ic" style="background:#F3EDFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 2.5h12v19l-3-2-3 2-3-2-3 2v-19Z" stroke="#7C3AED" stroke-width="2" stroke-linejoin="round"/><path d="M9.5 8h5M9.5 12h5" stroke="#7C3AED" stroke-width="2" stroke-linecap="round"/></svg></span>
+          <div><b>Full payment history</b><p>Every receipt from the day they joined. No more "I already paid last month, sir".</p></div>
+        </div>
+        <div class="tick">
+          <span class="ic" style="background:#F3EDFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 5.5h16v11H13l-4 3.5v-3.5H4v-11Z" stroke="#7C3AED" stroke-width="2" stroke-linejoin="round"/></svg></span>
+          <div><b>They raise complaints in the app</b><p>Water, electrical, internet, cleaning — written down with a photo instead of shouted at your gate.</p></div>
+        </div>
+        <div class="tick">
+          <span class="ic" style="background:#F3EDFF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M11 4 6 8H3v8h3l5 4V4Z" stroke="#7C3AED" stroke-width="2" stroke-linejoin="round"/><path d="M16 9.5a3.5 3.5 0 0 1 0 5M18.5 7a7 7 0 0 1 0 10" stroke="#7C3AED" stroke-width="2" stroke-linecap="round"/></svg></span>
+          <div><b>Your notices reach everyone at once</b><p>Water shutdown tomorrow? Post it once and every tenant sees it.</p></div>
+        </div>
+
+        <div class="wa-note" style="border-color:#E4D9FA;border-left-color:#7C3AED">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="flex:none;margin-top:2px"><rect x="4.5" y="10.5" width="15" height="10" rx="2" stroke="#7C3AED" stroke-width="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" stroke="#7C3AED" stroke-width="2" stroke-linecap="round"/></svg>
+          <div><b>Simple and safe.</b> Tenants sign in with their mobile number and set their own password on first use. They can only ever see their own information — never another tenant's, and never your accounts.</div>
+        </div>
+      </div>
+
+      <div class="rv" style="display:flex;justify-content:center">
+        <div class="tphone">
+          <div class="notch"></div>
+          <div class="tscreen">
+            <div class="t-top">
+              <div class="hi">Good morning</div>
+              <div class="nm">Rahul Kumar</div>
+              <div class="rm">Sunrise PG &middot; Room 204 &middot; Bed B</div>
+              <div class="t-due">
+                <small>RENT DUE &mdash; AUGUST</small>
+                <b>&#8377;8,000</b>
+                <em>Due on 5 August 2026</em>
+              </div>
+            </div>
+
+            <div class="t-body">
+              <div class="t-grid">
+                <div class="t-tile">
+                  <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 2.5h12v19l-3-2-3 2-3-2-3 2v-19Z" stroke="#7C3AED" stroke-width="2" stroke-linejoin="round"/></svg></span>
+                  <b>My Payments</b><small>8 receipts</small>
+                </div>
+                <div class="t-tile">
+                  <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 5.5h16v11H13l-4 3.5v-3.5H4v-11Z" stroke="#7C3AED" stroke-width="2" stroke-linejoin="round"/></svg></span>
+                  <b>Complaints</b><small>1 in progress</small>
+                </div>
+                <div class="t-tile">
+                  <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M11 4 6 8H3v8h3l5 4V4Z" stroke="#7C3AED" stroke-width="2" stroke-linejoin="round"/></svg></span>
+                  <b>Notices</b><small>2 new</small>
+                </div>
+                <div class="t-tile">
+                  <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.4" stroke="#7C3AED" stroke-width="2"/><path d="M5 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5" stroke="#7C3AED" stroke-width="2" stroke-linecap="round"/></svg></span>
+                  <b>My Profile</b><small>View details</small>
+                </div>
+              </div>
+
+              <p class="t-sec">Recent Payments</p>
+              <div class="t-row">
+                <span class="dt" style="background:#0E9F6E"></span>
+                <div><b>July Rent</b><small>Paid 4 Jul &middot; UPI</small></div>
+                <span class="rt">&#8377;8,000</span>
+              </div>
+              <div class="t-row">
+                <span class="dt" style="background:#0E9F6E"></span>
+                <div><b>June Rent</b><small>Paid 5 Jun &middot; Cash</small></div>
+                <span class="rt">&#8377;8,000</span>
+              </div>
+            </div>
+
+            <div class="t-nav">
+              <div class="on">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z" stroke="#7C3AED" stroke-width="2" stroke-linejoin="round"/></svg>
+                Home
+              </div>
+              <div>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 2.5h12v19l-3-2-3 2-3-2-3 2v-19Z" stroke="#A99CC0" stroke-width="2" stroke-linejoin="round"/></svg>
+                Payments
+              </div>
+              <div>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 5.5h16v11H13l-4 3.5v-3.5H4v-11Z" stroke="#A99CC0" stroke-width="2" stroke-linejoin="round"/></svg>
+                Complaints
+              </div>
+              <div>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M11 4 6 8H3v8h3l5 4V4Z" stroke="#A99CC0" stroke-width="2" stroke-linejoin="round"/></svg>
+                Notices
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     8d. COMPLAINTS & NOTICES
+     ============================================================ -->
+<section id="complaints">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="eyebrow"><span class="dot"></span> Complaints &amp; Notices</span>
+      <h2 class="title">Nothing Gets Forgotten</h2>
+      <p class="lede">Every complaint is written down, assigned a stage, and closed properly. Every announcement reaches all your tenants at once.</p>
+    </div>
+
+    <div class="board rv">
+      <div class="bcol">
+        <div class="bh"><i style="background:#DC2626"></i> New <span>3</span></div>
+        <div class="ticket">
+          <div class="tt">Water not coming in bathroom</div>
+          <div class="tm"><span class="badge b-over"><i></i>High</span> Plumbing &middot; Room 204</div>
+          <div class="tf"><span class="avatar w">RK</span><small>Rahul Kumar &middot; 2 hours ago</small></div>
+        </div>
+        <div class="ticket">
+          <div class="tt">Wi-Fi very slow on 3rd floor</div>
+          <div class="tm"><span class="badge b-due"><i></i>Medium</span> Internet &middot; Floor 3</div>
+          <div class="tf"><span class="avatar">AV</span><small>Arjun Verma &middot; Yesterday</small></div>
+        </div>
+        <div class="ticket">
+          <div class="tt">Cupboard door handle broken</div>
+          <div class="tm"><span class="badge b-grey"><i></i>Low</span> Furniture &middot; Room 108</div>
+          <div class="tf"><span class="avatar g">MK</span><small>Meena Krishnan &middot; 2 days ago</small></div>
+        </div>
+      </div>
+
+      <div class="bcol">
+        <div class="bh"><i style="background:#D97706"></i> Being Fixed <span>2</span></div>
+        <div class="ticket">
+          <div class="tt">Geyser not heating</div>
+          <div class="tm"><span class="badge b-over"><i></i>High</span> Electrical &middot; Room 105</div>
+          <div class="tf"><span class="avatar g">SP</span><small>Plumber visiting today</small></div>
+        </div>
+        <div class="ticket">
+          <div class="tt">Room not cleaned properly</div>
+          <div class="tm"><span class="badge b-due"><i></i>Medium</span> Cleaning &middot; Room 302</div>
+          <div class="tf"><span class="avatar">DS</span><small>Assigned to Ganesh M.</small></div>
+        </div>
+      </div>
+
+      <div class="bcol">
+        <div class="bh"><i style="background:#0E9F6E"></i> Resolved <span>28</span></div>
+        <div class="ticket">
+          <div class="tt">Fan making noise</div>
+          <div class="tm"><span class="badge b-paid"><i></i>Closed</span> Electrical &middot; Room 201</div>
+          <div class="tf"><span class="avatar g">KR</span><small>Fixed in 1 day</small></div>
+        </div>
+        <div class="ticket">
+          <div class="tt">Food quality complaint</div>
+          <div class="tm"><span class="badge b-paid"><i></i>Closed</span> Food &middot; Mess</div>
+          <div class="tf"><span class="avatar g">SP</span><small>Fixed in 3 days</small></div>
+        </div>
+        <p style="font-size:12.5px;color:var(--muted);text-align:center;margin-top:12px;line-height:1.5">
+          The tenant is told automatically every time you move their complaint forward.
+        </p>
+      </div>
+    </div>
+
+    <div class="split r-d top rv gap-top">
+      <div class="s-text">
+        <h2 class="title" style="font-size:clamp(22px,2.6vw,29px)">Announce Once, Everyone Knows</h2>
+        <p class="lede" style="font-size:16px">Post a notice and it reaches every tenant in the PG — no group messages, no missed calls, no notes on the wall.</p>
+        <div class="tick">
+          <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#2563EB" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><b>Ready-made notice types</b><p>General announcement, maintenance, water shutdown, power shutdown or a rent reminder.</p></div>
+        </div>
+        <div class="tick">
+          <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#2563EB" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><b>You can see who has read it</b><p>So you know the message actually landed before the water goes off.</p></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="notice bad">
+          <div class="nh"><b>Water Supply Off Tomorrow</b><span class="badge b-over"><i></i>Water Shutdown</span></div>
+          <p>Tank cleaning on 9 August between 10 AM and 2 PM. Please store water in advance.</p>
+          <div class="nf">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#8C97AB" stroke-width="2"/><path d="m8 12.3 2.7 2.7L16 9.7" stroke="#8C97AB" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Read by 78 of 96 tenants
+          </div>
+        </div>
+        <div class="notice warn">
+          <div class="nh"><b>Lift Maintenance</b><span class="badge b-due"><i></i>Maintenance</span></div>
+          <p>The lift will be serviced on Sunday morning. Please use the stairs until 12 PM.</p>
+          <div class="nf">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#8C97AB" stroke-width="2"/><path d="m8 12.3 2.7 2.7L16 9.7" stroke="#8C97AB" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Read by 62 of 96 tenants
+          </div>
+        </div>
+        <div class="notice">
+          <div class="nh"><b>Independence Day Breakfast</b><span class="badge b-info"><i></i>Announcement</span></div>
+          <p>Special breakfast on 15 August at 8 AM in the mess. All tenants welcome.</p>
+          <div class="nf">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#8C97AB" stroke-width="2"/><path d="m8 12.3 2.7 2.7L16 9.7" stroke="#8C97AB" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Read by 91 of 96 tenants
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     9. REPORTS
+     ============================================================ -->
+<section class="soft" id="reports">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="eyebrow"><span class="dot"></span> Reports</span>
+      <h2 class="title">Understand Your PG Performance</h2>
+      <p class="lede">Simple reports you can open, read and share — no accountant needed to make sense of them.</p>
+    </div>
+
+    <div class="split r-b top">
+      <div class="rep-grid two rv">
+        <div class="rep">
+          <span class="ic" style="background:var(--brand-50)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 3v18M16.5 7.2C15.6 6 14 5.4 12 5.4c-2.5 0-4 1.1-4 3s1.7 2.7 4 3.2c2.6.6 4.3 1.3 4.3 3.3s-1.7 3.1-4.3 3.1c-2.1 0-3.7-.6-4.6-1.9" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg></span>
+          <div><b>Rent Collection</b><p>What came in, month by month</p></div>
+        </div>
+        <div class="rep">
+          <span class="ic" style="background:var(--warn-bg)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#D97706" stroke-width="2"/><path d="M12 7.5V12l3 2" stroke="#D97706" stroke-width="2" stroke-linecap="round"/></svg></span>
+          <div><b>Pending Payments</b><p>Who still owes, and for how long</p></div>
+        </div>
+        <div class="rep">
+          <span class="ic" style="background:var(--ok-bg)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 18V9a2 2 0 0 1 2-2h5v9M3 18h18M21 18v-4a2 2 0 0 0-2-2h-9" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><b>Occupancy</b><p>How full your PG has been</p></div>
+        </div>
+        <div class="rep">
+          <span class="ic" style="background:var(--brand-50)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3.4" stroke="#2563EB" stroke-width="2"/><path d="M2.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/><path d="M17 8.5h4.5" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg></span>
+          <div><b>Tenant List</b><p>Everyone staying, with details</p></div>
+        </div>
+        <div class="rep">
+          <span class="ic" style="background:var(--ok-bg)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 18V9a2 2 0 0 1 2-2h5v9M3 18h18M21 18v-4a2 2 0 0 0-2-2h-9" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.8" cy="11.5" r="1.7" fill="#0E9F6E"/></svg></span>
+          <div><b>Available Beds</b><p>What you can fill right now</p></div>
+        </div>
+        <div class="rep">
+          <span class="ic" style="background:var(--brand-50)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 20V11M10 20V5M16 20v-6M22 20H2" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg></span>
+          <div><b>Monthly Revenue</b><p>Income against expenses</p></div>
+        </div>
+        <div class="rep">
+          <span class="ic" style="background:var(--bad-bg)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 3.5h9l4 4V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" stroke="#DC2626" stroke-width="2" stroke-linejoin="round"/><path d="M8.5 12h7M8.5 15.5h4" stroke="#DC2626" stroke-width="2" stroke-linecap="round"/></svg></span>
+          <div><b>Expense Report</b><p>Every rupee spent, by category</p></div>
+        </div>
+        <div class="rep">
+          <span class="ic" style="background:var(--ok-bg)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 16.5 8.5 11l4 3.5L21 6" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M15.5 6H21v5.5" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><b>Profit &amp; Loss</b><p>Any date range you choose</p></div>
+        </div>
+      </div>
+
+      <div class="rv">
+        <div class="paper">
+          <div class="ph">
+            <div>
+              <h6>Rent Collection Report</h6>
+              <small>Sunrise PG &middot; August 2026</small>
+            </div>
+            <span class="badge b-info"><i></i>PDF</span>
+          </div>
+          <div class="sumstrip">
+            <div><small>Invoiced</small><b>&#8377;5,52,000</b></div>
+            <div><small>Collected</small><b>&#8377;4,80,000</b></div>
+            <div><small>Pending</small><b>&#8377;72,000</b></div>
+            <div><small>Tenants</small><b>96</b></div>
+          </div>
+          <div class="paper-scroll">
+          <table class="tbl" style="font-size:12.5px">
+            <thead>
+              <tr><th style="padding-left:0">Tenant</th><th>Room</th><th>Rent</th><th>Paid</th><th style="text-align:right">Status</th></tr>
+            </thead>
+            <tbody>
+              <tr><td style="padding-left:0"><b style="color:var(--ink)">Sneha Patil</b></td><td>105 / A</td><td class="money">&#8377;7,500</td><td class="money">&#8377;7,500</td><td style="text-align:right"><span class="badge b-paid"><i></i>Paid</span></td></tr>
+              <tr><td style="padding-left:0"><b style="color:var(--ink)">Meena Krishnan</b></td><td>108 / A</td><td class="money">&#8377;8,000</td><td class="money">&#8377;8,000</td><td style="text-align:right"><span class="badge b-paid"><i></i>Paid</span></td></tr>
+              <tr><td style="padding-left:0"><b style="color:var(--ink)">Rahul Kumar</b></td><td>204 / B</td><td class="money">&#8377;8,000</td><td class="money">&#8377;0</td><td style="text-align:right"><span class="badge b-due"><i></i>Due</span></td></tr>
+              <tr><td style="padding-left:0"><b style="color:var(--ink)">Arjun Verma</b></td><td>302 / C</td><td class="money">&#8377;9,000</td><td class="money">&#8377;0</td><td style="text-align:right"><span class="badge b-over"><i></i>Overdue</span></td></tr>
+              <tr><td style="padding-left:0"><b style="color:var(--ink)">Kiran Rao</b></td><td>201 / A</td><td class="money">&#8377;8,000</td><td class="money">&#8377;4,000</td><td style="text-align:right"><span class="badge b-due"><i></i>Partial</span></td></tr>
+            </tbody>
+          </table>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0 4-4m-4 4-4-4" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg>
+            Download as PDF and share on WhatsApp or email.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     9b. OWNER & STAFF ACCESS
+     ============================================================ -->
+<section id="access">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="eyebrow"><span class="dot"></span> Owner &amp; Staff Access</span>
+      <h2 class="title">Hand Over a PG Without Handing Over Everything</h2>
+      <p class="lede">Own four PGs but only manage one yourself? Give each manager a login that opens only their own property. You keep the full picture.</p>
+    </div>
+
+    <div class="roles">
+      <div class="role rv">
+        <span class="ic" style="background:var(--brand-50)">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="m12 2.5 2.9 6 6.6.9-4.8 4.6 1.2 6.5-5.9-3.2-5.9 3.2 1.2-6.5L2.5 9.4l6.6-.9 2.9-6Z" stroke="#2563EB" stroke-width="2" stroke-linejoin="round"/></svg>
+        </span>
+        <h4>You, the Owner</h4>
+        <p class="sub">Full access to everything</p>
+        <ul>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#0E9F6E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> All your PGs in one login</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#0E9F6E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> Rent, payments and profit</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#0E9F6E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> Expenses and staff salaries</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#0E9F6E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> Create and remove manager logins</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#0E9F6E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> All reports</li>
+        </ul>
+      </div>
+
+      <div class="role rv">
+        <span class="ic" style="background:var(--ok-bg)">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.6" stroke="#0E9F6E" stroke-width="2"/><path d="M4.5 20c0-3.6 3.4-6 7.5-6s7.5 2.4 7.5 6" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round"/></svg>
+        </span>
+        <h4>Property Manager</h4>
+        <p class="sub">Only the PG you assign them</p>
+        <ul>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#0E9F6E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> Add tenants and allot beds</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#0E9F6E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> Collect rent and send reminders</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#0E9F6E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> Handle complaints and notices</li>
+          <li class="no"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="#C3CBD9" stroke-width="2.6" stroke-linecap="round"/></svg> Cannot see your other PGs</li>
+          <li class="no"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="#C3CBD9" stroke-width="2.6" stroke-linecap="round"/></svg> Cannot create logins</li>
+        </ul>
+      </div>
+
+      <div class="role rv">
+        <span class="ic" style="background:#F3EDFF">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="6" y="2.5" width="12" height="19" rx="2.5" stroke="#7C3AED" stroke-width="2"/><path d="M10.5 18.5h3" stroke="#7C3AED" stroke-width="2" stroke-linecap="round"/></svg>
+        </span>
+        <h4>Tenant</h4>
+        <p class="sub">Only their own details</p>
+        <ul>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#0E9F6E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> Their rent and due date</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#0E9F6E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> Their payment receipts</li>
+          <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#0E9F6E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> Raise complaints, read notices</li>
+          <li class="no"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="#C3CBD9" stroke-width="2.6" stroke-linecap="round"/></svg> Cannot see other tenants</li>
+          <li class="no"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="#C3CBD9" stroke-width="2.6" stroke-linecap="round"/></svg> Cannot see your accounts</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     9c. ALSO INCLUDED
+     ============================================================ -->
+<section class="soft" id="more">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="eyebrow"><span class="dot"></span> Also Included</span>
+      <h2 class="title">The Small Things That Save the Most Time</h2>
+      <p class="lede">Everything below is already part of the app — nothing extra to buy or switch on.</p>
+    </div>
+
+    <div class="mini-grid">
+      <div class="mini rv">
+        <span class="ic" style="background:var(--brand-50)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M3 21h18M5 21V7l7-4 7 4v14" stroke="#2563EB" stroke-width="2" stroke-linejoin="round"/></svg></span>
+        <b>Multiple PGs</b>
+        <p>Switch between all your properties from one login, each with its own rooms, tenants and accounts.</p>
+      </div>
+      <div class="mini rv">
+        <span class="ic" style="background:var(--ok-bg)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M12 3v18M16.5 7.2C15.6 6 14 5.4 12 5.4c-2.5 0-4 1.1-4 3s1.7 2.7 4 3.2c2.6.6 4.3 1.3 4.3 3.3s-1.7 3.1-4.3 3.1c-2.1 0-3.7-.6-4.6-1.9" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <b>Rent Price List</b>
+        <p>Set rent, deposit, AC charge and per-day rate for each sharing type once. It applies to every new tenant automatically.</p>
+      </div>
+      <div class="mini rv">
+        <span class="ic" style="background:var(--warn-bg)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M18 8.5A6 6 0 1 0 6 8.5c0 5-2.5 6.5-2.5 6.5h17S18 13.5 18 8.5Z" stroke="#D97706" stroke-width="2" stroke-linejoin="round"/><path d="M10 19a2.2 2.2 0 0 0 4 0" stroke="#D97706" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <b>Automatic Alerts</b>
+        <p>Rent due, checkout coming up, payment received, new complaint — you are told without checking.</p>
+      </div>
+      <div class="mini rv">
+        <span class="ic" style="background:var(--brand-50)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M3 7.5h18M3 7.5V19a1.5 1.5 0 0 0 1.5 1.5h15A1.5 1.5 0 0 0 21 19V7.5M8 7.5v-3h8v3" stroke="#2563EB" stroke-width="2" stroke-linejoin="round"/><path d="M12 11v6m-3-3h6" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <b>Bills Raised on Their Own</b>
+        <p>Each tenant's monthly bill is created a few days before it is due — you never have to remember.</p>
+      </div>
+      <div class="mini rv">
+        <span class="ic" style="background:var(--ok-bg)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M12 15.5V4m0 0L7.5 8.5M12 4l4.5 4.5" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16v3a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19v-3" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <b>We Move Your Old Data In</b>
+        <p>Already have your rooms and tenants in a sheet? We import all of it for you, including past payments.</p>
+      </div>
+      <div class="mini rv">
+        <span class="ic" style="background:var(--bad-bg)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M20 11.5A8 8 0 1 1 17.6 6M20 4v4h-4" stroke="#DC2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <b>Nothing Is Ever Lost</b>
+        <p>Removed a tenant or a bill by mistake? Both can be brought back, with their history intact.</p>
+      </div>
+      <div class="mini rv">
+        <span class="ic" style="background:#F3EDFF"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"><rect x="4.5" y="10.5" width="15" height="10" rx="2" stroke="#7C3AED" stroke-width="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" stroke="#7C3AED" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <b>Fingerprint Login</b>
+        <p>Open the app with your fingerprint or face instead of typing a password every time.</p>
+      </div>
+      <div class="mini rv">
+        <span class="ic" style="background:var(--brand-50)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"><rect x="2.5" y="4" width="19" height="13" rx="2" stroke="#2563EB" stroke-width="2"/><path d="M8 20.5h8" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <b>Phone and Computer</b>
+        <p>The same app on your mobile and in any web browser. Whatever you record shows up on both.</p>
+      </div>
+      <div class="mini rv">
+        <span class="ic" style="background:var(--ok-bg)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h10" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <b>Money In / Money Out Ledger</b>
+        <p>One list showing every rupee received and every rupee spent this month, side by side.</p>
+      </div>
+      <div class="mini rv">
+        <span class="ic" style="background:var(--warn-bg)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="15" rx="2.5" stroke="#D97706" stroke-width="2"/><path d="M3.5 10h17M8 3v4m8-4v4" stroke="#D97706" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <b>Petty Cash Box</b>
+        <p>Track the cash you keep at the PG for small purchases. The balance is always up to date.</p>
+      </div>
+      <div class="mini rv">
+        <span class="ic" style="background:var(--brand-50)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M4 5.5h16v11H13l-4 3.5v-3.5H4v-11Z" stroke="#2563EB" stroke-width="2" stroke-linejoin="round"/></svg></span>
+        <b>Email to Tenants</b>
+        <p>Rent reminders and receipts can also go out by email, if you want them to.</p>
+      </div>
+      <div class="mini rv">
+        <span class="ic" style="background:var(--ok-bg)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M6 3.5h9l4 4V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" stroke="#0E9F6E" stroke-width="2" stroke-linejoin="round"/><path d="m9 13 2.2 2.2L15.5 11" stroke="#0E9F6E" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <b>Tenant Documents</b>
+        <p>Keep ID proof, emergency contact and workplace details with each tenant's profile.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     10. OWNER BENEFITS
+     ============================================================ -->
+<section id="benefits">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="eyebrow"><span class="dot"></span> Benefits</span>
+      <h2 class="title">Why PG Owners Choose This</h2>
+      <p class="lede">Built around the daily reality of running a PG — not around software.</p>
+    </div>
+
+    <div class="ben-grid">
+      <div class="ben rv">
+        <span class="ic" style="background:var(--brand-50)">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="13" r="8" stroke="#2563EB" stroke-width="2"/><path d="M12 9v4l2.6 2" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 2h6" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg>
+        </span>
+        <h4>Save Time</h4>
+        <p>What used to take an evening of calls and registers now takes a few minutes on your phone.</p>
+      </div>
+
+      <div class="ben rv">
+        <span class="ic" style="background:var(--ok-bg)">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M6 3.5h9l4 4V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" stroke="#0E9F6E" stroke-width="2" stroke-linejoin="round"/><path d="m9 13 2.2 2.2L15.5 11" stroke="#0E9F6E" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <h4>Reduce Manual Work</h4>
+        <p>No notebooks, no duplicate entries. Record it once and it shows up everywhere it should.</p>
+      </div>
+
+      <div class="ben rv">
+        <span class="ic" style="background:var(--warn-bg)">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 3v18M16.5 7.2C15.6 6 14 5.4 12 5.4c-2.5 0-4 1.1-4 3s1.7 2.7 4 3.2c2.6.6 4.3 1.3 4.3 3.3s-1.7 3.1-4.3 3.1c-2.1 0-3.7-.6-4.6-1.9" stroke="#D97706" stroke-width="2" stroke-linecap="round"/></svg>
+        </span>
+        <h4>Track Rent Easily</h4>
+        <p>Paid, due and overdue are colour-coded. One look tells you where the month stands.</p>
+      </div>
+
+      <div class="ben rv">
+        <span class="ic" style="background:var(--ok-bg)">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M3 18V9a2 2 0 0 1 2-2h5v9M3 18h18M21 18v-4a2 2 0 0 0-2-2h-9" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.8" cy="11.5" r="1.7" fill="#0E9F6E"/></svg>
+        </span>
+        <h4>Know Bed Availability</h4>
+        <p>When someone enquires, answer immediately — you know every free bed, in every room.</p>
+      </div>
+
+      <div class="ben rv">
+        <span class="ic" style="background:var(--brand-50)">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3.4" stroke="#2563EB" stroke-width="2"/><path d="M2.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/><path d="M17 8.5h4.5M19.25 6.25v4.5" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg>
+        </span>
+        <h4>Faster Tenant Management</h4>
+        <p>Add a tenant, allot a bed and start their rent cycle in the same short flow.</p>
+      </div>
+
+      <div class="ben rv">
+        <span class="ic" style="background:var(--bad-bg)">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M4 20V11M10 20V5M16 20v-6M22 20H2" stroke="#DC2626" stroke-width="2" stroke-linecap="round"/></svg>
+        </span>
+        <h4>Better Financial Visibility</h4>
+        <p>See collection, pending amounts and expenses together, so nothing quietly slips.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     11. HOW IT WORKS
+     ============================================================ -->
+<section class="soft" id="how">
+  <div class="wrap">
+    <div class="sec-head center rv">
+      <span class="eyebrow"><span class="dot"></span> How It Works</span>
+      <h2 class="title">Up and Running in Four Steps</h2>
+      <p class="lede">Set up once, then simply keep it updated as tenants come and go.</p>
+    </div>
+
+    <div class="steps">
+      <div class="step rv">
+        <div class="n">01</div>
+        <span class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M3 21h18M5 21V7l7-4 7 4v14" stroke="#2563EB" stroke-width="2" stroke-linejoin="round"/><path d="M10 21v-5h4v5" stroke="#2563EB" stroke-width="2" stroke-linejoin="round"/></svg></span>
+        <h4>Add Your PG</h4>
+        <p>Enter your property name and address. Have more than one PG? Add them all.</p>
+      </div>
+
+      <div class="step rv">
+        <div class="n">02</div>
+        <span class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M3 18V9a2 2 0 0 1 2-2h5v9M3 18h18M21 18v-4a2 2 0 0 0-2-2h-9" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.8" cy="11.5" r="1.7" fill="#2563EB"/></svg></span>
+        <h4>Add Rooms &amp; Beds</h4>
+        <p>Set up floors, rooms and beds with the sharing type and rent for each.</p>
+      </div>
+
+      <div class="step rv">
+        <div class="n">03</div>
+        <span class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3.4" stroke="#2563EB" stroke-width="2"/><path d="M2.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/><path d="M17 8.5h4.5M19.25 6.25v4.5" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <h4>Add Tenants</h4>
+        <p>Add tenant details and allot a bed. Their rent cycle starts from that day.</p>
+      </div>
+
+      <div class="step rv">
+        <div class="n">04</div>
+        <span class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="2.5" y="6" width="19" height="12.5" rx="2.5" stroke="#2563EB" stroke-width="2"/><path d="M2.5 10h19" stroke="#2563EB" stroke-width="2"/><path d="M6.5 14.5h4" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <h4>Manage Rent &amp; Payments</h4>
+        <p>Rent is raised each month. Record payments, send reminders, view reports.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     12. FINAL CTA
+     ============================================================ -->
+<section id="cta" style="padding-top:0">
+  <div class="wrap" style="padding-top:96px">
+    <div class="cta rv">
+      <h2>Your PG, All in One Place.</h2>
+      <p>Spend less time managing paperwork and more time growing your PG business.</p>
+      <a href="#top" class="btn btn-white btn-lg">
+        Get Started
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M5 12h14m0 0-5.5-5.5M19 12l-5.5 5.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
+      <div class="cta-badges">
+        <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> Works on mobile and computer</span>
+        <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> Manage multiple PGs</span>
+        <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg> Your data stays private</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <a href="#top" class="brand" style="font-size:16px">
+        <span class="mark" style="width:32px;height:32px;border-radius:9px">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z" fill="#fff"/></svg>
+        </span>
+        PG Manager
+      </a>
+      <div class="foot-links">
+        <a href="#dashboard">Dashboard</a>
+        <a href="#tenantapp">Tenant App</a>
+        <a href="#complaints">Complaints</a>
+        <a href="#expenses">Expenses</a>
+        <a href="#reports">Reports</a>
+      </div>
+      <p>&copy; 2026 PG Manager. Product demo.</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ---------- Sticky header shadow ---------- */
+  var hdr = document.getElementById('hdr');
+  function onScroll(){ hdr.classList.toggle('stuck', window.scrollY > 8); }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  /* ---------- Mobile menu ---------- */
+  var burger = document.getElementById('burger');
+  var menu = document.getElementById('mobileMenu');
+  burger.addEventListener('click', function () {
+    var open = menu.classList.toggle('show');
+    burger.classList.toggle('open', open);
+    burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  menu.querySelectorAll('a').forEach(function (a) {
+    a.addEventListener('click', function () {
+      menu.classList.remove('show');
+      burger.classList.remove('open');
+      burger.setAttribute('aria-expanded', 'false');
+    });
+  });
+
+  /* ---------- Scroll reveal ---------- */
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var revealables = document.querySelectorAll('.rv');
+
+  if (reduce || !('IntersectionObserver' in window)) {
+    revealables.forEach(function (el) { el.classList.add('in'); });
+    document.querySelectorAll('[data-count]').forEach(function (el) { el.textContent = format(el); });
+    startBars(document);
+    startProgress(document);
+    setDonut(80);
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        e.target.classList.add('in');
+        io.unobserve(e.target);
+        countUp(e.target);
+        startBars(e.target);
+        startProgress(e.target);
+        if (e.target.querySelector('#donutArc')) setDonut(80);
+      });
+    }, { threshold: 0.14, rootMargin: '0px 0px -60px 0px' });
+    revealables.forEach(function (el) { io.observe(el); });
+  }
+
+  /* ---------- Number count-up ---------- */
+  function format(el) {
+    var n = parseInt(el.getAttribute('data-count'), 10);
+    return el.hasAttribute('data-money')
+      ? '₹' + n.toLocaleString('en-IN')
+      : n.toLocaleString('en-IN');
+  }
+
+  function countUp(scope) {
+    scope.querySelectorAll('[data-count]').forEach(function (el) {
+      if (el.dataset.done) return;
+      el.dataset.done = '1';
+      var target = parseInt(el.getAttribute('data-count'), 10);
+      var money = el.hasAttribute('data-money');
+      var dur = 1400, t0 = null;
+
+      function tick(ts) {
+        if (t0 === null) t0 = ts;
+        var p = Math.min((ts - t0) / dur, 1);
+        var eased = 1 - Math.pow(1 - p, 3);           // easeOutCubic
+        var v = Math.round(target * eased);
+        el.textContent = (money ? '₹' : '') + v.toLocaleString('en-IN');
+        if (p < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    });
+  }
+
+  /* ---------- Bar charts ---------- */
+  function startBars(scope) {
+    scope.querySelectorAll('[data-bars] .bar').forEach(function (bar, i) {
+      if (bar.dataset.done) return;
+      bar.dataset.done = '1';
+      setTimeout(function () { bar.style.height = bar.getAttribute('data-h') + '%'; }, 90 * i);
+    });
+  }
+
+  /* ---------- Budget progress bars ---------- */
+  function startProgress(scope) {
+    scope.querySelectorAll('.prog i[data-w]').forEach(function (el, i) {
+      if (el.dataset.done) return;
+      el.dataset.done = '1';
+      setTimeout(function () { el.style.width = el.getAttribute('data-w') + '%'; }, 120 * i);
+    });
+  }
+
+  /* ---------- Self check-in QR (decorative, deterministic) ---------- */
+  (function buildQr() {
+    var grid = document.getElementById('qrGrid');
+    if (!grid) return;
+    var N = 25, seed = 20260808, cells = '';
+
+    // Small deterministic generator so the pattern is stable across reloads.
+    function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+
+    // The three corner finder squares of a real QR code.
+    function inFinder(r, c) {
+      var corners = [[0, 0], [0, N - 7], [N - 7, 0]];
+      for (var k = 0; k < 3; k++) {
+        var dr = r - corners[k][0], dc = c - corners[k][1];
+        if (dr < 0 || dr > 6 || dc < 0 || dc > 6) continue;
+        var ring = Math.max(Math.abs(dr - 3), Math.abs(dc - 3));
+        return ring !== 2;                       // outer ring + centre block filled
+      }
+      return null;
+    }
+
+    for (var r = 0; r < N; r++) {
+      for (var c = 0; c < N; c++) {
+        var f = inFinder(r, c);
+        var on = f === null ? rnd() > 0.52 : f;
+        cells += on ? '<i class="on"></i>' : '<i></i>';
+      }
+    }
+    grid.innerHTML = cells;
+  })();
+
+  /* ---------- Occupancy donut ---------- */
+  function setDonut(pct) {
+    var arc = document.getElementById('donutArc');
+    var label = document.getElementById('occPct');
+    if (!arc || arc.dataset.done) return;
+    arc.dataset.done = '1';
+
+    var CIRC = 2 * Math.PI * 52;                       // r = 52
+    arc.style.transition = 'stroke-dashoffset 1.3s cubic-bezier(.16,.84,.44,1)';
+    requestAnimationFrame(function () {
+      arc.style.strokeDashoffset = CIRC * (1 - pct / 100);
+    });
+
+    var t0 = null;
+    function tick(ts) {
+      if (t0 === null) t0 = ts;
+      var p = Math.min((ts - t0) / 1300, 1);
+      label.textContent = Math.round(pct * (1 - Math.pow(1 - p, 3))) + '%';
+      if (p < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  /* ---------- WhatsApp demo ----------
+     Mirrors the real product behaviour: the app only *opens* WhatsApp
+     with a pre-filled message. It never claims the message was sent. */
+  var waBtn = document.getElementById('waBtn');
+  var waLabel = document.getElementById('waBtnLabel');
+  var waMsg = document.getElementById('waMsg');
+  var waFake = document.getElementById('waFake');
+  var waBusy = false;
+
+  function runWaDemo() {
+    if (waBusy) return;
+    waBusy = true;
+    waMsg.classList.remove('show');
+    waLabel.textContent = 'Opening WhatsApp...';
+    waBtn.disabled = true;
+    waFake.textContent = 'Type a message';
+
+    setTimeout(function () {
+      waFake.textContent = 'Hello Rahul, your PG rent of ₹8,000...';
+      waFake.style.color = '#111B21';
+    }, 550);
+
+    setTimeout(function () {
+      waMsg.classList.add('show');
+      waFake.textContent = 'Type a message';
+      waFake.style.color = '#8696A0';
+      waLabel.textContent = 'Message ready in WhatsApp';
+    }, 1500);
+
+    setTimeout(function () {
+      waLabel.textContent = 'Send Reminder';
+      waBtn.disabled = false;
+      waBusy = false;
+    }, 4200);
+  }
+
+  waBtn.addEventListener('click', runWaDemo);
+
+  // Play the demo once when the phone scrolls into view.
+  if (!reduce && 'IntersectionObserver' in window) {
+    var waIo = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { waIo.disconnect(); setTimeout(runWaDemo, 500); }
+      });
+    }, { threshold: 0.45 });
+    waIo.observe(document.querySelector('.phone-stage'));
+  } else {
+    waMsg.classList.add('show');
+  }
+
+  /* ---------- Smooth anchor scroll with header offset ---------- */
+  document.querySelectorAll('a[href^="#"]').forEach(function (a) {
+    a.addEventListener('click', function (ev) {
+      var id = a.getAttribute('href');
+      if (id.length < 2) return;
+      var t = document.querySelector(id);
+      if (!t) return;
+      ev.preventDefault();
+      var y = t.getBoundingClientRect().top + window.scrollY - 78;
+      window.scrollTo({ top: y, behavior: reduce ? 'auto' : 'smooth' });
+    });
+  });
+})();
+</script>
+</body>
+</html>

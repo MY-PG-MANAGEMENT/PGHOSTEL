@@ -323,6 +323,11 @@ app:
       from: ${EMAIL_FROM:no-reply@pgmanager.app}
       from-name: ${EMAIL_FROM_NAME:PG Manager}
 
+    # WhatsApp invoice reminders are Phase 1 (wa.me deep link, sent by hand from the owner's
+    # phone). No Meta credentials exist yet, so there is nothing secret to declare here.
+    whatsapp:
+      default-country-code: ${WHATSAPP_DEFAULT_COUNTRY_CODE:91}
+
 # =============================================================================
 # API docs
 #

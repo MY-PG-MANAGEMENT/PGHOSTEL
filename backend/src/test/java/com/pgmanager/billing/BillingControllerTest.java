@@ -47,7 +47,8 @@ class BillingControllerTest {
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
         mvc = MockMvcBuilders.standaloneSetup(new BillingController(currentUser, jdbc, notificationService,
-                        invoiceGenerationService, billingConfigService, auditService, passThroughGuard()))
+                        invoiceGenerationService, billingConfigService, auditService, passThroughGuard(),
+                        new com.pgmanager.whatsapp.InvoiceReminderService(new com.pgmanager.whatsapp.WhatsAppProperties())))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setValidator(validator)
                 .build();
