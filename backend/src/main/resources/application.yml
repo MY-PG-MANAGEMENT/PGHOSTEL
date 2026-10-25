@@ -58,6 +58,13 @@ app:
       enabled: ${EMAIL_ENABLED:false}
       from: ${EMAIL_FROM:no-reply@pgmanager.app}
       from-name: ${EMAIL_FROM_NAME:PG Manager}
+    # WhatsApp invoice reminders are PHASE 1: a wa.me deep link the owner sends by hand.
+    # There is deliberately no Cloud API config here - no access token, no phone-number id, no
+    # business account id, nothing to provision. The only setting the feature needs is the country
+    # code prefixed onto bare 10-digit tenant mobiles (person.mobile_number stores no country code).
+    # Phase 2 (Cloud API) is where credentials arrive.
+    whatsapp:
+      default-country-code: ${WHATSAPP_DEFAULT_COUNTRY_CODE:91}
   security:
     jwt-secret: change-this-development-secret-change-before-production-123456789
     access-token-minutes: 30

@@ -7,6 +7,7 @@ import com.pgmanager.common.exception.NotFoundException;
 import com.pgmanager.notification.NotificationService;
 import com.pgmanager.security.CurrentUser;
 import com.pgmanager.security.PropertyAccessGuard;
+import com.pgmanager.whatsapp.InvoiceReminderService;
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
@@ -46,6 +47,7 @@ public class BillingController {
     private final BillingConfigService billingConfigService;
     private final AuditService auditService;
     private final PropertyAccessGuard propertyAccessGuard;
+    private final InvoiceReminderService invoiceReminderService;
 
     @GetMapping("/dashboard")
     ApiResponse<Map<String, Object>> dashboard(@RequestParam(required = false) Long propertyId) {
@@ -132,16 +134,50 @@ public class BillingController {
         return ApiResponse.ok(Map.of("items", items, "page", page, "size", safeSize));
     }
 
+    // Extended (rather than duplicated into a WhatsApp-specific endpoint) with the three fields the
+    // payment reminder needs and this payload lacked: the tenant's mobile number, their property
+    // name, and the derived `reminder` block. The Flutter sheet already fetches this for the charge
+    // breakdown, so the WhatsApp action costs no extra round trip and there is no second API to keep
+    // in step. `p.mobile_number` is free — the person join was already here.
+    //
+    // Property name is a correlated scalar subquery, not a join, and excludes the org-level row:
+    // a tenant holds both an org-level and a property-level TENANT membership, so joining would
+    // duplicate the invoice and the org-level row would masquerade as a property. Same shape
+    // ReportController uses for its property column.
+    private static final String INVOICE_DETAIL_SQL = """
+            SELECT i.*, ba.party_id, p.full_name, p.mobile_number, ba.advance_balance,
+                   (SELECT f.facility_name FROM facility_party pm
+                      JOIN facility f ON f.facility_id = pm.facility_id AND f.facility_type_id = 'PROPERTY'
+                     WHERE pm.party_id = ba.party_id AND pm.organization_id = i.organization_id
+                       AND pm.role_type_id = 'TENANT' AND pm.facility_id <> i.organization_id
+                     ORDER BY pm.thru_date IS NULL DESC, pm.from_date DESC LIMIT 1) property_name
+            FROM invoice i
+            JOIN billing_account ba ON ba.billing_account_id = i.billing_account_id
+            JOIN person p ON p.party_id = ba.party_id
+            WHERE i.invoice_id = ? AND i.organization_id = ?
+            """;
+
     @GetMapping("/invoices/{invoiceId}")
     ApiResponse<Map<String, Object>> invoice(@PathVariable Long invoiceId) {
-        List<Map<String, Object>> rows = jdbc.queryForList("SELECT i.*,ba.party_id,p.full_name,ba.advance_balance FROM invoice i " +
-                        "JOIN billing_account ba ON ba.billing_account_id=i.billing_account_id JOIN person p ON p.party_id=ba.party_id " +
-                        "WHERE i.invoice_id=? AND i.organization_id=?", invoiceId, currentUser.organizationId());
+        List<Map<String, Object>> rows = jdbc.queryForList(INVOICE_DETAIL_SQL, invoiceId, currentUser.organizationId());
         if (rows.isEmpty()) throw new NotFoundException("Invoice not found");
         Map<String, Object> result = new LinkedHashMap<>(rows.getFirst());
-        result.put("items", jdbc.queryForList("SELECT invoice_item_id,item_type_id,description,amount FROM invoice_item WHERE invoice_id=?", invoiceId));
+        // This endpoint was org-scoped only — a property-scoped manager could read any invoice in the
+        // organization by id. That gap matters more now the response carries the tenant's phone
+        // number, so it goes through the same choke point every other by-tenant operation uses.
+        // Owners are unaffected (the guard returns immediately when unrestricted).
+        Object partyId = result.get("party_id");
+        propertyAccessGuard.assertTenantInScope(partyId instanceof Number n ? n.longValue() : null);
+        List<Map<String, Object>> items = jdbc.queryForList(
+                "SELECT invoice_item_id,item_type_id,description,amount FROM invoice_item WHERE invoice_id=?", invoiceId);
+        result.put("items", items);
         result.put("payments", jdbc.queryForList("SELECT p.payment_id,p.amount,p.payment_mode,p.payment_date,p.reference_number " +
                 "FROM payment_allocation a JOIN payment p ON p.payment_id=a.payment_id WHERE a.invoice_id=?", invoiceId));
+        // The WhatsApp payment reminder: reminder type, message text and normalised number, all
+        // decided server-side. The app only turns it into a wa.me link — see InvoiceReminderService.
+        // Built from the rows already in hand, so it adds no query of its own.
+        result.put("reminder", invoiceReminderService.fromInvoiceRow(result,
+                items.stream().map(item -> String.valueOf(item.get("item_type_id"))).toList()));
         return ApiResponse.ok(result);
     }
 

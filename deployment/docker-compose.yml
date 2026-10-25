@@ -239,6 +239,9 @@ services:
       EMAIL_FROM:      ${EMAIL_FROM:-no-reply@pgmanager.app}
       EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-PG Manager}
 
+      # --- WhatsApp reminders (Phase 1: wa.me deep link, no Meta credentials) ---
+      WHATSAPP_DEFAULT_COUNTRY_CODE: ${WHATSAPP_DEFAULT_COUNTRY_CODE:-91}
+
       # --- api request logging (com.pgmanager.apilog) ---
       API_LOG_ENABLED:        ${API_LOG_ENABLED:-true}
       API_LOG_RETENTION_DAYS: ${API_LOG_RETENTION_DAYS:-10}
